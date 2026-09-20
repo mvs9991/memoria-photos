@@ -70,7 +70,11 @@ photos ──► scan ──► decode / EXIF / hash / thumbnail ──► faces
 python -m venv .venv
 .venv/Scripts/activate          # Windows;  source .venv/bin/activate elsewhere
 
-pip install torch torchvision --index-url https://download.pytorch.org/whl/cu126   # or plain `pip install torch` for CPU
+# Install the PyTorch build that matches your GPU — see https://pytorch.org/get-started/locally/
+# The cu126 pin below is not a general recommendation: it was needed for a Pascal-era card.
+# CPU-only is simply: pip install torch torchvision
+pip install torch torchvision --index-url https://download.pytorch.org/whl/cu126
+
 pip install -r requirements.txt
 
 python -m photointel models download     # face models (~280 MB)

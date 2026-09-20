@@ -102,7 +102,13 @@ cd memoria-photos
 
 python -m venv .venv                     # Python 3.11+
 .venv/Scripts/activate
-pip install torch torchvision --index-url https://download.pytorch.org/whl/cu126   # or match your GPU
+# PyTorch: pick the build for YOUR GPU — do not copy the cu126 pin below blindly.
+#   https://pytorch.org/get-started/locally/  generates the right command.
+#   cu126 was required *here* only because this machine had a Pascal card (GTX 1050 Ti);
+#   newer CUDA builds dropped sm_61. On a modern GPU use the current default build.
+#   CPU-only: just `pip install torch torchvision`.
+pip install torch torchvision --index-url https://download.pytorch.org/whl/cu126
+
 pip install -r requirements.txt
 
 python -m photointel models download     # face models, ~280 MB
