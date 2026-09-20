@@ -7,6 +7,29 @@ it all in plain language.
 
 Everything runs on your machine. Your photos are never uploaded, modified, moved or deleted.
 
+![Home](docs/screenshots/home.webp)
+
+<table>
+<tr>
+<td width="50%"><img src="docs/screenshots/people.webp" alt="People"></td>
+<td width="50%"><img src="docs/screenshots/event.webp" alt="Event detail"></td>
+</tr>
+<tr>
+<td><img src="docs/screenshots/duplicates.webp" alt="Duplicates"></td>
+<td><img src="docs/screenshots/photos.webp" alt="Photo grid"></td>
+</tr>
+</table>
+
+<sup>Screens shown on a synthetic test library (COCO scenes with LFW faces composited on), not
+anyone's real photos.</sup>
+
+## Why this exists
+
+Photo libraries become unusable at scale. You know a photo exists — a particular person, a
+particular trip — but finding it means scrolling through years. Cloud services solve this by
+uploading everything. This solves it locally: the recognition, the clustering, the geocoding and
+the search all run on your own machine, and the originals are only ever opened read-only.
+
 ```
 photos ──► scan ──► decode / EXIF / hash / thumbnail ──► faces ──► embeddings
                                                             │          │
@@ -385,7 +408,12 @@ scanning, incremental re-indexing, moves, decoding, metadata, clustering, correc
 duplicates, search parsing and the HTTP API. The fixtures seed their randomness from stable
 hashes, so a failure reproduces on the next run instead of disappearing.
 
-## Model licences
+## Licence
+
+Source code is MIT (see `LICENSE`). The model weights are **not** covered by it — notably the
+default face pipeline is non-commercial, so commercial use as shipped would require swapping it out.
+
+### Model licences
 
 - **InsightFace buffalo_l** (SCRFD + ArcFace) — non-commercial research use.
 - **SigLIP2** via open_clip — Apache 2.0.
