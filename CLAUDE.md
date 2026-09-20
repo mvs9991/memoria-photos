@@ -1,5 +1,7 @@
 # Memoria — local photo intelligence
 
+Repo: https://github.com/mvs9991/memoria-photos · setup from a clone is `HANDOFF.md` §3.
+
 Indexes a folder of photos and works out who is in them, when and where they were taken, what they
 show, which are duplicates, and how they group into events and trips. Serves a React photo app with
 natural-language search. Python 3.11 + PyTorch + SQLite + FastAPI; everything runs locally.
