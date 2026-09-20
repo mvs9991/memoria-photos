@@ -1,0 +1,97 @@
+/* Memoria design tokens.
+   Dark-first: photographs read best against a near-black, slightly warm ground. */
+
+:root {
+  /* neutrals — warm-tinted so photos don't look clinical */
+  --bg: #0a0a0c;
+  --bg-elev: #121215;
+  --surface: #17171b;
+  --surface-2: #1e1e23;
+  --surface-3: #26262c;
+  --hairline: rgba(255, 255, 255, 0.07);
+  --hairline-strong: rgba(255, 255, 255, 0.13);
+
+  --text: #f4f3f1;
+  --text-2: #b9b8b4;
+  --text-3: #86858a;
+  --text-inverse: #101013;
+
+  /* accent — warm gold, nostalgic without being loud */
+  --accent: #e2b062;
+  --accent-soft: rgba(226, 176, 98, 0.14);
+  --accent-line: rgba(226, 176, 98, 0.38);
+  --accent-text: #f0c887;
+
+  --danger: #f2756a;
+  --danger-soft: rgba(242, 117, 106, 0.14);
+  --ok: #6dd39a;
+  --info: #7fb6f0;
+
+  --scrim: rgba(6, 6, 8, 0.72);
+  --scrim-strong: rgba(4, 4, 6, 0.94);
+
+  /* radii */
+  --r-xs: 6px;
+  --r-sm: 9px;
+  --r-md: 13px;
+  --r-lg: 18px;
+  --r-xl: 26px;
+  --r-pill: 999px;
+
+  /* elevation */
+  --sh-1: 0 1px 2px rgba(0, 0, 0, 0.32);
+  --sh-2: 0 4px 14px rgba(0, 0, 0, 0.36);
+  --sh-3: 0 14px 44px rgba(0, 0, 0, 0.5);
+  --sh-4: 0 28px 80px rgba(0, 0, 0, 0.62);
+
+  /* motion */
+  --ease: cubic-bezier(0.2, 0.7, 0.2, 1);
+  --ease-out: cubic-bezier(0.16, 1, 0.3, 1);
+  --t-fast: 110ms;
+  --t: 200ms;
+  --t-slow: 380ms;
+
+  /* layout */
+  --nav-w: 232px;
+  --nav-w-collapsed: 72px;
+  --topbar-h: 62px;
+  --gutter: 28px;
+  --grid-gap: 5px;
+
+  --font: "Inter Variable", "Inter", -apple-system, BlinkMacSystemFont, "Segoe UI", system-ui, sans-serif;
+  --font-display: "Instrument Serif", "Iowan Old Style", Georgia, serif;
+  --font-mono: ui-monospace, "SF Mono", "Cascadia Mono", "Roboto Mono", Menlo, monospace;
+}
+
+:root[data-theme="light"] {
+  --bg: #faf9f7;
+  --bg-elev: #ffffff;
+  --surface: #ffffff;
+  --surface-2: #f3f1ed;
+  --surface-3: #e9e6e0;
+  --hairline: rgba(20, 18, 14, 0.09);
+  --hairline-strong: rgba(20, 18, 14, 0.16);
+
+  --text: #16161a;
+  --text-2: #4c4b52;
+  --text-3: #7d7c85;
+  --text-inverse: #ffffff;
+
+  --accent: #a9762a;
+  --accent-soft: rgba(169, 118, 42, 0.12);
+  --accent-line: rgba(169, 118, 42, 0.42);
+  --accent-text: #8a5f1e;
+
+  --danger: #c93f33;
+  --danger-soft: rgba(201, 63, 51, 0.1);
+  --ok: #217a4b;
+  --info: #2a6dab;
+
+  --scrim: rgba(250, 249, 247, 0.78);
+  --scrim-strong: rgba(250, 249, 247, 0.96);
+
+  --sh-1: 0 1px 2px rgba(20, 18, 14, 0.06);
+  --sh-2: 0 4px 14px rgba(20, 18, 14, 0.08);
+  --sh-3: 0 14px 40px rgba(20, 18, 14, 0.12);
+  --sh-4: 0 28px 70px rgba(20, 18, 14, 0.18);
+}

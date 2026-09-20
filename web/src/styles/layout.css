@@ -1,0 +1,285 @@
+/* App shell: fixed sidebar + scrolling content area. */
+
+.shell {
+  display: grid;
+  grid-template-columns: var(--nav-w) 1fr;
+  height: 100%;
+  /* Without this the auto-sized grid row grows to fit its content, so `height:
+     100%` becomes a minimum rather than a cap: the whole shell stretches, .content
+     never becomes a scroll container, and the photo grid measures a viewport the
+     size of the entire library — mounting every tile instead of one screenful. */
+  overflow: hidden;
+  transition: grid-template-columns var(--t) var(--ease);
+}
+.shell.is-collapsed { grid-template-columns: var(--nav-w-collapsed) 1fr; }
+
+/* ---------------- sidebar ---------------- */
+.nav {
+  display: flex;
+  flex-direction: column;
+  gap: 4px;
+  padding: 14px 10px 12px;
+  border-right: 1px solid var(--hairline);
+  background: var(--bg-elev);
+  overflow: hidden;
+}
+.nav-head {
+  display: flex;
+  align-items: center;
+  justify-content: space-between;
+  gap: 8px;
+  padding: 2px 6px 14px;
+}
+.brand {
+  display: flex;
+  align-items: center;
+  gap: 10px;
+  min-width: 0;
+  color: var(--text);
+}
+.brand-mark {
+  display: grid;
+  place-items: center;
+  width: 32px;
+  height: 32px;
+  flex: none;
+  border-radius: var(--r-sm);
+  background: var(--accent-soft);
+  color: var(--accent);
+}
+.brand-name {
+  font-size: 21px;
+  letter-spacing: 0.005em;
+  white-space: nowrap;
+}
+.is-collapsed .brand-name,
+.is-collapsed .nav-label,
+.is-collapsed .nav-count,
+.is-collapsed .nav-stat { display: none; }
+.is-collapsed .nav-head { justify-content: center; padding-bottom: 12px; }
+.is-collapsed .nav-toggle { display: none; }
+.is-collapsed .nav:hover .nav-toggle { display: inline-flex; }
+
+.nav-links { display: flex; flex-direction: column; gap: 2px; }
+.nav-link {
+  display: flex;
+  align-items: center;
+  gap: 11px;
+  height: 38px;
+  padding: 0 11px;
+  border-radius: var(--r-sm);
+  color: var(--text-2);
+  font-size: 13.5px;
+  font-weight: 500;
+  transition: background var(--t-fast), color var(--t-fast);
+  position: relative;
+}
+.nav-link:hover { background: var(--surface-2); color: var(--text); }
+.nav-link.is-active { background: var(--surface-2); color: var(--text); }
+.nav-link.is-active::before {
+  content: "";
+  position: absolute;
+  left: -10px;
+  top: 9px;
+  bottom: 9px;
+  width: 3px;
+  border-radius: 0 3px 3px 0;
+  background: var(--accent);
+}
+.nav-link svg { flex: none; }
+.nav-label { flex: 1; white-space: nowrap; overflow: hidden; }
+.nav-count { font-size: 11.5px; color: var(--text-3); }
+.is-collapsed .nav-link { justify-content: center; padding: 0; }
+
+.nav-foot { margin-top: auto; display: flex; flex-direction: column; gap: 6px; }
+.nav-stat { padding: 6px 12px 2px; font-size: 11.5px; color: var(--text-3); }
+
+/* ---------------- main ---------------- */
+.main {
+  display: flex;
+  flex-direction: column;
+  min-width: 0;
+  min-height: 0;          /* let .content scroll instead of stretching .main */
+  height: 100%;
+}
+.topbar {
+  display: flex;
+  align-items: center;
+  gap: 14px;
+  height: var(--topbar-h);
+  padding: 0 var(--gutter);
+  border-bottom: 1px solid var(--hairline);
+  background: color-mix(in srgb, var(--bg) 82%, transparent);
+  backdrop-filter: saturate(140%) blur(14px);
+  position: sticky;
+  top: 0;
+  z-index: 40;
+}
+.topbar-actions { display: flex; align-items: center; gap: 6px; margin-left: auto; }
+
+.content {
+  flex: 1;
+  min-height: 0;          /* a flex child defaults to min-height:auto and will not shrink */
+  overflow-y: auto;
+  overflow-x: hidden;
+  scroll-behavior: smooth;
+}
+.page {
+  padding: 26px var(--gutter) 90px;
+  max-width: 1900px;
+  margin: 0 auto;
+  animation: fade-in var(--t) var(--ease);
+}
+.page-head {
+  display: flex;
+  align-items: flex-end;
+  justify-content: space-between;
+  gap: 18px;
+  flex-wrap: wrap;
+  margin-bottom: 20px;
+}
+.page-head h1 { font-size: 34px; }
+.page-head p { margin-top: 4px; font-size: 13.5px; }
+.toolbar { display: flex; align-items: center; gap: 8px; flex-wrap: wrap; }
+
+.section-head {
+  display: flex;
+  align-items: flex-end;
+  justify-content: space-between;
+  gap: 16px;
+  margin: 30px 0 13px;
+}
+.section-head:first-child { margin-top: 0; }
+.section-count { margin-left: 9px; font-size: 13px; font-weight: 500; }
+.section-sub { margin-top: 3px; font-size: 12.5px; }
+
+.back-link {
+  display: inline-flex;
+  align-items: center;
+  gap: 6px;
+  color: var(--text-3);
+  font-size: 13px;
+  margin-bottom: 14px;
+  transition: color var(--t-fast);
+}
+.back-link:hover { color: var(--text); }
+
+/* ---------------- search box ---------------- */
+.searchbox {
+  position: relative;
+  display: flex;
+  align-items: center;
+  gap: 9px;
+  flex: 1;
+  max-width: 620px;
+  height: 38px;
+  padding: 0 10px 0 13px;
+  border-radius: var(--r-pill);
+  background: var(--surface);
+  border: 1px solid var(--hairline);
+  transition: border-color var(--t-fast), background var(--t-fast), box-shadow var(--t-fast);
+}
+.searchbox:focus-within {
+  border-color: var(--accent-line);
+  background: var(--bg-elev);
+  box-shadow: 0 0 0 4px var(--accent-soft);
+}
+.searchbox-icon { color: var(--text-3); flex: none; }
+.searchbox-input {
+  flex: 1;
+  min-width: 0;
+  border: 0;
+  background: none;
+  outline: none;
+  font-size: 13.5px;
+}
+.searchbox-input::placeholder { color: var(--text-3); }
+.searchbox-kbd {
+  font-family: var(--font-mono);
+  font-size: 11px;
+  color: var(--text-3);
+  border: 1px solid var(--hairline-strong);
+  border-radius: 5px;
+  padding: 1px 6px;
+  flex: none;
+}
+.searchbox:focus-within .searchbox-kbd { display: none; }
+
+.suggest {
+  position: absolute;
+  top: calc(100% + 8px);
+  left: 0;
+  right: 0;
+  background: var(--bg-elev);
+  border: 1px solid var(--hairline-strong);
+  border-radius: var(--r-md);
+  box-shadow: var(--sh-3);
+  padding: 6px;
+  z-index: 60;
+  max-height: 60vh;
+  overflow-y: auto;
+  animation: rise var(--t-fast) var(--ease-out);
+}
+.suggest-row {
+  display: flex;
+  align-items: center;
+  gap: 10px;
+  width: 100%;
+  padding: 7px 9px;
+  border-radius: var(--r-sm);
+  text-align: left;
+  color: var(--text-2);
+  font-size: 13px;
+  transition: background var(--t-fast);
+}
+.suggest-row:hover { background: var(--surface-2); color: var(--text); }
+.suggest-row.is-primary { color: var(--text); }
+.suggest-thumb {
+  width: 30px; height: 30px; border-radius: 7px; overflow: hidden; flex: none;
+  background: var(--surface-2); display: grid; place-items: center;
+}
+.suggest-thumb img { width: 100%; height: 100%; object-fit: cover; }
+.suggest-dot { width: 7px; height: 7px; border-radius: 50%; background: var(--text-3); }
+.suggest-main { display: flex; flex-direction: column; min-width: 0; flex: 1; }
+.suggest-label { color: var(--text); font-weight: 500; }
+.suggest-detail, .suggest-type { font-size: 11.5px; }
+.suggest-examples { display: flex; flex-wrap: wrap; gap: 6px; padding: 8px 6px 4px; }
+
+/* ---------------- job pill ---------------- */
+.job-pill {
+  display: flex;
+  align-items: center;
+  gap: 8px;
+  height: 30px;
+  padding: 0 11px;
+  border-radius: var(--r-pill);
+  background: var(--accent-soft);
+  color: var(--accent-text);
+  font-size: 12px;
+  font-weight: 500;
+  position: relative;
+  overflow: hidden;
+}
+.job-pill-bar {
+  position: absolute;
+  left: 0; bottom: 0; height: 2px; width: 100%;
+  background: rgba(255, 255, 255, 0.12);
+}
+.job-pill-bar span { display: block; height: 100%; background: var(--accent); transition: width var(--t); }
+
+/* ---------------- responsive ---------------- */
+@media (max-width: 1100px) {
+  :root { --gutter: 20px; }
+}
+@media (max-width: 860px) {
+  .shell { grid-template-columns: var(--nav-w-collapsed) 1fr; }
+  .brand-name, .nav-label, .nav-count, .nav-stat { display: none; }
+  .nav-link { justify-content: center; padding: 0; }
+  .nav-toggle { display: none; }
+  .page-head h1 { font-size: 26px; }
+}
+@media (max-width: 620px) {
+  :root { --gutter: 14px; --topbar-h: 56px; }
+  .searchbox-kbd { display: none; }
+  .page { padding-bottom: 60px; }
+}

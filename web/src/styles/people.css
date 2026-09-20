@@ -1,0 +1,309 @@
+/* People gallery, person page, face review. */
+
+.people-grid {
+  display: grid;
+  grid-template-columns: repeat(auto-fill, minmax(132px, 1fr));
+  gap: 18px 14px;
+}
+.person-tile {
+  display: flex;
+  flex-direction: column;
+  align-items: center;
+  gap: 8px;
+  padding: 10px 6px 12px;
+  border-radius: var(--r-lg);
+  transition: background var(--t-fast) var(--ease), transform var(--t-fast) var(--ease);
+  text-align: center;
+}
+.person-tile:hover { background: var(--surface); transform: translateY(-2px); }
+.person-face {
+  position: relative;
+  width: 104px;
+  height: 104px;
+  border-radius: 50%;
+  overflow: hidden;
+  background: var(--surface-2);
+  display: grid;
+  place-items: center;
+  box-shadow: 0 0 0 1px var(--hairline), var(--sh-1);
+  transition: box-shadow var(--t) var(--ease);
+}
+.person-tile:hover .person-face { box-shadow: 0 0 0 2px var(--accent-line), var(--sh-2); }
+.person-face img { width: 100%; height: 100%; object-fit: cover; }
+.person-face.is-picked { box-shadow: 0 0 0 3px var(--accent); }
+.person-face-blank { color: var(--text-3); display: grid; place-items: center; width: 100%; height: 100%; }
+.person-pick-badge {
+  position: absolute;
+  right: 4px;
+  top: 4px;
+  min-width: 20px;
+  height: 20px;
+  border-radius: 50%;
+  background: var(--accent);
+  color: #17130a;
+  font-size: 11px;
+  font-weight: 700;
+  display: grid;
+  place-items: center;
+}
+.person-hidden-badge {
+  position: absolute;
+  left: 6px;
+  bottom: 6px;
+  width: 20px; height: 20px;
+  border-radius: 50%;
+  background: var(--scrim);
+  color: var(--text-2);
+  display: grid; place-items: center;
+}
+.person-name {
+  font-size: 13px;
+  font-weight: 550;
+  max-width: 100%;
+  overflow: hidden;
+  text-overflow: ellipsis;
+  white-space: nowrap;
+}
+.person-count { font-size: 11.5px; }
+
+/* person page */
+.person-hero {
+  display: flex;
+  align-items: center;
+  gap: 24px;
+  margin-bottom: 22px;
+  flex-wrap: wrap;
+}
+.person-hero-face {
+  width: 128px;
+  height: 128px;
+  border-radius: 50%;
+  overflow: hidden;
+  background: var(--surface-2);
+  flex: none;
+  box-shadow: 0 0 0 1px var(--hairline), var(--sh-2);
+  display: grid;
+  place-items: center;
+}
+.person-hero-face img { width: 100%; height: 100%; object-fit: cover; }
+.person-hero-main { min-width: 260px; flex: 1; }
+.person-title {
+  font-size: 38px;
+  display: flex;
+  align-items: center;
+  gap: 10px;
+}
+.person-title .btn { opacity: 0; transition: opacity var(--t-fast); }
+.person-hero:hover .person-title .btn { opacity: 1; }
+.person-meta { font-size: 13px; margin-top: 5px; }
+.person-actions { display: flex; gap: 8px; margin-top: 13px; flex-wrap: wrap; }
+.rename-form { display: flex; gap: 8px; align-items: center; max-width: 460px; }
+
+.person-facts, .event-facts {
+  display: grid;
+  grid-template-columns: repeat(auto-fit, minmax(270px, 1fr));
+  gap: 14px;
+  margin: 8px 0 8px;
+}
+.fact-card {
+  background: var(--surface);
+  border: 1px solid var(--hairline);
+  border-radius: var(--r-lg);
+  padding: 14px 15px;
+  min-width: 0;
+}
+.fact-head {
+  display: flex;
+  align-items: center;
+  gap: 6px;
+  font-size: 11.5px;
+  font-weight: 600;
+  letter-spacing: 0.04em;
+  text-transform: uppercase;
+  color: var(--text-3);
+  margin-bottom: 11px;
+}
+.fact-chips { display: flex; flex-wrap: wrap; gap: 6px; }
+.fact-card-map { padding-bottom: 10px; }
+
+.face-strip {
+  display: flex;
+  gap: 10px;
+  overflow-x: auto;
+  padding-bottom: 6px;
+  scrollbar-width: thin;
+}
+.face-chip {
+  display: flex;
+  flex-direction: column;
+  align-items: center;
+  gap: 5px;
+  flex: none;
+  width: 78px;
+  transition: transform var(--t-fast) var(--ease);
+}
+.face-chip:hover { transform: translateY(-2px); }
+.face-chip-img {
+  width: 64px;
+  height: 64px;
+  border-radius: 50%;
+  overflow: hidden;
+  background: var(--surface-2);
+  display: grid;
+  place-items: center;
+  box-shadow: 0 0 0 1px var(--hairline);
+}
+.face-chip-img img { width: 100%; height: 100%; object-fit: cover; }
+.face-chip-name {
+  font-size: 11.5px;
+  max-width: 100%;
+  overflow: hidden;
+  text-overflow: ellipsis;
+  white-space: nowrap;
+  text-align: center;
+}
+.face-chip-count { font-size: 10.5px; }
+.face-chip-sm { width: 66px; }
+.face-chip-sm .face-chip-img { width: 52px; height: 52px; }
+
+.spark { display: flex; align-items: flex-end; gap: 4px; height: 72px; }
+.spark-bar {
+  flex: 1;
+  min-width: 10px;
+  display: flex;
+  flex-direction: column;
+  justify-content: flex-end;
+  align-items: center;
+  height: 100%;
+  gap: 4px;
+}
+.spark-bar span {
+  width: 100%;
+  background: color-mix(in srgb, var(--accent) 34%, transparent);
+  border: 1px solid var(--accent-line);
+  border-radius: 3px 3px 0 0;
+  transition: background var(--t-fast);
+}
+.spark-bar:hover span { background: var(--accent); }
+.spark-bar em { font-size: 9.5px; font-style: normal; }
+
+/* merge flow */
+.merge-bar, .review-bar {
+  display: flex;
+  align-items: center;
+  gap: 10px;
+  flex-wrap: wrap;
+  padding: 10px 14px;
+  border-radius: var(--r-md);
+  background: var(--accent-soft);
+  border: 1px solid var(--accent-line);
+  color: var(--accent-text);
+  margin-bottom: 16px;
+  position: sticky;
+  top: 6px;
+  z-index: 20;
+  backdrop-filter: blur(10px);
+}
+.merge-bar-actions { margin-left: auto; display: flex; gap: 8px; }
+.merge-cards {
+  display: grid;
+  grid-template-columns: repeat(auto-fill, minmax(260px, 1fr));
+  gap: 12px;
+}
+.merge-card {
+  background: var(--surface);
+  border: 1px solid var(--hairline);
+  border-radius: var(--r-lg);
+  padding: 14px;
+  display: flex;
+  flex-direction: column;
+  gap: 12px;
+}
+.merge-card-faces { display: flex; align-items: center; justify-content: center; gap: 14px; }
+.merge-card-eq { font-size: 18px; }
+.face-bubble { display: flex; flex-direction: column; align-items: center; gap: 4px; font-size: 11.5px; }
+.face-bubble img { width: 62px; height: 62px; border-radius: 50%; object-fit: cover; }
+.face-bubble-name { font-weight: 550; }
+.merge-card-actions { display: flex; gap: 8px; justify-content: center; }
+.merge-card-score { text-align: center; font-size: 11px; }
+
+/* face review */
+.review-hint { margin-bottom: 14px; font-size: 13px; max-width: 70ch; }
+.face-review-grid {
+  display: grid;
+  grid-template-columns: repeat(auto-fill, minmax(96px, 1fr));
+  gap: 10px;
+}
+.face-review {
+  position: relative;
+  aspect-ratio: 1;
+  border-radius: var(--r-md);
+  overflow: hidden;
+  background: var(--surface-2);
+  transition: transform var(--t-fast) var(--ease);
+}
+.face-review img { width: 100%; height: 100%; object-fit: cover; }
+.face-review:hover { transform: scale(1.03); }
+.face-review.is-selected { outline: 3px solid var(--accent); outline-offset: -3px; }
+.face-review-check {
+  position: absolute;
+  left: 6px; top: 6px;
+  width: 20px; height: 20px;
+  border-radius: 50%;
+  background: var(--accent);
+  color: #17130a;
+  display: grid; place-items: center;
+}
+.face-review-badge {
+  position: absolute;
+  right: 6px; top: 5px;
+  color: var(--ok);
+  font-size: 12px;
+  text-shadow: 0 1px 3px rgba(0, 0, 0, 0.8);
+}
+.face-review-conf {
+  position: absolute;
+  right: 5px; bottom: 4px;
+  font-size: 10px;
+  color: #fff;
+  background: rgba(0, 0, 0, 0.5);
+  border-radius: 4px;
+  padding: 0 4px;
+}
+
+.tabs {
+  display: flex;
+  gap: 4px;
+  border-bottom: 1px solid var(--hairline);
+  margin: 26px 0 18px;
+}
+.tabs button {
+  padding: 9px 14px;
+  font-size: 13.5px;
+  font-weight: 550;
+  color: var(--text-3);
+  border-bottom: 2px solid transparent;
+  margin-bottom: -1px;
+  transition: color var(--t-fast), border-color var(--t-fast);
+}
+.tabs button:hover { color: var(--text-2); }
+.tabs button.on { color: var(--text); border-color: var(--accent); }
+
+.assign-form { display: flex; gap: 8px; align-items: center; }
+.assign-form .field { width: 190px; height: 30px; font-size: 12.5px; }
+.assign-candidates {
+  display: flex;
+  gap: 10px;
+  flex-wrap: wrap;
+  padding: 12px 14px;
+  margin-bottom: 16px;
+  border-radius: var(--r-md);
+  background: var(--surface);
+  border: 1px solid var(--hairline);
+}
+.assign-candidates .face-chip { cursor: pointer; }
+
+.people-more {
+  display: block;
+  margin: 18px auto 4px;
+}

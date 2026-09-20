@@ -1,0 +1,29 @@
+# Library data: database, thumbnail cache, model weights, geo data, logs.
+# Regenerable — models and place data are downloaded, thumbnails are rebuilt on index.
+/data/
+# Any other library data directory pointed at by PHOTOINTEL_DATA
+/*data/
+!/eval/
+
+# Python
+.venv/
+__pycache__/
+*.py[cod]
+.pytest_cache/
+*.egg-info/
+
+# Node / web build inputs
+web/node_modules/
+
+# Local settings that may hold an API key
+settings.json
+
+# Editor / OS
+.vscode/
+.idea/
+.DS_Store
+Thumbs.db
+
+# Scratch
+*.log
+*.tmp

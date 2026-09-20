@@ -1,0 +1,17 @@
+# Normalise to LF in the repository; check out native on Windows.
+* text=auto
+
+*.py   text eol=lf
+*.ts   text eol=lf
+*.tsx  text eol=lf
+*.css  text eol=lf
+*.md   text eol=lf
+*.json text eol=lf
+*.sql  text eol=lf
+*.mjs  text eol=lf
+
+# Binary assets in the built UI
+*.woff2 binary
+*.png   binary
+*.jpg   binary
+*.webp  binary

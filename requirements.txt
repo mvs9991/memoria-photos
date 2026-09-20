@@ -1,0 +1,31 @@
+# Core
+numpy>=1.26
+pillow>=10.2
+opencv-python-headless>=4.9
+scipy>=1.11
+scikit-learn>=1.4
+
+# Formats
+pillow-heif>=0.15
+rawpy>=0.19
+piexif>=1.1.3
+
+# Models (install torch separately for your CUDA version, see README)
+torch>=2.2
+torchvision>=0.17
+onnx>=1.15
+onnx2torch>=1.5
+open_clip_torch>=2.24
+transformers>=4.40          # local captioning (Florence-2)
+
+# Web
+fastapi>=0.110
+uvicorn[standard]>=0.29
+python-multipart>=0.0.9
+
+# Optional Claude reasoning layer
+anthropic>=0.49
+
+# Tests
+pytest>=8.0
+httpx>=0.27
