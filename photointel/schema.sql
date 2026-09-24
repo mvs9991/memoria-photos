@@ -297,3 +297,49 @@ CREATE INDEX IF NOT EXISTS ix_audit_entity ON audit_log(entity_type, entity_id);
 CREATE VIRTUAL TABLE IF NOT EXISTS photo_fts USING fts5(
     text, tokenize = 'unicode61 remove_diacritics 2'
 );
+
+-- ---- v2 ----------------------------------------------------------------------------------
+-- Columns added to `photos` in v2 live in db.py (_ensure_v2_columns): an ALTER must not be
+-- attempted by this script on a database that already has them.
+
+-- Words that appear *in* a photo (OCR) and descriptions people wrote. Kept apart from
+-- photo_fts so a quoted text search never matches a filename or folder instead.
+CREATE VIRTUAL TABLE IF NOT EXISTS photo_text_fts USING fts5(
+    text, tokenize = 'unicode61 remove_diacritics 2'
+);
+
+CREATE TABLE IF NOT EXISTS albums (
+    id             INTEGER PRIMARY KEY,
+    name           TEXT NOT NULL,
+    description    TEXT,
+    source         TEXT NOT NULL DEFAULT 'user',   -- user | takeout
+    source_key     TEXT UNIQUE,                    -- takeout: '<root_id>:<folder>'; keeps re-imports idempotent
+    cover_photo_id INTEGER,
+    hidden         INTEGER NOT NULL DEFAULT 0,     -- a deleted imported album: kept so re-import skips it
+    created_at     REAL NOT NULL,
+    updated_at     REAL NOT NULL
+);
+
+CREATE TABLE IF NOT EXISTS album_photos (
+    album_id INTEGER NOT NULL REFERENCES albums(id) ON DELETE CASCADE,
+    photo_id INTEGER NOT NULL REFERENCES photos(id) ON DELETE CASCADE,
+    added_at REAL NOT NULL,
+    PRIMARY KEY (album_id, photo_id)
+) WITHOUT ROWID;
+CREATE INDEX IF NOT EXISTS ix_album_photos_photo ON album_photos(photo_id);
+
+-- What a Google Takeout .json sidecar said about a photo. Stored as evidence, not as truth:
+-- which fields are *used* is decided in engine/takeout.py (see HANDOFF.md).
+CREATE TABLE IF NOT EXISTS takeout_sidecars (
+    photo_id    INTEGER PRIMARY KEY REFERENCES photos(id) ON DELETE CASCADE,
+    json_path   TEXT NOT NULL,
+    taken_ts    REAL,
+    lat         REAL,
+    lon         REAL,
+    description TEXT,
+    people      TEXT,                              -- JSON list of names
+    favorited   INTEGER NOT NULL DEFAULT 0,
+    archived    INTEGER NOT NULL DEFAULT 0,
+    trashed     INTEGER NOT NULL DEFAULT 0,
+    imported_at REAL NOT NULL
+);

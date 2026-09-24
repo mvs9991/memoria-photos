@@ -5,9 +5,12 @@ import json
 import logging
 from datetime import datetime, timedelta
 
-from fastapi import APIRouter, Body, HTTPException, Query
+from fastapi import APIRouter, Body, HTTPException, Query, Response
+from fastapi.responses import FileResponse
+from pydantic import BaseModel
 
 from .. import db
+from ..engine import albums as albums_mod
 from ..engine.events import date_range_label, event_title
 from ..engine.people import person_label
 from ..engine.places import place_label
@@ -22,8 +25,8 @@ def photo_filter_sql(conn, person: list[int] | None = None, place: int | None = 
                      year: int | None = None, month: int | None = None, tag: str | None = None,
                      source: str | None = None, favorite: bool = False, camera: str | None = None,
                      folder: str | None = None, has_faces: bool | None = None,
-                     include_screenshots: bool = True) -> tuple[str, list]:
-    where = ["p.status = 'ok'", "p.hidden = 0"]
+                     include_screenshots: bool = True, media: str | None = None) -> tuple[str, list]:
+    where = ["p.status = 'ok'", "p.hidden = 0", "p.live_component = 0"]
     args: list = []
     for pid in person or []:
         where.append("EXISTS (SELECT 1 FROM faces f WHERE f.photo_id = p.id AND f.person_id = ?)")
@@ -67,7 +70,23 @@ def photo_filter_sql(conn, person: list[int] | None = None, place: int | None = 
         where.append("p.favorite = 1")
     if has_faces is True:
         where.append("p.face_count > 0")
+    if media == "video":
+        where.append("p.media_type = 'video'")
+    elif media == "image":
+        where.append("p.media_type = 'image'")
+    elif media == "live":
+        where.append("(p.live_video_id IS NOT NULL OR COALESCE(p.motion_offset, 0) > 0)")
     return " AND ".join(where), args
+
+
+# Bit flags in /photos/index: favourite, has faces, video, live/motion photo.
+FLAG_FAVORITE, FLAG_FACES, FLAG_VIDEO, FLAG_LIVE = 1, 2, 4, 8
+
+
+def photo_flags(r) -> int:
+    return ((FLAG_FAVORITE if r["favorite"] else 0) | (FLAG_FACES if (r["face_count"] or 0) > 0 else 0)
+            | (FLAG_VIDEO if r["media_type"] == "video" else 0)
+            | (FLAG_LIVE if r["live_video_id"] or (r["motion_offset"] or 0) > 0 else 0))
 
 
 @router.get("/photos/index")
@@ -75,6 +94,7 @@ def photos_index(person: list[int] = Query(default=[]), place: int | None = None
                  year: int | None = None, month: int | None = None, tag: str | None = None,
                  source: str | None = None, favorite: bool = False, camera: str | None = None,
                  folder: str | None = None, has_faces: bool | None = None, include_screenshots: bool = True,
+                 media: str | None = Query(None, pattern="^(image|video|live)$"),
                  order: str = Query("date_desc", pattern="^(date_desc|date_asc|quality)$"),
                  limit: int = Query(200000, le=500000)):
     """Columnar photo list for the virtualised grid: ids, aspect ratios, timestamps.
@@ -85,20 +105,27 @@ def photos_index(person: list[int] = Query(default=[]), place: int | None = None
     state = get_state()
     conn = state.conn()
     where, args = photo_filter_sql(conn, person, place, event, year, month, tag, source, favorite, camera,
-                                   folder, has_faces, include_screenshots)
+                                   folder, has_faces, include_screenshots, media)
     order_sql = {"date_desc": "p.taken_ts DESC, p.id DESC", "date_asc": "p.taken_ts ASC, p.id ASC",
                  "quality": "COALESCE(p.quality_score,0) DESC"}[order]
     rows = conn.execute(
-        f"SELECT p.id, p.width, p.height, p.taken_ts, p.face_count, p.favorite FROM photos p "
+        f"SELECT p.id, p.width, p.height, p.taken_ts, p.face_count, p.favorite, p.media_type, p.duration, "
+        f"p.live_video_id, p.motion_offset FROM photos p "
         f"WHERE {where} ORDER BY {order_sql} LIMIT ?", (*args, limit)).fetchall()
-    ids, ratios, ts, flags = [], [], [], []
+    return columnar(rows)
+
+
+def columnar(rows) -> dict:
+    """The compact grid payload shared by every photo list (library, albums, events)."""
+    ids, ratios, ts, flags, dur = [], [], [], [], []
     for r in rows:
         ids.append(r["id"])
         w, h = r["width"] or 4, r["height"] or 3
         ratios.append(round(max(0.2, min(6.0, w / max(h, 1))), 3))
         ts.append(int(r["taken_ts"] or 0))
-        flags.append((1 if r["favorite"] else 0) | (2 if (r["face_count"] or 0) > 0 else 0))
-    return {"ids": ids, "ratio": ratios, "ts": ts, "flags": flags, "total": len(ids)}
+        flags.append(photo_flags(r))
+        dur.append(round(r["duration"], 1) if r["media_type"] == "video" and r["duration"] else 0)
+    return {"ids": ids, "ratio": ratios, "ts": ts, "flags": flags, "dur": dur, "total": len(ids)}
 
 
 @router.get("/photos/{photo_id}")
@@ -128,9 +155,10 @@ def photo_detail(photo_id: int):
     from ..engine.tags import confidence as _tag_conf
 
     tags = [{"name": t["name"], "category": t["category"], "score": round(t["score"], 3),
-             "confidence": round(_tag_conf(t["score"]), 3)} for t in conn.execute(
-        """SELECT t.name, t.category, pt.score FROM photo_tags pt JOIN tags t ON t.id = pt.tag_id
-           WHERE pt.photo_id = ? ORDER BY pt.score DESC LIMIT 12""", (photo_id,))]
+             "confidence": round(_tag_conf(t["score"]), 3), "by_user": t["source"] == "user"} for t in conn.execute(
+        """SELECT t.name, t.category, pt.score, pt.source FROM photo_tags pt JOIN tags t ON t.id = pt.tag_id
+           WHERE pt.photo_id = ? AND pt.score > 0
+           ORDER BY (pt.source = 'user') DESC, pt.score DESC LIMIT 16""", (photo_id,))]
     dups = []
     for d in conn.execute(
             """SELECT g.id, g.kind, g.member_count, g.keep_photo_id, m.relation FROM dup_members m
@@ -167,7 +195,103 @@ def photo_detail(photo_id: int):
         "event": {"id": row["event_id2"], "title": event_title(row) if row["event_id2"] else None,
                   "kind": row["event_kind"]} if row["event_id2"] else None,
         "sha256": row["sha256"],
+        "media_type": row["media_type"], "duration": row["duration"], "video_codec": row["video_codec"],
+        "live": bool(row["live_video_id"] or (row["motion_offset"] or 0) > 0),
+        "description": row["description"], "ocr_text": row["ocr_text"] or None,
+        "albums": albums_mod.albums_for_photo(conn, photo_id),
     }
+
+
+# ----------------------------------------------------------------------------- video & motion
+
+@router.get("/photos/{photo_id}/video")
+def photo_video(photo_id: int):
+    """Play a video. Browser-playable files are streamed as-is (with Range support);
+    anything else is transcoded once to an H.264 preview in the cache."""
+    from ..video import VideoError, playable_in_browser, transcode_to_mp4
+    from .images import abs_path
+
+    state = get_state()
+    row = state.conn().execute(
+        "SELECT p.*, r.path AS root FROM photos p JOIN roots r ON r.id = p.root_id WHERE p.id = ?",
+        (photo_id,)).fetchone()
+    if row is None or row["media_type"] != "video":
+        raise HTTPException(404, "not a video")
+    path = abs_path(row)
+    if not path.exists():
+        raise HTTPException(410, "original file is missing")
+    if playable_in_browser(row["video_codec"], row["ext"]):
+        return FileResponse(path, media_type="video/webm" if row["ext"] == ".webm" else "video/mp4",
+                            headers={"Cache-Control": "private, max-age=3600"})
+    cached = state.ctx.paths.data / "cache" / "videos" / (row["sha256"] or str(photo_id))[:2] / \
+        f"{row['sha256'] or photo_id}.mp4"
+    if not cached.exists():
+        try:
+            transcode_to_mp4(path, cached)
+        except VideoError as exc:
+            raise HTTPException(415, str(exc))
+    return FileResponse(cached, media_type="video/mp4", headers={"Cache-Control": "private, max-age=86400"})
+
+
+@router.get("/photos/{photo_id}/motion")
+def photo_motion(photo_id: int):
+    """The moving part of a Live photo (its paired video) or a motion photo (embedded MP4)."""
+    from ..video import motion_bytes
+    from .images import abs_path
+
+    conn = get_state().conn()
+    row = conn.execute(
+        "SELECT p.*, r.path AS root FROM photos p JOIN roots r ON r.id = p.root_id WHERE p.id = ?",
+        (photo_id,)).fetchone()
+    if row is None:
+        raise HTTPException(404, "photo not found")
+    if row["live_video_id"]:
+        return photo_video(int(row["live_video_id"]))
+    if (row["motion_offset"] or 0) > 0:
+        path = abs_path(row)
+        if not path.exists():
+            raise HTTPException(410, "original file is missing")
+        return Response(motion_bytes(path, row["motion_offset"]), media_type="video/mp4",
+                        headers={"Cache-Control": "private, max-age=86400"})
+    raise HTTPException(404, "this photo has no motion")
+
+
+# ----------------------------------------------------------------------------- user tags
+
+class TagBody(BaseModel):
+    photo_ids: list[int]
+    name: str
+
+
+@router.post("/photos/tags")
+def add_tag(body: TagBody):
+    if not body.photo_ids or not body.name.strip():
+        raise HTTPException(400, "photos and a tag name are required")
+    return albums_mod.add_user_tag(get_state().conn(), body.photo_ids, body.name)
+
+
+@router.post("/photos/tags/remove")
+def remove_tag(body: TagBody):
+    return albums_mod.remove_user_tag(get_state().conn(), body.photo_ids, body.name)
+
+
+@router.get("/tags")
+def list_tags():
+    return {"tags": albums_mod.list_tags(get_state().conn())}
+
+
+class DescriptionBody(BaseModel):
+    description: str | None = None
+
+
+@router.post("/photos/{photo_id}/description")
+def set_description(photo_id: int, body: DescriptionBody):
+    conn = get_state().conn()
+    text = (body.description or "").strip() or None
+    conn.execute("UPDATE photos SET description = ? WHERE id = ?", (text, photo_id))
+    db.audit(conn, "photo_described", "photo", photo_id, {"description": text})
+    conn.commit()
+    return {"ok": True, "description": text}
 
 
 @router.get("/photos/{photo_id}/similar")
@@ -276,7 +400,7 @@ def stats():
     state = get_state()
     conn = state.conn()
     one = lambda sql, *a: conn.execute(sql, a).fetchone()[0]  # noqa: E731
-    total = one("SELECT COUNT(*) FROM photos WHERE status='ok'")
+    total = one("SELECT COUNT(*) FROM photos WHERE status='ok' AND live_component = 0")
     date_row = conn.execute(
         "SELECT MIN(taken_ts), MAX(taken_ts) FROM photos WHERE status='ok' AND taken_ts IS NOT NULL").fetchone()
     top_places = [dict(r) for r in conn.execute(
@@ -317,7 +441,7 @@ def memories(limit: int = 12):
     # On this day (any year)
     rows = conn.execute(
         """SELECT p.id, p.taken_ts FROM photos p
-           WHERE p.status='ok' AND p.hidden=0 AND p.taken_ts IS NOT NULL
+           WHERE p.status='ok' AND p.hidden=0 AND p.live_component=0 AND p.taken_ts IS NOT NULL
              AND strftime('%m-%d', p.taken_ts, 'unixepoch') = ?
              AND COALESCE(p.source_kind,'') != 'screenshot'
            ORDER BY COALESCE(p.quality_score,0) DESC LIMIT 60""", (now.strftime("%m-%d"),)).fetchall()
@@ -366,7 +490,7 @@ def memories(limit: int = 12):
     for delta in (1, 2, 3, 5):
         y = now.year - delta
         row = conn.execute(
-            """SELECT id FROM photos WHERE status='ok' AND hidden=0 AND taken_ts IS NOT NULL
+            """SELECT id FROM photos WHERE status='ok' AND hidden=0 AND live_component=0 AND taken_ts IS NOT NULL
                AND strftime('%Y', taken_ts, 'unixepoch') = ? AND COALESCE(source_kind,'') != 'screenshot'
                ORDER BY COALESCE(quality_score,0) DESC LIMIT 8""", (str(y),)).fetchall()
         if row:

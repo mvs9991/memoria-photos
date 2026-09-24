@@ -32,7 +32,7 @@ def load_photo_embeddings(conn: sqlite3.Connection, model_id: int, only_active: 
     sql = ("SELECT e.photo_id, e.vec FROM photo_embeddings e "
            "JOIN photos p ON p.id = e.photo_id WHERE e.model_id = ?")
     if only_active:
-        sql += " AND p.status = 'ok'"
+        sql += " AND p.status = 'ok' AND p.live_component = 0"
     sql += " ORDER BY e.photo_id"
     rows = conn.execute(sql, (model_id,)).fetchall()
     if not rows:
@@ -49,7 +49,7 @@ def load_face_embeddings(conn: sqlite3.Connection, model_id: int) -> tuple[np.nd
     rows = conn.execute(
         "SELECT f.id, f.photo_id, f.embedding, f.quality, f.det_score, f.size_px, f.person_id, f.assign_source "
         "FROM faces f JOIN photos p ON p.id = f.photo_id "
-        "WHERE f.model_id = ? AND p.status != 'missing' ORDER BY f.id", (model_id,)
+        "WHERE f.model_id = ? AND p.status != 'missing' AND p.live_component = 0 ORDER BY f.id", (model_id,)
     ).fetchall()
     if not rows:
         return np.zeros((0,), np.int64), np.zeros((0, 0), np.float32), {}

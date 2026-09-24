@@ -261,6 +261,33 @@ def run_caption_job(ctx, job_id: int | None = None, limit: int = 200, detailed: 
         conn.close()
 
 
+def run_ocr_job(ctx, job_id: int | None = None, everything: bool = False, limit: int | None = None) -> dict:
+    """Read text in photos as a tracked job (heartbeat, progress, cancellation)."""
+    from ..engine.ocr import ocr_photos
+    from .post import rebuild_fts
+
+    reporter = JobReporter(ctx, job_id)
+    reporter.start()
+    conn = ctx.connect()
+
+    def should_stop() -> bool:
+        row = conn.execute("SELECT cancel_requested FROM jobs WHERE id=?", (job_id,)).fetchone() if job_id else None
+        return bool(row and row[0])
+
+    try:
+        out = ocr_photos(ctx, conn, everything=everything, limit=limit, should_stop=should_stop,
+                         progress=lambda d, t: reporter.progress("ocr", d, t, f"Read {d:,} of {t:,}"))
+        rebuild_fts(conn)   # make the new text searchable straight away
+        reporter.finish("cancelled" if should_stop() else "done", f"Read text in {out.get('read', 0):,} photos")
+        return out
+    except Exception as exc:
+        log.exception("OCR job failed")
+        reporter.finish("failed", "Failed", str(exc))
+        raise
+    finally:
+        conn.close()
+
+
 def spawn_index_job(ctx, params: dict) -> int:
     """Start indexing in a separate process so the web server stays responsive."""
     conn = ctx.connect()
@@ -270,6 +297,12 @@ def spawn_index_job(ctx, params: dict) -> int:
         return int(existing["id"])
     job_id = create_job(conn, params.get("kind", "index"), params)
     conn.close()
+    if params.get("kind") == "ocr":
+        args = [sys.executable, "-m", "photointel", "--data", str(ctx.paths.data), "ocr", "--job-id", str(job_id)]
+        if params.get("all"):
+            args.append("--all")
+        _spawn(args)
+        return job_id
     if params.get("kind") == "caption":
         # The job id lets the child process heartbeat and see cancellation; without it
         # the reaper marks a job that is still running as interrupted after a minute.

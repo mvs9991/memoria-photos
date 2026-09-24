@@ -52,7 +52,7 @@ class SearchEngine:
     # ------------------------------------------------------------------ SQL candidates
     def _candidate_sql(self, conn: sqlite3.Connection, q: ParsedQuery, limit: int | None = None
                        ) -> tuple[str, list]:
-        where = ["p.status = 'ok'", "p.hidden = 0"]
+        where = ["p.status = 'ok'", "p.hidden = 0", "p.live_component = 0"]
         args: list = []
         for pid in q.persons_all:
             where.append("EXISTS (SELECT 1 FROM faces f WHERE f.photo_id = p.id AND f.person_id = ?)")
@@ -87,6 +87,25 @@ class SearchEngine:
                 where.append("EXISTS (SELECT 1 FROM photo_tags pt JOIN tags t ON t.id = pt.tag_id "
                              "WHERE pt.photo_id = p.id AND t.name = ? AND pt.score >= 2.0)")
                 args.append(str(tag))
+        for tag in q.user_tags:
+            where.append("EXISTS (SELECT 1 FROM photo_tags pt JOIN tags t ON t.id = pt.tag_id "
+                         "WHERE pt.photo_id = p.id AND t.name = ? AND pt.score >= 2.0)")
+            args.append(tag)
+        if q.album_ids:
+            # By content: an album photo's identical copy elsewhere counts as the same photo.
+            marks = ",".join("?" * len(q.album_ids))
+            where.append(f"(p.id IN (SELECT photo_id FROM album_photos WHERE album_id IN ({marks})) "
+                         f"OR p.sha256 IN (SELECT ph.sha256 FROM album_photos ap JOIN photos ph ON ph.id = ap.photo_id "
+                         f"WHERE ap.album_id IN ({marks}) AND ph.sha256 IS NOT NULL))")
+            args.extend(q.album_ids)
+            args.extend(q.album_ids)
+        for phrase in q.text_phrases:
+            where.append("p.id IN (SELECT rowid FROM photo_text_fts WHERE photo_text_fts MATCH ?)")
+            args.append('"' + phrase.replace('"', '""') + '"')
+        if q.only_videos:
+            where.append("p.media_type = 'video'")
+        if q.only_live:
+            where.append("(p.live_video_id IS NOT NULL OR COALESCE(p.motion_offset, 0) > 0)")
         if q.only_favorites:
             where.append("p.favorite = 1")
         if q.only_screenshots:
@@ -147,7 +166,8 @@ class SearchEngine:
         res = SearchResult(interpretation=q.interpretation, result_type=q.result_type, query=query)
         structured = bool(q.persons_all or q.persons_any or q.place_ids or q.event_ids
                           or q.date.start or q.date.end or q.date.month_only or q.only_favorites
-                          or q.only_screenshots or q.only_selfies)
+                          or q.only_screenshots or q.only_selfies or q.only_videos or q.only_live
+                          or q.album_ids or q.user_tags or q.text_phrases)
         # "someone playing tennis" matches the broad tag "playing" and leaves "tennis"
         # as a residue. Using the tag as a hard filter there throws away the word that
         # actually identifies the photo, so with nothing structured to anchor the query
@@ -176,7 +196,7 @@ class SearchEngine:
             # fall back to ranking the whole library visually.
             if not structured and len(ranked) < 20:
                 everything = [int(r[0]) for r in conn.execute(
-                    "SELECT id FROM photos WHERE status='ok' AND hidden=0 "
+                    "SELECT id FROM photos WHERE status='ok' AND hidden=0 AND live_component=0 "
                     "AND COALESCE(source_kind,'') != 'screenshot'")]
                 ranked, scores = self._semantic_rank(conn, q.semantic_text, everything, limit)
                 res.photo_ids, res.scores = ranked, scores
@@ -207,7 +227,7 @@ class SearchEngine:
                     f" LIMIT ?", (*candidates, limit * 3)).fetchall()
             else:
                 rows = conn.execute(
-                    "SELECT id FROM photos WHERE status='ok' ORDER BY COALESCE(quality_score,0) DESC LIMIT ?",
+                    "SELECT id FROM photos WHERE status='ok' AND hidden=0 AND live_component=0 ORDER BY COALESCE(quality_score,0) DESC LIMIT ?",
                     (limit * 3,)).fetchall()
             ids = [int(r[0]) for r in rows]
             return self._diversify(conn, ids, limit)
@@ -218,7 +238,7 @@ class SearchEngine:
                 (*candidates, limit)).fetchall()
         else:
             cand = set(candidates)
-            rows = [r for r in conn.execute(f"SELECT id FROM photos WHERE status='ok' ORDER BY taken_ts {order}")
+            rows = [r for r in conn.execute(f"SELECT id FROM photos WHERE status='ok' AND live_component=0 ORDER BY taken_ts {order}")
                     if int(r[0]) in cand][:limit]
         return [int(r[0]) for r in rows]
 
@@ -428,6 +448,10 @@ def _explain(q: ParsedQuery, res: SearchResult) -> str:
         bits.append(joiner.join(names))
     if q.place_label:
         bits.append(f"in {q.place_label}")
+    if q.album_label:
+        bits.append(f"in album {q.album_label}")
+    if q.text_phrases:
+        bits.append("with text " + ", ".join(f"“{t}”" for t in q.text_phrases))
     if q.event_label:
         bits.append(f"during {q.event_label}")
     if q.date.label:

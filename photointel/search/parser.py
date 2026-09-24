@@ -65,6 +65,12 @@ class ParsedQuery:
     only_selfies: bool = False
     require_faces: bool = False
     trips_only: bool = False
+    only_videos: bool = False
+    only_live: bool = False
+    album_ids: list[int] = field(default_factory=list)
+    album_label: str | None = None
+    user_tags: list[str] = field(default_factory=list)      # tags a person set: always a hard filter
+    text_phrases: list[str] = field(default_factory=list)   # words written in the photo (OCR) or its description
     unmatched: list[str] = field(default_factory=list)
     interpretation: list[dict] = field(default_factory=list)
     source: str = "rules"
@@ -72,7 +78,8 @@ class ParsedQuery:
     def is_empty(self) -> bool:
         return not any([self.persons_all, self.persons_any, self.place_ids, self.event_ids, self.tags,
                         self.date.start, self.date.month_only, self.semantic_text, self.only_favorites,
-                        self.only_screenshots, self.only_selfies, self.trips_only])
+                        self.only_screenshots, self.only_selfies, self.trips_only, self.only_videos,
+                        self.only_live, self.album_ids, self.user_tags, self.text_phrases])
 
     def chip(self, kind: str, label: str, detail: str | None = None) -> None:
         self.interpretation.append({"kind": kind, "label": label, "detail": detail})
@@ -109,6 +116,11 @@ class Vocabulary:
                     self.events.setdefault(key.lower(), []).append(r["id"])
 
         self.tags: set[str] = {r[0].lower() for r in conn.execute("SELECT name FROM tags")}
+        self.user_tags: set[str] = {r[0].lower() for r in conn.execute(
+            "SELECT DISTINCT t.name FROM tags t JOIN photo_tags pt ON pt.tag_id = t.id WHERE pt.source = 'user'")}
+        self.albums: dict[str, list[int]] = {}
+        for r in conn.execute("SELECT id, name FROM albums WHERE hidden = 0"):
+            self.albums.setdefault(r["name"].lower(), []).append(r["id"])
         self.tag_aliases = {
             "wedding": "wedding", "weddings": "wedding", "marriage": "wedding", "birthday": "birthday",
             "birthdays": "birthday", "beaches": "beach", "sea": "beach", "ocean": "beach",
@@ -130,7 +142,7 @@ def vocabulary_generation(conn: sqlite3.Connection) -> int:
     generation would otherwise keep serving a stale vocabulary.
     """
     total = 0
-    for key in ("gen:people", "gen:events", "gen:places"):
+    for key in ("gen:people", "gen:events", "gen:places", "gen:albums", "gen:tags"):
         row = conn.execute("SELECT value FROM meta WHERE key = ?", (key,)).fetchone()
         if row and row[0] is not None:
             try:
@@ -183,7 +195,13 @@ def parse(query: str, conn: sqlite3.Connection, me_person_id: int | None = None,
           generation: int | None = None, now: datetime | None = None) -> ParsedQuery:
     vocab = get_vocabulary(conn, generation)
     q = ParsedQuery(raw=query.strip())
-    text = query.strip().lower()
+    # Words written *in* the photo: "receipt that says Reliance", or anything in quotes.
+    # Pulled out first so a quoted word is never read as a person, place or date.
+    remainder, phrases = _extract_text_phrases(query.strip())
+    for phrase in phrases:
+        q.text_phrases.append(phrase)
+        q.chip("text", f"“{phrase}”", "text in the photo or its description")
+    text = remainder.lower()
     now = now or datetime.now()
     consumed: set[int] = set()
     tokens = _tokenize(text)
@@ -222,6 +240,9 @@ def parse(query: str, conn: sqlite3.Connection, me_person_id: int | None = None,
             # place
             elif phrase in vocab.places:
                 matched_terms.append(("place", phrase, vocab.places[phrase]))
+            # album (a one-word album name must not shadow a tag of the same name)
+            elif phrase in vocab.albums and (n > 1 or phrase not in vocab.tags):
+                matched_terms.append(("album", phrase, vocab.albums[phrase]))
             # event title
             elif phrase in vocab.events and n > 1:
                 matched_terms.append(("event", phrase, vocab.events[phrase]))
@@ -268,6 +289,14 @@ def parse(query: str, conn: sqlite3.Connection, me_person_id: int | None = None,
             q.only_selfies = True
             q.chip("filter", "Selfies")
             consumed.add(idx)
+        elif tok in ("video", "videos", "movie", "movies") and not q.only_videos:   # not "clip": paper clips
+            q.only_videos = True
+            q.chip("filter", "Videos")
+            consumed.add(idx)
+        elif tok == "live" and idx + 1 < len(tokens) and tokens[idx + 1] in ("photo", "photos", "pictures", "pics"):
+            q.only_live = True
+            q.chip("filter", "Live & motion photos")
+            consumed.update((idx, idx + 1))
         elif tok in ("me", "myself") and me_person_id:
             q.persons_all.append(me_person_id)
             q.person_labels[me_person_id] = "You"
@@ -300,6 +329,13 @@ def parse(query: str, conn: sqlite3.Connection, me_person_id: int | None = None,
             q.event_ids.extend(value)
             q.event_label = phrase.title()
             q.chip("event", phrase.title())
+        elif kind == "album":
+            q.album_ids.extend(value)
+            q.album_label = phrase.title()
+            q.chip("album", phrase.title())
+        elif kind == "tag" and str(value) in vocab.user_tags:
+            q.user_tags.append(str(value))
+            q.chip("tag", str(value).title(), "your tag")
         elif kind == "tag":
             q.tags.append(value)
             q.chip("tag", str(value).title())
@@ -333,6 +369,26 @@ def parse(query: str, conn: sqlite3.Connection, me_person_id: int | None = None,
     if q.sort == "auto":
         q.sort = "relevance" if q.semantic_text else "date_desc"
     return q
+
+
+_QUOTED = re.compile(r'"([^"]+)"|“([^”]+)”')
+_SAYS = re.compile(r"\b(?:that says|which says|saying|with the text|with text|with the words)\s+(.+)$", re.I)
+
+
+def _extract_text_phrases(query: str) -> tuple[str, list[str]]:
+    phrases = []
+    for m in _QUOTED.finditer(query):
+        phrase = " ".join((m.group(1) or m.group(2) or "").split())
+        if phrase:
+            phrases.append(phrase)
+    rest = _QUOTED.sub(" ", query)
+    m = _SAYS.search(rest)
+    if m:
+        phrase = " ".join(m.group(1).split()).strip(" .?!")
+        if phrase:
+            phrases.append(phrase)
+        rest = rest[: m.start()]
+    return rest, phrases
 
 
 def _parse_dates(tokens: list[str], consumed: set[int], now: datetime) -> tuple[DateRange | None, set[int]]:

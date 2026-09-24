@@ -161,6 +161,7 @@ def ctx(tmp_path, monkeypatch) -> AppContext:
     data = tmp_path / "data"
     ctx = AppContext(data)
     ctx._device = "cpu"
+    ctx.settings.ocr_enabled = False       # real OCR is slow to load; OCR tests enable it
     fake_face = FakeFaceEngine()
     fake_sem = FakeSemanticModel()
     monkeypatch.setattr(ctx, "face_engine", lambda: fake_face)

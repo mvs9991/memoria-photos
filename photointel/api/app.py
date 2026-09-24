@@ -13,7 +13,7 @@ from fastapi.responses import FileResponse, JSONResponse
 from fastapi.staticfiles import StaticFiles
 
 from ..context import AppContext
-from . import images, routes_duplicates, routes_events, routes_library, routes_people, routes_search, routes_system
+from . import images, routes_albums, routes_duplicates, routes_events, routes_library, routes_people, routes_search, routes_system
 from .deps import ApiState, set_state
 
 log = logging.getLogger(__name__)
@@ -43,7 +43,7 @@ def create_app(ctx: AppContext) -> FastAPI:
                            allow_methods=["*"], allow_headers=["*"])
         log.warning("PHOTOINTEL_DEV=1: allowing cross-origin requests from the Vite dev server")
 
-    for router in (routes_library.router, routes_people.router, routes_events.router, routes_search.router,
+    for router in (routes_library.router, routes_albums.router, routes_people.router, routes_events.router, routes_search.router,
                    routes_duplicates.router, routes_system.router, images.router):
         app.include_router(router, prefix="/api")
 

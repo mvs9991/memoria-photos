@@ -13,13 +13,19 @@ from typing import Callable
 from .. import db
 from ..engine import duplicates as dup_mod
 from ..engine import events as events_mod
+from ..engine import live as live_mod
+from ..engine import ocr as ocr_mod
+from ..engine import takeout as takeout_mod
 from ..engine import people as people_mod
 from ..engine import places as places_mod
 from ..engine import tags as tags_mod
 
 log = logging.getLogger(__name__)
 
-STAGES = ["geocode", "tags", "quality", "people", "events", "locations", "duplicates", "search-index"]
+# Order matters: live pairing decides which files are clustered and listed at all;
+# Takeout locations must exist before geocoding; OCR picks its candidates by tag.
+STAGES = ["live-photos", "takeout", "geocode", "tags", "ocr", "quality", "people", "events", "locations",
+          "duplicates", "search-index"]
 
 
 def run_post_stages(ctx, conn: sqlite3.Connection, stages: list[str] | None = None,
@@ -37,7 +43,16 @@ def run_post_stages(ctx, conn: sqlite3.Connection, stages: list[str] | None = No
         t0 = time.time()
         report(i, stage, f"Running {stage}")
         try:
-            if stage == "geocode":
+            if stage == "live-photos":
+                out[stage] = live_mod.pair_live_photos(conn)
+                out[stage]["motion"] = live_mod.backfill_motion_offsets(conn)
+            elif stage == "takeout":
+                if ctx.settings.takeout_import:
+                    out[stage] = takeout_mod.import_takeout(ctx, conn)
+            elif stage == "ocr":
+                if ctx.settings.ocr_enabled:
+                    out[stage] = ocr_mod.ocr_photos(ctx, conn)
+            elif stage == "geocode":
                 out[stage] = places_mod.geocode_photos(ctx, conn)
             elif stage == "tags":
                 if ctx.settings.semantic_model:
@@ -70,6 +85,7 @@ def rebuild_fts(conn: sqlite3.Connection, batch: int = 5000) -> dict:
     conn.execute("DELETE FROM photo_fts")
     rows = conn.execute(
         """SELECT p.id, p.filename, p.folder, p.caption, p.camera_make, p.camera_model, p.source_kind,
+                  p.description, p.ocr_text,
                   pl.name AS place_name, pl.city, pl.admin1, pl.country,
                   lm.name AS landmark,
                   e.auto_title, e.user_title
@@ -89,6 +105,7 @@ def rebuild_fts(conn: sqlite3.Connection, batch: int = 5000) -> dict:
         people_map.setdefault(int(pid), []).append(name)
 
     payload = []
+    text_payload = []      # only words written *in* or *about* the photo: OCR and descriptions
     for r in rows:
         parts = [
             r["filename"].rsplit(".", 1)[0].replace("_", " ").replace("-", " "),
@@ -97,10 +114,16 @@ def rebuild_fts(conn: sqlite3.Connection, batch: int = 5000) -> dict:
             r["landmark"] or "", r["user_title"] or r["auto_title"] or "",
             r["camera_make"] or "", r["camera_model"] or "", r["source_kind"] or "",
             " ".join(tag_map.get(int(r["id"]), [])), " ".join(people_map.get(int(r["id"]), [])),
+            r["description"] or "", r["ocr_text"] or "",
         ]
         payload.append((int(r["id"]), " ".join(p for p in parts if p)))
+        written = " ".join(x for x in (r["description"], r["ocr_text"]) if x)
+        if written:
+            text_payload.append((int(r["id"]), written))
     for i in range(0, len(payload), batch):
         conn.executemany("INSERT INTO photo_fts(rowid, text) VALUES (?,?)", payload[i:i + batch])
+    conn.execute("DELETE FROM photo_text_fts")
+    conn.executemany("INSERT INTO photo_text_fts(rowid, text) VALUES (?,?)", text_payload)
     conn.commit()
     db.bump_generation(conn, "fts")
     conn.commit()

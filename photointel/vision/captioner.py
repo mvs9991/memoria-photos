@@ -108,7 +108,7 @@ def caption_photos(ctx, conn, photo_ids: list[int] | None = None, limit: int = 2
         # Priority: event covers and highlights — the photos the UI actually shows big.
         rows = conn.execute(
             """SELECT p.id, r.path root, p.rel_path FROM photos p JOIN roots r ON r.id = p.root_id
-               WHERE p.status='ok' AND (p.caption IS NULL OR p.caption_model != ?)
+               WHERE p.status='ok' AND p.live_component=0 AND (p.caption IS NULL OR p.caption_model != ?)
                  AND COALESCE(p.source_kind,'') != 'screenshot'
                ORDER BY (p.id IN (SELECT cover_photo_id FROM events WHERE cover_photo_id IS NOT NULL)) DESC,
                         COALESCE(p.quality_score, 0) DESC

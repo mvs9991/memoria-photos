@@ -15,7 +15,7 @@ from pathlib import Path
 import numpy as np
 from PIL import Image, ImageFile, ImageOps
 
-from .config import RAW_EXTENSIONS
+from .config import RAW_EXTENSIONS, VIDEO_EXTENSIONS
 
 # Accept truncated files where possible (partial download / sync) — we log them via `truncated`.
 ImageFile.LOAD_TRUNCATED_IMAGES = True
@@ -130,8 +130,19 @@ def _to_rgb(img: Image.Image) -> Image.Image:
 
 
 def decode(path: Path | str, max_side: int = 1600, data: bytes | None = None) -> Decoded:
-    """Decode an image to RGB with orientation applied and long side <= max_side."""
+    """Decode an image to RGB with orientation applied and long side <= max_side.
+
+    A video decodes to its representative frame; `info["video"]` then holds its VideoInfo.
+    """
     path = Path(path)
+    if path.suffix.lower() in VIDEO_EXTENSIONS:
+        from . import video
+
+        try:
+            img, vinfo = video.representative_frame(path, max_side)
+        except video.VideoError as exc:
+            raise DecodeError(f"video: {exc}") from exc
+        return Decoded(img, vinfo.width, vinfo.height, 1, "VIDEO", None, None, {"video": vinfo})
     if path.suffix.lower() in RAW_EXTENSIONS:
         try:
             return _decode_raw(path, max_side)

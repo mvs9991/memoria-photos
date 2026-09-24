@@ -38,7 +38,8 @@ def list_people(include_hidden: bool = False, include_ignored: bool = False, min
         "hidden": bool(r["hidden"]), "ignored": bool(r["ignored"]), "named": bool(r["name"]),
     } for r in rows]
     unassigned = conn.execute(
-        "SELECT COUNT(*) FROM faces WHERE person_id IS NULL AND quality >= 0.3").fetchone()[0]
+        "SELECT COUNT(*) FROM faces f JOIN photos p ON p.id = f.photo_id "
+        "WHERE f.person_id IS NULL AND f.quality >= 0.3 AND p.status = 'ok' AND p.live_component = 0").fetchone()[0]
     return {"people": people, "unassigned_faces": unassigned,
             "me_person_id": get_state().ctx.settings.me_person_id}
 
@@ -121,7 +122,7 @@ def unassigned_faces(limit: int = Query(200, le=1000), min_quality: float = 0.35
     rows = conn.execute(
         """SELECT f.id, f.photo_id, f.quality, f.x1, f.y1, f.x2, f.y2, p.taken_ts FROM faces f
            JOIN photos p ON p.id = f.photo_id
-           WHERE f.person_id IS NULL AND f.quality >= ? AND p.status='ok'
+           WHERE f.person_id IS NULL AND f.quality >= ? AND p.status='ok' AND p.live_component=0
            ORDER BY f.quality DESC LIMIT ?""", (min_quality, limit)).fetchall()
     return {"faces": [{"id": r["id"], "photo_id": r["photo_id"], "quality": round(r["quality"], 3),
                        "box": [r["x1"], r["y1"], r["x2"], r["y2"]], "taken_ts": r["taken_ts"]} for r in rows]}
@@ -212,6 +213,28 @@ def reject(body: RejectBody):
 def merge_suggestions(limit: int = 20):
     state = get_state()
     return {"suggestions": people_mod.merge_suggestions(state.ctx, state.conn(), limit=limit)}
+
+
+@router.get("/people/suggestions/names")
+def name_suggestions():
+    """Names Google Photos used for people Memoria found (from Takeout sidecars). Never applied
+    automatically: each comes with its evidence for the user to accept or dismiss."""
+    from ..engine.takeout import name_suggestions as suggest
+
+    return {"suggestions": suggest(get_state().conn())}
+
+
+class NameDismissBody(BaseModel):
+    person_id: int
+    name: str
+
+
+@router.post("/people/suggestions/names/dismiss")
+def dismiss_name(body: NameDismissBody):
+    from ..engine.takeout import dismiss_name_suggestion
+
+    dismiss_name_suggestion(get_state().conn(), body.person_id, body.name)
+    return {"ok": True}
 
 
 class NotSameBody(BaseModel):

@@ -81,7 +81,8 @@ def find_duplicates(ctx, conn: sqlite3.Connection, params: DupParams | None = No
     t0 = time.time()
     rows = conn.execute(
         "SELECT id, sha256, phash, dhash, width, height, size, taken_ts, date_source, source_kind, "
-        "camera_model, quality_score, blur, first_seen_at, folder FROM photos WHERE status = 'ok'"
+        "camera_model, quality_score, blur, first_seen_at, folder, media_type "
+        "FROM photos WHERE status = 'ok' AND live_component = 0"
     ).fetchall()
     if not rows:
         return {"groups": 0, "new_groups": 0}
@@ -90,7 +91,10 @@ def find_duplicates(ctx, conn: sqlite3.Connection, params: DupParams | None = No
     row_of = {int(pid): i for i, pid in enumerate(ids)}
     phash = np.array([to_unsigned64(r["phash"]) if r["phash"] is not None else 0 for r in rows], dtype=np.uint64)
     dhash = np.array([to_unsigned64(r["dhash"]) if r["dhash"] is not None else 0 for r in rows], dtype=np.uint64)
-    has_hash = np.array([r["phash"] is not None for r in rows])
+    # A video is only ever an *exact* duplicate: its hashes and embedding describe one
+    # frame, which would otherwise pair it with the still it was shot alongside.
+    is_video = np.array([r["media_type"] == "video" for r in rows])
+    has_hash = np.array([r["phash"] is not None for r in rows]) & ~is_video
     width = np.array([r["width"] or 0 for r in rows], dtype=np.int64)
     height = np.array([r["height"] or 0 for r in rows], dtype=np.int64)
     fsize = np.array([r["size"] or 0 for r in rows], dtype=np.int64)
@@ -166,7 +170,7 @@ def find_duplicates(ctx, conn: sqlite3.Connection, params: DupParams | None = No
                         if s < p.sem_similar:
                             continue
                         ib = row_of.get(int(emb_ids[idx[a, c]]))
-                        if ib is None or ia == ib:
+                        if ib is None or ia == ib or is_video[ia] or is_video[ib]:
                             continue
                         key = (ia, ib) if ia < ib else (ib, ia)
                         sem_sim[key] = max(sem_sim.get(key, 0.0), s)

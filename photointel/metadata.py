@@ -372,6 +372,48 @@ def extract(exif: Image.Exif | None, xmp, filename: str, folder: str, mtime: flo
     return out
 
 
+def extract_video(vinfo, filename: str, folder: str, mtime: float, ctime: float | None) -> dict:
+    """Same output shape as `extract`, from a video's container metadata.
+
+    Date order, most to least trustworthy: Apple's creationdate (local time with its
+    offset) > a phone filename timestamp > MP4 creation_time (UTC converted with this
+    machine's zone, so off by the zone difference when shot abroad) > filename date >
+    folder > file times.
+    """
+    fn_dt, fn_precision, fn_hint = date_from_filename(filename)
+    dt, source, conf = vinfo.taken, vinfo.taken_source, vinfo.taken_confidence
+    if dt is not None and conf != "high" and fn_dt is not None and fn_precision == "datetime" \
+            and fn_hint in ("phone", "screenshot", "whatsapp"):
+        dt, source, conf = fn_dt, "filename", "high"
+    if dt is None and fn_dt is not None:
+        dt, source, conf = fn_dt, "filename", "high" if fn_precision == "datetime" and fn_hint == "phone" else "medium"
+    if dt is None:
+        fdt, fprec = date_from_folder(folder)
+        if fdt is not None and fprec in ("date", "month"):
+            dt, source, conf = fdt, "folder", "low"
+    if dt is None:
+        cands = [t for t in (mtime, ctime) if t]
+        dt = datetime.fromtimestamp(min(cands) if cands else mtime)
+        source, conf = "mtime", "low"
+    make = vinfo.make
+    model = vinfo.model
+    if make and model and model.lower().startswith(make.lower()):
+        model = model[len(make):].strip() or model
+    low = filename.lower()
+    if any(k in low for k in ("screen record", "screenrecord", "screen_record", "screen-record")):
+        kind = "screenshot"      # a screen recording is excluded from events like a screenshot
+    else:
+        kind = classify_source(filename, folder, make, vinfo.software, "VIDEO", vinfo.width, vinfo.height,
+                               bool(make), fn_hint)
+    return {
+        "camera_make": make, "camera_model": model, "software": vinfo.software, "lens": None,
+        "focal_length": None, "aperture": None, "exposure_time": None, "iso": None,
+        "gps_lat": vinfo.lat, "gps_lon": vinfo.lon, "gps_alt": vinfo.alt,
+        "taken_ts": naive_to_ts(dt), "taken_local": dt.strftime("%Y-%m-%d %H:%M:%S"), "tz_offset_min": None,
+        "date_source": source, "date_confidence": conf, "source_kind": kind,
+    }
+
+
 _SCREEN_ASPECTS = (16 / 9, 9 / 16, 19.5 / 9, 9 / 19.5, 20 / 9, 9 / 20, 18 / 9, 9 / 18, 16 / 10, 10 / 16,
                    19 / 9, 9 / 19, 21 / 9, 9 / 21, 3 / 2, 2 / 3)
 _COMMON_SCREEN_WIDTHS = {720, 750, 828, 1080, 1125, 1170, 1179, 1242, 1284, 1290, 1440, 1366, 1536,

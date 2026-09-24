@@ -76,7 +76,7 @@ def detect_events(ctx, conn: sqlite3.Connection, params: EventParams | None = No
     t0 = time.time()
     rows = conn.execute(
         """SELECT id, taken_ts, date_confidence, gps_lat, gps_lon, place_id, folder, source_kind
-           FROM photos WHERE status='ok' AND taken_ts IS NOT NULL
+           FROM photos WHERE status='ok' AND taken_ts IS NOT NULL AND live_component = 0
              AND COALESCE(source_kind,'unknown') != 'screenshot'
            ORDER BY taken_ts"""
     ).fetchall()

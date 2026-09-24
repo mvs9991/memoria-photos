@@ -10,6 +10,7 @@ from ..engine.people import person_label
 from ..engine.places import place_label
 from ..metadata import ts_to_naive
 from .deps import get_state
+from .routes_library import columnar
 
 router = APIRouter()
 
@@ -74,18 +75,17 @@ def event_detail(event_id: int):
                 conn.execute("UPDATE events SET summary=? WHERE id=?", (fresh, event_id))
                 conn.commit()
     if e["kind"] == "trip":
-        photo_sql = ("SELECT p.id, p.width, p.height, p.taken_ts FROM trip_photos tp JOIN photos p ON p.id=tp.photo_id "
-                     "WHERE tp.trip_id=? AND p.status='ok' ORDER BY p.taken_ts")
+        photo_sql = ("SELECT p.id, p.width, p.height, p.taken_ts, p.face_count, p.favorite, p.media_type, p.duration, p.live_video_id, p.motion_offset FROM trip_photos tp JOIN photos p ON p.id=tp.photo_id "
+                     "WHERE tp.trip_id=? AND p.status='ok' AND p.live_component=0 ORDER BY p.taken_ts")
         children = [_event_dict(conn, c) for c in conn.execute(
             "SELECT * FROM events WHERE parent_id=? ORDER BY start_ts", (event_id,))]
         data["children"] = children
     else:
-        photo_sql = "SELECT id, width, height, taken_ts FROM photos WHERE event_id=? AND status='ok' ORDER BY taken_ts"
+        photo_sql = ("SELECT p.id, p.width, p.height, p.taken_ts, p.face_count, p.favorite, p.media_type, p.duration, p.live_video_id, p.motion_offset FROM photos p "
+                     "WHERE p.event_id=? AND p.status='ok' AND p.live_component=0 ORDER BY p.taken_ts")
         data["children"] = []
     rows = conn.execute(photo_sql, (event_id,)).fetchall()
-    data["photos"] = {"ids": [r["id"] for r in rows],
-                      "ratio": [round(max(0.2, min(6.0, (r["width"] or 4) / max(r["height"] or 3, 1))), 3) for r in rows],
-                      "ts": [int(r["taken_ts"] or 0) for r in rows]}
+    data["photos"] = columnar(rows)
     ids = [r["id"] for r in rows][:900]
     if ids:
         marks = ",".join("?" * len(ids))
@@ -212,7 +212,7 @@ def map_points(limit: int = Query(20000, le=100000), person: int | None = None):
     """GPS points for the map, with place ids for clustering/labels."""
     conn = get_state().conn()
     sql = ("SELECT p.id, p.gps_lat lat, p.gps_lon lon, p.place_id, p.taken_ts FROM photos p "
-           "WHERE p.status='ok' AND p.gps_lat IS NOT NULL")
+           "WHERE p.status='ok' AND p.live_component=0 AND p.gps_lat IS NOT NULL")
     args: list = []
     if person:
         sql += " AND EXISTS (SELECT 1 FROM faces f WHERE f.photo_id = p.id AND f.person_id = ?)"

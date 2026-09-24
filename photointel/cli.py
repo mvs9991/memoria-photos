@@ -76,6 +76,12 @@ def cmd_caption(ctx: AppContext, args) -> None:
                      indent=2))
 
 
+def cmd_ocr(ctx: AppContext, args) -> None:
+    from .pipeline.jobs import run_ocr_job
+
+    print(json.dumps(run_ocr_job(ctx, job_id=args.job_id, everything=args.all, limit=args.limit), indent=2))
+
+
 def cmd_status(ctx: AppContext, args) -> None:
     conn = ctx.connect()
     q = lambda sql: conn.execute(sql).fetchone()[0]  # noqa: E731
@@ -131,13 +137,18 @@ def main(argv: list[str] | None = None) -> None:
     p.add_argument("--detailed", action="store_true")
     p.add_argument("--job-id", type=int)
 
+    p = sub.add_parser("ocr", help="read text in photos (by default only ones likely to contain text)")
+    p.add_argument("--all", action="store_true", help="read every photo, not just likely-text ones")
+    p.add_argument("--limit", type=int)
+    p.add_argument("--job-id", type=int)
+
     sub.add_parser("status", help="library summary")
 
     args = parser.parse_args(argv)
     ctx = AppContext(args.data)
     setup_logging(ctx.paths, level=logging.DEBUG if args.verbose else logging.INFO)
     handlers = {"add-root": cmd_add_root, "index": cmd_index, "serve": cmd_serve, "status": cmd_status,
-                "geo-setup": cmd_geo_setup, "models": cmd_models, "caption": cmd_caption}
+                "geo-setup": cmd_geo_setup, "models": cmd_models, "caption": cmd_caption, "ocr": cmd_ocr}
     t0 = time.time()
     handlers[args.cmd](ctx, args)
     log.debug("%s finished in %.1fs", args.cmd, time.time() - t0)

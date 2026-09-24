@@ -24,7 +24,8 @@ from typing import Callable
 
 import numpy as np
 
-from .. import db, hashing, imaging, metadata, quality
+from .. import db, hashing, imaging, metadata, quality, video
+from ..config import VIDEO_EXTENSIONS
 from ..context import AppContext
 
 log = logging.getLogger(__name__)
@@ -313,17 +314,28 @@ class Indexer:
                 if t.need_meta:
                     # Keep what we know (hash, file times) so the photo is still listed and deduplicated.
                     meta.update(metadata.extract(None, None, t.filename, t.folder, t.mtime, t.ctime, t.ext.upper().lstrip("."), 0, 0))
+                    meta["media_type"] = "video" if t.ext in VIDEO_EXTENSIONS else "image"
                     res.meta = meta
                 res.error, res.error_stage = str(exc), "decode"
                 return res
+            if t.need_meta and dec.format == "JPEG":
+                # 0 = checked, no embedded video (a real offset is never 0: the JPEG starts there).
+                # Files too big to hold in memory stay NULL; the post-stage backfill checks those.
+                meta["motion_offset"] = (video.find_motion_offset(data) or 0) if data is not None else None
             data = None
             t0 = self._timed("decode", t0)
             img = dec.image
             res.orig_size = (dec.orig_width, dec.orig_height)
             if t.need_meta:
                 stage = "metadata"
-                meta.update(metadata.extract(dec.exif, dec.xmp, t.filename, t.folder, t.mtime, t.ctime,
-                                             dec.format, dec.orig_width, dec.orig_height))
+                if dec.format == "VIDEO":
+                    vinfo = dec.info["video"]
+                    meta.update(metadata.extract_video(vinfo, t.filename, t.folder, t.mtime, t.ctime))
+                    meta.update(media_type="video", duration=vinfo.duration, video_codec=vinfo.codec)
+                else:
+                    meta.update(metadata.extract(dec.exif, dec.xmp, t.filename, t.folder, t.mtime, t.ctime,
+                                                 dec.format, dec.orig_width, dec.orig_height))
+                    meta["media_type"] = "image"
                 meta.update(width=dec.orig_width, height=dec.orig_height, orientation=dec.orientation, format=dec.format)
                 t0 = self._timed("metadata", t0)
                 stage = "thumbnail"
@@ -541,6 +553,7 @@ class Indexer:
                 "tz_offset_min", "date_source", "date_confidence", "camera_make", "camera_model", "lens",
                 "focal_length", "aperture", "exposure_time", "iso", "software", "gps_lat", "gps_lon", "gps_alt",
                 "source_kind", "blur", "brightness", "contrast", "clipped",
+                "media_type", "duration", "video_codec", "motion_offset",
             ]
             vals = [m.get(c) for c in cols]
             location_cols = ""

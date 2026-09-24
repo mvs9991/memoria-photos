@@ -87,8 +87,12 @@ def geocode_photos(ctx, conn: sqlite3.Connection, force: bool = False, progress=
             hit = (place_id, landmark_id)
             cache[key] = hit
         updates.append((hit[0], hit[1], r["id"]))
+    # A location read from a Takeout sidecar is Google's estimate, not the photo's own GPS:
+    # keep saying so after it is geocoded.
     conn.executemany(
-        "UPDATE photos SET place_id=?, landmark_id=?, location_source='gps', location_confidence='high' WHERE id=?",
+        "UPDATE photos SET place_id=?, landmark_id=?, "
+        "location_source = CASE WHEN location_source = 'takeout' THEN 'takeout' ELSE 'gps' END, "
+        "location_confidence = CASE WHEN location_source = 'takeout' THEN 'medium' ELSE 'high' END WHERE id=?",
         updates)
     conn.commit()
     out = {"geocoded": len(updates), "distinct_places": len(cache), "seconds": round(time.time() - t0, 2)}

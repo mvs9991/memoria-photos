@@ -114,7 +114,8 @@ def tag_photos(ctx, conn: sqlite3.Connection, force: bool = False, batch: int = 
 
     todo_ids, todo_mat = ids, mat
     if not stale:
-        done = {int(r[0]) for r in conn.execute("SELECT DISTINCT photo_id FROM photo_tags")}
+        # Only automatic rows count: a photo the user tagged by hand still needs scoring.
+        done = {int(r[0]) for r in conn.execute("SELECT DISTINCT photo_id FROM photo_tags WHERE source = 'semantic'")}
         keep = np.array([i for i, pid in enumerate(ids) if int(pid) not in done], dtype=np.int64)
         if len(keep) == 0:
             return {"tagged": 0, "status": "up to date"}
@@ -143,8 +144,11 @@ def tag_photos(ctx, conn: sqlite3.Connection, force: bool = False, batch: int = 
             for c in cand:
                 rows.append((int(chunk_ids[r]), tag_ids[names[c][0]], round(float(s[c]), 3), "semantic"))
         if rows:
+            # Never overwrite a tag the user added or removed.
             conn.executemany(
-                "INSERT OR REPLACE INTO photo_tags(photo_id, tag_id, score, source) VALUES (?,?,?,?)", rows)
+                """INSERT INTO photo_tags(photo_id, tag_id, score, source) VALUES (?,?,?,?)
+                   ON CONFLICT(photo_id, tag_id) DO UPDATE SET score = excluded.score, source = excluded.source
+                   WHERE photo_tags.source NOT IN ('user', 'user_removed')""", rows)
             written += len(rows)
         ap = (chunk @ pos.T).mean(axis=1)
         an = (chunk @ neg.T).mean(axis=1)

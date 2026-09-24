@@ -132,6 +132,7 @@ class JobBody(BaseModel):
     post_only: bool = False
     skip_faces: bool = False
     skip_semantic: bool = False
+    all: bool = False               # ocr: read every photo, not only likely-text ones
 
 
 @router.post("/jobs")

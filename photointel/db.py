@@ -9,8 +9,35 @@ from contextlib import contextmanager
 from pathlib import Path
 from typing import Any, Iterable, Iterator
 
-SCHEMA_VERSION = 1
+SCHEMA_VERSION = 2
 _SCHEMA_FILE = Path(__file__).with_name("schema.sql")
+
+# Columns added to `photos` after v1: (name, SQL type/default).
+V2_PHOTO_COLUMNS = [
+    ("media_type", "TEXT NOT NULL DEFAULT 'image'"),   # image | video
+    ("duration", "REAL"),                              # seconds (videos)
+    ("video_codec", "TEXT"),
+    ("live_video_id", "INTEGER"),       # on a still: the separate file holding its motion (iPhone Live)
+    ("live_component", "INTEGER NOT NULL DEFAULT 0"),  # on a video: 1 = it is the motion half of a Live photo
+    ("motion_offset", "INTEGER"),       # on a still: byte offset of an embedded MP4 (Google/Samsung motion photo)
+    ("description", "TEXT"),            # written by a person (e.g. in Google Photos), never generated
+    ("ocr_text", "TEXT"),
+    ("ocr_model", "INTEGER"),
+]
+V2_INDEXES = [
+    "CREATE INDEX IF NOT EXISTS ix_photos_media ON photos(media_type)",
+    "CREATE INDEX IF NOT EXISTS ix_photos_live ON photos(live_component)",
+]
+
+
+def _ensure_v2_columns(conn: sqlite3.Connection) -> None:
+    """Add v2 columns to `photos` if absent. Idempotent; runs for new and old databases alike."""
+    have = {r[1] for r in conn.execute("PRAGMA table_info(photos)")}
+    for name, decl in V2_PHOTO_COLUMNS:
+        if name not in have:
+            conn.execute(f"ALTER TABLE photos ADD COLUMN {name} {decl}")
+    for sql in V2_INDEXES:
+        conn.execute(sql)
 
 
 def connect(db_path: Path | str, readonly: bool = False) -> sqlite3.Connection:
@@ -37,10 +64,7 @@ def init_db(db_path: Path | str) -> sqlite3.Connection:
     conn = connect(db_path)
     conn.executescript(_SCHEMA_FILE.read_text(encoding="utf-8"))
     current = get_meta(conn, "schema_version")
-    if current is None:
-        set_meta(conn, "schema_version", SCHEMA_VERSION)
-    else:
-        migrate(conn, int(current))
+    migrate(conn, int(current) if current is not None else 1)
     conn.commit()
     return conn
 
@@ -51,8 +75,9 @@ def migrate(conn: sqlite3.Connection, from_version: int) -> None:
         raise RuntimeError(
             f"Database schema v{from_version} is newer than this software (v{SCHEMA_VERSION})."
         )
-    # v1 is the baseline; future migrations go here:
-    # if from_version < 2: ...
+    # v2: video, live/motion photos, descriptions, OCR (new tables are in schema.sql).
+    # Run unconditionally: it is idempotent, and a fresh database needs the columns too.
+    _ensure_v2_columns(conn)
     set_meta(conn, "schema_version", SCHEMA_VERSION)
 
 

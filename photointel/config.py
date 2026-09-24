@@ -20,7 +20,10 @@ IMAGE_EXTENSIONS = {
 RAW_EXTENSIONS = {
     ".cr2", ".cr3", ".nef", ".arw", ".dng", ".orf", ".rw2", ".raf", ".srw", ".pef", ".nrw",
 }
-SUPPORTED_EXTENSIONS = IMAGE_EXTENSIONS | RAW_EXTENSIONS
+VIDEO_EXTENSIONS = {
+    ".mp4", ".mov", ".m4v", ".3gp", ".avi", ".mkv", ".webm", ".mts", ".m2ts", ".wmv", ".mpg", ".mpeg",
+}
+SUPPORTED_EXTENSIONS = IMAGE_EXTENSIONS | RAW_EXTENSIONS | VIDEO_EXTENSIONS
 
 # Folders that are never photo content (OS / NAS / app metadata).
 SKIP_DIR_NAMES = {
@@ -46,6 +49,8 @@ class Settings:
     cluster_min_faces: int = 3            # min faces for an auto-discovered person
     event_min_photos: int = 4
     home_radius_km: float = 60.0
+    ocr_enabled: bool = True              # read text in likely-text photos after indexing (local, CPU)
+    takeout_import: bool = True           # read Google Takeout sidecars/albums when present
     # Privacy: all external services are opt-in.
     allow_online_map_tiles: bool = False
     llm_enabled: bool = False
