@@ -70,14 +70,10 @@ def cmd_models(ctx: AppContext, args) -> None:
 
 
 def cmd_caption(ctx: AppContext, args) -> None:
-    from .vision.captioner import caption_photos
+    from .pipeline.jobs import run_caption_job
 
-    conn = ctx.connect()
-    try:
-        print(json.dumps(caption_photos(ctx, conn, limit=args.limit, detailed=args.detailed,
-                                        progress=lambda d, t: print(f"  {d}/{t}", flush=True)), indent=2))
-    finally:
-        conn.close()
+    print(json.dumps(run_caption_job(ctx, job_id=args.job_id, limit=args.limit, detailed=args.detailed),
+                     indent=2))
 
 
 def cmd_status(ctx: AppContext, args) -> None:
@@ -133,6 +129,7 @@ def main(argv: list[str] | None = None) -> None:
     p = sub.add_parser("caption", help="describe photos with a local vision model")
     p.add_argument("--limit", type=int, default=200)
     p.add_argument("--detailed", action="store_true")
+    p.add_argument("--job-id", type=int)
 
     sub.add_parser("status", help="library summary")
 

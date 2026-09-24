@@ -90,7 +90,7 @@ class Captioner:
 
 
 def caption_photos(ctx, conn, photo_ids: list[int] | None = None, limit: int = 200,
-                   detailed: bool = False, progress=None) -> dict:
+                   detailed: bool = False, progress=None, should_stop=None) -> dict:
     """Caption photos that don't have one yet (covers and highlights first)."""
     from .. import db, imaging
 
@@ -118,8 +118,12 @@ def caption_photos(ctx, conn, photo_ids: list[int] | None = None, limit: int = 2
 
     captioner = Captioner(device=ctx.device, cache_dir=ctx.paths.models / "hf")
     done = failed = 0
+    cancelled = False
     t0 = time.time()
     for i, r in enumerate(rows):
+        if should_stop and should_stop():
+            cancelled = True
+            break
         path = Path(r["root"]) / r["rel_path"]
         try:
             img = imaging.decode(path, max_side=1024).image
@@ -138,5 +142,7 @@ def caption_photos(ctx, conn, photo_ids: list[int] | None = None, limit: int = 2
     conn.commit()
     captioner.unload()
     out = {"captioned": done, "failed": failed, "seconds": round(time.time() - t0, 1)}
+    if cancelled:
+        out["cancelled"] = True
     log.info("Captioning: %s", out)
     return out

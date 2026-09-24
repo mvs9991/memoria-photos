@@ -231,6 +231,36 @@ def run_index_job(ctx, job_id: int | None = None, roots: list[str] | None = None
     return stats
 
 
+def run_caption_job(ctx, job_id: int | None = None, limit: int = 200, detailed: bool = False) -> dict:
+    """Caption photos as a tracked job: heartbeat, progress and cancellation like indexing."""
+    from ..vision.captioner import caption_photos
+
+    reporter = JobReporter(ctx, job_id)
+    reporter.start()
+    conn = ctx.connect()
+
+    def should_stop() -> bool:
+        if not job_id:
+            return False
+        row = conn.execute("SELECT cancel_requested FROM jobs WHERE id=?", (job_id,)).fetchone()
+        return bool(row and row[0])
+
+    try:
+        out = caption_photos(ctx, conn, limit=limit, detailed=detailed, should_stop=should_stop,
+                             progress=lambda d, t: reporter.progress("caption", d, t, f"Described {d:,} of {t:,}"))
+        if out.get("cancelled"):
+            reporter.finish("cancelled", "Cancelled by user")
+        else:
+            reporter.finish("done", f"Described {out.get('captioned', 0):,} photos")
+        return out
+    except Exception as exc:
+        log.exception("Caption job failed")
+        reporter.finish("failed", "Failed", str(exc))
+        raise
+    finally:
+        conn.close()
+
+
 def spawn_index_job(ctx, params: dict) -> int:
     """Start indexing in a separate process so the web server stays responsive."""
     conn = ctx.connect()
@@ -241,16 +271,13 @@ def spawn_index_job(ctx, params: dict) -> int:
     job_id = create_job(conn, params.get("kind", "index"), params)
     conn.close()
     if params.get("kind") == "caption":
+        # The job id lets the child process heartbeat and see cancellation; without it
+        # the reaper marks a job that is still running as interrupted after a minute.
         args = [sys.executable, "-m", "photointel", "--data", str(ctx.paths.data), "caption",
-                "--limit", str(int(params.get("limit", 200)))]
+                "--job-id", str(job_id), "--limit", str(int(params.get("limit", 200)))]
         if params.get("detailed"):
             args.append("--detailed")
         _spawn(args)
-        conn = ctx.connect()
-        conn.execute("UPDATE jobs SET status='running', started_at=?, heartbeat_at=? WHERE id=?",
-                     (time.time(), time.time(), job_id))
-        conn.commit()
-        conn.close()
         return job_id
     args = [sys.executable, "-m", "photointel", "--data", str(ctx.paths.data), "index", "--job-id", str(job_id)]
     if params.get("retry_errors"):

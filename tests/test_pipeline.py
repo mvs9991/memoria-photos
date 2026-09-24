@@ -187,6 +187,61 @@ def test_index_lock_recovers_from_a_dead_owner(ctx):
     assert IndexLock(path).acquire() is True
 
 
+class _FakeCaptioner:
+    def __init__(self, *a, **kw):
+        pass
+
+    def caption(self, image, detailed=False):
+        return "a test caption"
+
+    def unload(self):
+        pass
+
+
+def test_caption_job_is_spawned_with_its_job_id(ctx, monkeypatch):
+    """Without its id the caption process never heartbeats, so the reaper marks a
+    job that is still running as 'interrupted' after a minute and cancel is ignored."""
+    from photointel.pipeline import jobs as jobs_mod
+
+    spawned: list[list[str]] = []
+    monkeypatch.setattr(jobs_mod, "_spawn", lambda args: spawned.append(args))
+    job_id = jobs_mod.spawn_index_job(ctx, {"kind": "caption", "limit": 5})
+    args = spawned[0]
+    assert "caption" in args
+    assert "--job-id" in args and args[args.index("--job-id") + 1] == str(job_id)
+
+
+def test_caption_job_reports_and_finishes(ctx, library, monkeypatch):
+    from photointel.pipeline import jobs as jobs_mod
+    from photointel.vision import captioner as cap_mod
+
+    monkeypatch.setattr(cap_mod, "Captioner", _FakeCaptioner)
+    index(ctx, [str(library)])
+    conn = ctx.connect()
+    job_id = jobs_mod.create_job(conn, "caption", {"limit": 50})
+    out = jobs_mod.run_caption_job(ctx, job_id=job_id, limit=50)
+    assert out["captioned"] > 0
+    job = conn.execute("SELECT status, heartbeat_at, pid FROM jobs WHERE id=?", (job_id,)).fetchone()
+    assert job["status"] == "done" and job["heartbeat_at"] and job["pid"]
+    assert conn.execute("SELECT COUNT(*) FROM photos WHERE caption='a test caption'").fetchone()[0] == out["captioned"]
+    conn.close()
+
+
+def test_caption_job_can_be_cancelled(ctx, library, monkeypatch):
+    from photointel.pipeline import jobs as jobs_mod
+    from photointel.vision import captioner as cap_mod
+
+    monkeypatch.setattr(cap_mod, "Captioner", _FakeCaptioner)
+    index(ctx, [str(library)])
+    conn = ctx.connect()
+    job_id = jobs_mod.create_job(conn, "caption", {"limit": 50})
+    jobs_mod.cancel_job(conn, job_id)
+    out = jobs_mod.run_caption_job(ctx, job_id=job_id, limit=50)
+    assert out["captioned"] == 0
+    assert conn.execute("SELECT status FROM jobs WHERE id=?", (job_id,)).fetchone()[0] == "cancelled"
+    conn.close()
+
+
 def test_heic_photo_indexes_end_to_end(ctx, tmp_path):
     """A HEIC library must index like any other — most phone photos arrive this way."""
     pillow_heif = pytest.importorskip("pillow_heif")
