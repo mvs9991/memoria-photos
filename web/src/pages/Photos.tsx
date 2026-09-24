@@ -1,8 +1,9 @@
 import { useMemo, useState } from "react";
 import { useSearchParams } from "react-router-dom";
 import { useQuery } from "@tanstack/react-query";
-import { CalendarDays, Heart, Images, LayoutGrid, Rows3, SlidersHorizontal, Star } from "lucide-react";
+import { CalendarDays, Heart, Images, LayoutGrid, Rows3, SlidersHorizontal, Star, X } from "lucide-react";
 import { api } from "../lib/api";
+import { monthName } from "../lib/format";
 import { PhotoGrid } from "../components/PhotoGrid";
 import { EmptyState, ErrorState, NoLibrary, SkeletonGrid } from "../components/States";
 import { useViewer } from "../components/ViewerContext";
@@ -19,10 +20,14 @@ export default function Photos() {
   const favorite = params.get("favorite") === "1";
   const source = params.get("source") ?? "";
   const order = (params.get("order") as "date_desc" | "date_asc" | "quality") ?? "date_desc";
+  // Set by the Timeline's month links. A month without a year means nothing to the API.
+  const year = Number(params.get("year")) || undefined;
+  const month = year ? Number(params.get("month")) || undefined : undefined;
+  const period = year ? (month ? `${monthName(month)} ${year}` : String(year)) : "";
 
   const query = useQuery({
-    queryKey: ["photos", { favorite, source, order }],
-    queryFn: () => api.photos({ favorite, source: source || undefined, order,
+    queryKey: ["photos", { favorite, source, order, year, month }],
+    queryFn: () => api.photos({ favorite, source: source || undefined, order, year, month,
       include_screenshots: source ? true : undefined }),
   });
   const { data: stats } = useQuery({ queryKey: ["stats"], queryFn: api.stats });
@@ -52,9 +57,22 @@ export default function Photos() {
           <h1 className="display">Photos</h1>
           <p className="dim">
             {query.data ? `${query.data.total.toLocaleString()} photos` : "Loading your library"}
+            {period ? ` · ${period}` : ""}
             {favorite ? " · favourites" : ""}
             {source ? ` · ${source}` : ""}
           </p>
+          {period && (
+            <button className="chip chip-button chip-accent" style={{ marginTop: 8 }}
+              onClick={() => {
+                const next = new URLSearchParams(params);
+                next.delete("year");
+                next.delete("month");
+                setParams(next, { replace: true });
+              }}
+              title="Show the whole library">
+              {period} <X size={12} />
+            </button>
+          )}
         </div>
         <div className="toolbar">
           <div className="segmented" role="group" aria-label="Sort order">
