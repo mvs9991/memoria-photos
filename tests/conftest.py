@@ -114,7 +114,9 @@ class FakeFaceEngine:
                 embedding=emb, emb_norm=20.0))
         return out
 
-    def analyze_batch(self, items, min_size_px=28, min_score=0.55):
+    def analyze_batch(self, items, min_size_px=28, min_score=0.55, embed_batch=64):
+        # Must accept the real signature: a mismatch raises inside the indexer, which
+        # quietly falls back to per-photo analysis and leaves the batched path untested.
         return [self.analyze(w, ow, oh, min_size_px, min_score, p) for (w, p, ow, oh) in items]
 
 

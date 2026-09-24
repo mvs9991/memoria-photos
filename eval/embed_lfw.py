@@ -15,12 +15,16 @@ from PIL import Image
 
 sys.path.insert(0, str(Path(__file__).resolve().parent.parent))
 
+from photointel.config import Paths, resolve_data_dir  # noqa: E402
+from photointel.vision.device import pick_device  # noqa: E402
 from photointel.vision.faces import FaceEngine  # noqa: E402
 
 DATASETS = Path(os.environ.get("PI_DATASETS", "D:/pi_cache/datasets"))
 LFW_DIR = Path(os.environ.get("LFW_DIR", DATASETS / "lfw_funneled"))
-OUT = Path(os.environ.get("LFW_OUT", "D:/pi_cache/datasets/lfw_embeddings.npz"))
-MODEL_DIR = Path("D:/claude_photos_intelligence/data/models/insightface/buffalo_l")
+# calibrate_faces.py reads the embeddings from the same place.
+OUT = Path(os.environ.get("LFW_OUT", DATASETS / "lfw_embeddings.npz"))
+# The weights `models download` fetched: $PHOTOINTEL_MODELS, else the library's own.
+MODEL_DIR = Paths(resolve_data_dir()).models / "insightface" / "buffalo_l"
 
 
 def main(limit_identities: int | None = None) -> None:
@@ -34,7 +38,7 @@ def main(limit_identities: int | None = None) -> None:
             labels.append(i)
     print(f"{len(files)} images, {len(people)} identities")
 
-    fe = FaceEngine(MODEL_DIR, device="cuda")
+    fe = FaceEngine(MODEL_DIR, device=pick_device(os.environ.get("PHOTOINTEL_DEVICE", "auto")))
     embs, keep_labels, quals, sizes, dets = [], [], [], [], []
     batch, batch_labels = [], []
     t0 = time.time()

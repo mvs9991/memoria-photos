@@ -337,7 +337,7 @@ def test_clustering_does_not_chain_identities_through_bridges():
     chained separate identities into one 14,321-face "person". Ordinary fixtures
     never show it: the failure needs borderline faces linking identity to
     identity, so this builds that chain explicitly. At 0.55 four clusters end up
-    holding more than one true identity; at the shipped 0.64 none do.
+    holding more than one true identity; at the shipped 0.68 none do.
     """
     n_ids = 30
     mat, truth, meta = synthetic_faces(identities=n_ids, per_identity=14, seed=7)
