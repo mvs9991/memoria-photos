@@ -285,6 +285,40 @@ def test_dev_cors_is_opt_in(ctx, monkeypatch):
     assert any(m.cls is CORSMiddleware for m in dev.user_middleware)
 
 
+def test_running_server_sees_newly_indexed_photos(client, library):
+    """Indexing while the server runs must reach the cached embedding matrix.
+
+    The API caches every photo embedding in memory, keyed by the `embeddings`
+    generation. Nothing used to bump that generation, so a photo indexed from the
+    UI stayed invisible to visual search and "similar photos" until a restart.
+    """
+    c, ctx, conn, pid = client
+    first = c.get("/api/photos/index").json()["ids"][0]
+    assert c.get(f"/api/photos/{first}/similar").json()["photos"]      # cache is now loaded
+
+    make_image(library / "Later" / "IMG_20240901_120000.jpg", colour=(90, 60, 200),
+               taken=datetime(2024, 9, 1, 12, 0))
+    Indexer(ctx, workers=2).run(roots=[str(library)])
+    new_id = conn.execute("SELECT id FROM photos WHERE filename='IMG_20240901_120000.jpg'").fetchone()[0]
+
+    assert c.get(f"/api/photos/{new_id}/similar").json()["photos"], \
+        "the server is still serving the embedding matrix from before the index run"
+
+
+def test_running_server_forgets_photos_whose_files_went_missing(client, library):
+    c, ctx, conn, pid = client
+    ids = conn.execute("SELECT id FROM photos WHERE rel_path LIKE 'Trips/Goa/%' ORDER BY id").fetchall()
+    keep, gone = ids[0][0], ids[1][0]
+    assert gone in {p["id"] for p in c.get(f"/api/photos/{keep}/similar").json()["photos"]}
+
+    gone_rel = conn.execute("SELECT rel_path FROM photos WHERE id=?", (gone,)).fetchone()[0]
+    (library / gone_rel).unlink()
+    Indexer(ctx, workers=2).run(roots=[str(library)])
+    assert conn.execute("SELECT status FROM photos WHERE id=?", (gone,)).fetchone()[0] == "missing"
+
+    assert gone not in {p["id"] for p in c.get(f"/api/photos/{keep}/similar").json()["photos"]}
+
+
 def test_duplicate_reclaimable_bytes_covers_whole_library(client):
     """The headline figure must span every group, not just the page returned.
 

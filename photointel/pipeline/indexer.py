@@ -86,6 +86,7 @@ class Indexer:
         self.stats = {"processed": 0, "errors": 0, "faces": 0, "moved": 0, "skipped": 0}
         self._stage_times: dict[str, float] = {}
         self._fatal: BaseException | None = None
+        self._embeddings_changed = False
 
     # ------------------------------------------------------------------ progress / cancel
     def _report(self, stage: str, done: int, total: int, message: str = "") -> None:
@@ -497,6 +498,10 @@ class Indexer:
                     last_cancel_check = now
                     if self._check_cancel(conn):
                         pass  # keep draining until the sentinel so in-flight work is saved
+            if self._embeddings_changed:
+                # A running server caches every embedding in memory; this is what
+                # tells it to reload, so new photos become searchable without a restart.
+                db.bump_generation(conn, "embeddings")
             conn.commit()
             self._report("analyze", done, total, "Analysis complete")
         finally:
@@ -529,6 +534,7 @@ class Indexer:
                     )
                     db.audit(conn, "photo_moved", "photo", old_id, {"to": row["rel_path"]}, actor="indexer")
                     self.stats["moved"] += 1
+                    self._embeddings_changed = True   # the old row is back to status 'ok'
                     return
             cols = [
                 "sha256", "phash", "dhash", "width", "height", "orientation", "format", "taken_ts", "taken_local",
@@ -569,6 +575,7 @@ class Indexer:
                 (pid, self.sem_mid, r.embedding.astype(np.float16).tobytes()),
             )
             conn.execute("UPDATE photos SET semantic_model=? WHERE id=?", (self.sem_mid, pid))
+            self._embeddings_changed = True
 
     def _write_faces(self, conn, pid: int, faces: list, now: float) -> None:
         old = conn.execute(

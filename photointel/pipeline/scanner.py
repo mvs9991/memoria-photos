@@ -9,6 +9,7 @@ from dataclasses import dataclass
 from pathlib import Path
 from typing import Callable, Iterator
 
+from .. import db
 from ..config import SKIP_DIR_NAMES, SUPPORTED_EXTENSIONS
 
 log = logging.getLogger(__name__)
@@ -174,6 +175,9 @@ def scan_root(conn: sqlite3.Connection, root_id: int, root_path: Path, exclude: 
     if missing:
         conn.executemany("UPDATE photos SET status='missing' WHERE id=?", missing)
     stats.missing = len(missing)
+    if stats.missing or stats.restored:
+        # The API's cached embedding matrix only holds photos with status 'ok'.
+        db.bump_generation(conn, "embeddings")
     # Record the scan even on the very first pass, when nothing was "seen" before.
     conn.execute("UPDATE roots SET last_scan_at=? WHERE id=?", (now, root_id))
     conn.commit()
