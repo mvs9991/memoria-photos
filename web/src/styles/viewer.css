@@ -184,3 +184,30 @@
   .viewer-info { width: 100%; }
   .viewer-nav { width: 38px; height: 38px; }
 }
+
+/* ---------------- video, live, tags, description ---------------- */
+.viewer-motion { position: absolute; inset: 0; width: 100%; height: 100%; animation: none; }
+.viewer-live { font-weight: 700; letter-spacing: 0.06em; font-size: 11px; }
+.vi-desc { font-size: 13.5px; line-height: 1.55; display: flex; gap: 6px; align-items: flex-start; }
+.vi-desc .btn { flex: none; margin-top: -4px; }
+.vi-desc-form { display: grid; gap: 8px; }
+.vi-desc-input { height: auto; min-height: 72px; padding: 8px 10px; resize: vertical; font: inherit; font-size: 13px; }
+.vi-desc-actions { display: flex; justify-content: flex-end; gap: 6px; }
+.vi-tag { gap: 4px; padding-right: 4px; }
+.vi-tag a { color: inherit; }
+.vi-tag-x {
+  display: grid;
+  place-items: center;
+  width: 16px;
+  height: 16px;
+  border-radius: 50%;
+  color: var(--text-3);
+  opacity: 0;
+  transition: opacity var(--t-fast), background var(--t-fast);
+}
+.vi-tag:hover .vi-tag-x, .vi-tag-x:focus-visible { opacity: 1; }
+.vi-tag-x:hover { background: var(--surface-3); color: var(--text); }
+.vi-tag-add { margin-top: 10px; }
+.vi-tag-add .field { width: 100%; }
+.vi-ocr { white-space: pre-line; max-height: 180px; overflow-y: auto; font-family: var(--font-mono); font-size: 12px; }
+@media (hover: none) { .vi-tag-x { opacity: 1; } }

@@ -49,6 +49,8 @@ class SettingsBody(BaseModel):
     anthropic_api_key: str | None = None
     me_person_id: int | None = None
     thumb_size: int | None = None
+    ocr_enabled: bool | None = None
+    takeout_import: bool | None = None
 
 
 @router.post("/settings")

@@ -7,22 +7,24 @@
  * 100k-photo library at a steady frame rate.
  */
 import { useCallback, useEffect, useLayoutEffect, useMemo, useRef, useState } from "react";
-import { Check, Heart, Users } from "lucide-react";
-import { thumbUrl } from "../lib/api";
-import { formatDay, formatMonth, toDate } from "../lib/format";
+import { Check, Heart, Play } from "lucide-react";
+import { FLAG, thumbUrl } from "../lib/api";
+import { clock, formatDay, formatMonth, toDate } from "../lib/format";
 
 export interface GridItem {
   id: number;
   ratio: number;
   ts: number;
   flags?: number;
+  /** video length in seconds */
+  dur?: number;
   score?: number | null;
 }
 
 interface Row {
   top: number;
   height: number;
-  items: { id: number; w: number; h: number; index: number; flags: number }[];
+  items: { id: number; w: number; h: number; index: number; flags: number; dur: number }[];
 }
 
 interface Section {
@@ -45,6 +47,8 @@ interface Props {
   selection?: Set<number>;
   onToggleSelect?: (id: number) => void;
   selectable?: boolean;
+  /** a plain click selects instead of opening */
+  selectMode?: boolean;
   scrubber?: boolean;
   emptyState?: React.ReactNode;
   headerExtra?: React.ReactNode;
@@ -61,6 +65,7 @@ export function PhotoGrid({
   selection,
   onToggleSelect,
   selectable = false,
+  selectMode = false,
   scrubber = true,
   emptyState,
 }: Props) {
@@ -157,7 +162,7 @@ export function PhotoGrid({
           const w = i === buf.length - 1 && !isLast
             ? Math.max(1, width - x)
             : Math.round(it.ratio * h);
-          const cell = { id: it.id, w, h, index: index++, flags: it.flags ?? 0 };
+          const cell = { id: it.id, w, h, index: index++, flags: it.flags ?? 0, dur: it.dur ?? 0 };
           x += w + gap;
           return cell;
         });
@@ -223,9 +228,11 @@ export function PhotoGrid({
                       w={cell.w}
                       h={cell.h}
                       flags={cell.flags}
+                      dur={cell.dur}
                       index={cell.index}
                       selected={selection?.has(cell.id) ?? false}
                       selectable={selectable}
+                      selectMode={selectMode}
                       onOpen={onOpen}
                       onToggleSelect={onToggleSelect}
                     />
@@ -243,8 +250,9 @@ export function PhotoGrid({
   );
 }
 
-function Tile({ id, w, h, flags, index, selected, selectable, onOpen, onToggleSelect }: {
-  id: number; w: number; h: number; flags: number; index: number; selected: boolean; selectable: boolean;
+function Tile({ id, w, h, flags, dur, index, selected, selectable, selectMode, onOpen, onToggleSelect }: {
+  id: number; w: number; h: number; flags: number; dur: number; index: number; selected: boolean; selectable: boolean;
+  selectMode: boolean;
   onOpen?: (id: number, index: number) => void; onToggleSelect?: (id: number) => void;
 }) {
   const [loaded, setLoaded] = useState(false);
@@ -254,7 +262,7 @@ function Tile({ id, w, h, flags, index, selected, selectable, onOpen, onToggleSe
       className={`tile${selected ? " is-selected" : ""}`}
       style={{ width: w, height: h }}
       onClick={(e) => {
-        if (selectable && (e.metaKey || e.ctrlKey || e.shiftKey)) onToggleSelect?.(id);
+        if (selectable && (selectMode || e.metaKey || e.ctrlKey || e.shiftKey)) onToggleSelect?.(id);
         else onOpen?.(id, index);
       }}
       role="button"
@@ -262,10 +270,11 @@ function Tile({ id, w, h, flags, index, selected, selectable, onOpen, onToggleSe
       onKeyDown={(e) => {
         if (e.key === "Enter" || e.key === " ") {
           e.preventDefault();
-          onOpen?.(id, index);
+          if (selectable && selectMode) onToggleSelect?.(id);
+          else onOpen?.(id, index);
         }
       }}
-      aria-label={`Photo ${id}`}
+      aria-label={(flags & FLAG.video) ? `Video ${id}` : `Photo ${id}`}
     >
       <img
         src={thumbUrl(id, size)}
@@ -277,7 +286,11 @@ function Tile({ id, w, h, flags, index, selected, selectable, onOpen, onToggleSe
         draggable={false}
       />
       <div className="tile-shade" />
-      {(flags & 1) > 0 && <Heart size={14} className="tile-badge tile-fav" fill="currentColor" />}
+      {(flags & FLAG.favorite) > 0 && <Heart size={14} className="tile-badge tile-fav" fill="currentColor" />}
+      {(flags & FLAG.video) > 0 && (
+        <span className="tile-media tnum"><Play size={10} fill="currentColor" /> {clock(dur)}</span>
+      )}
+      {(flags & FLAG.live) > 0 && <span className="tile-media">LIVE</span>}
       {selectable && (
         <button
           className={`tile-select${selected ? " on" : ""}`}

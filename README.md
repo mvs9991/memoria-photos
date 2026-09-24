@@ -51,6 +51,10 @@ photos ──► scan ──► decode / EXIF / hash / thumbnail ──► faces
 | **Places** | Offline reverse geocoding (GeoNames) — country → region → city → neighbourhood, plus landmarks. Photos without GPS can inherit a location from their event, always labelled with confidence. |
 | **Search** | "Ghat and Priya together in Goa in 2024", "best photos from last summer", "beach", "screenshots". Shows you exactly how it read the query. |
 | **Duplicates** | Exact, resized, recompressed, edited, cropped and screenshot copies — plus burst shots kept separate. Nothing is ever deleted. |
+| **Videos & Live photos** | Videos are indexed like photos (who and what is in them, when, where) and play in the viewer. iPhone Live photos and Google/Samsung motion photos show as one item that plays its moment. |
+| **Albums & tags** | Your own albums and tags. Albums in a Google Takeout export are imported; hiding a duplicate copy never empties an album. Removing an automatic tag is remembered. |
+| **Google Takeout** | Reads the `.json` sidecars for albums, descriptions, favourites, trash and missing locations. People names Google knew are *suggested* for the faces Memoria found — never applied without you. |
+| **Text in photos** | Local OCR on screenshots, documents, receipts and signs: search `"invoice 2024"` or `receipt that says reliance`. |
 | **Quality** | Sharpness, exposure, resolution and an aesthetic proxy, so "best photos of X" means something. |
 | **Timeline / Map / Memories** | Year → month → event browsing, a map of everywhere you've been, and an "on this day" home screen. |
 
@@ -109,6 +113,7 @@ Re-running `index` only processes what is new or changed.
 | `index --post-only` | Just rebuild people/events/duplicates from existing analysis |
 | `index --retry-errors` | Retry photos that previously failed |
 | `caption --limit 500` | Describe photos with a local vision model (~2/s) |
+| `ocr [--all]` | Read text in photos. After each index only likely-text photos (screenshots, documents, receipts…) are read; `--all` reads everything |
 | `status` | Library summary |
 | `serve --port 8765` | Run the web app |
 
@@ -141,15 +146,24 @@ transactions.
 - **Move-aware** — a file that reappears elsewhere with the same content keeps its identity, faces and people.
 - **Read-only** — originals are opened for reading; only the cache directory is written.
 
-Formats: JPEG, PNG, WebP, HEIC/HEIF, AVIF, TIFF, BMP, GIF, and RAW (CR2/CR3/NEF/ARW/DNG/ORF/RW2/RAF…)
-via embedded previews where available.
+Formats: JPEG, PNG, WebP, HEIC/HEIF, AVIF, TIFF, BMP, GIF, RAW (CR2/CR3/NEF/ARW/DNG/ORF/RW2/RAF…)
+via embedded previews where available, and video (MP4, MOV, M4V, 3GP, AVI, MKV, WebM, MTS, WMV, MPEG) via
+PyAV's bundled FFmpeg — nothing extra to install. Videos a browser cannot play (HEVC, MPEG-2, WMV…) are
+converted once to an H.264 preview in the cache; the original is untouched.
 
-**Google Takeout exports** are handled from the image itself, not from the `.json` sidecars
-Takeout writes beside each photo. That is deliberate and measured: across 6,415 sidecars in a real
+**Google Takeout exports.** A photo's *date* comes from the image itself, not from the `.json`
+sidecar Takeout writes beside it. That is deliberate and measured: across 6,415 sidecars in a real
 export, the date already derived from EXIF or the filename agreed with `photoTakenTime` 98.6% of
 the time, and in the disagreements the sidecar was the *worse* answer — WhatsApp images dated
 2018-09-14 by filename carried a Google timestamp of 2020-01-08 15:46, seconds apart across many
-files, which records a bulk upload rather than a capture. Sidecars are therefore ignored.
+files, which records a bulk upload rather than a capture. The sidecar date is used only for a photo
+that has no date of its own, which would otherwise get the day the export was unzipped.
+
+The rest of the sidecar *is* used: album folders become albums, descriptions become searchable text,
+favourites and trash are applied once (never overriding a change you make here), and Google's location
+fills in photos with no GPS, labelled as such. Names of people are only ever offered as suggestions
+for a face group, with the evidence — how many of that person's photos carry the name, and how many
+photos with that name show someone else.
 
 ### Faces and people
 
@@ -326,6 +340,14 @@ against COCO instance annotations), `embed_lfw.py`, `scale_benchmark.py`.
 - **RAW decoding is unverified.** The code path exists (embedded preview, else demosaic) and its
   failure handling is tested, but no camera RAW file was available here, so no CR2/NEF/ARW/DNG
   has actually been decoded. HEIC, by contrast, is covered by tests and by 1,130 real files.
+- **Video is tested on generated files only.** Dates, GPS, rotation, Live pairing, motion-photo
+  extraction and transcoding are covered by tests on videos encoded for the purpose, but no real
+  phone or camera footage has been through it yet. Rotation follows FFmpeg's display matrix and is
+  internally consistent; it has not been checked against a real portrait iPhone clip.
+- **OCR quality is not measured.** RapidOCR reads rendered text in the tests, but it can drop spaces
+  ("RELIANCE FRESH" was read as "RELIANCEFRESH"), so a quoted multi-word search can miss.
+- **Takeout name suggestions are unmeasured.** The share/coverage rule is tested on constructed
+  cases, not on a real export with known answers.
 
 ---
 
@@ -389,12 +411,14 @@ photointel/
   geo.py geodata.py                         offline reverse geocoding
   vision/     faces.py semantic.py captioner.py vocab.py
   pipeline/   scanner.py indexer.py post.py jobs.py
+  video.py                                  video metadata, frames, motion photos, transcoding
   engine/     clustering.py people.py events.py places.py duplicates.py tags.py
+              live.py albums.py takeout.py ocr.py
   search/     parser.py engine.py llm.py
   api/        app.py routes_*.py images.py
 web/          React + TypeScript UI
 eval/         dataset builders, calibration, end-to-end evaluation
-tests/        131 tests, no GPU required
+tests/        164 tests, no GPU required
 ```
 
 The layering is deliberate: vision → features → database → relationship engines → search → UI.
@@ -407,7 +431,7 @@ face recogniser.
 python -m pytest tests/ -q
 ```
 
-They stub the neural nets, so all 131 tests run on CPU in about 70 seconds and still cover
+They stub the neural nets, so all 164 tests run on CPU in about 70 seconds and still cover
 scanning, incremental re-indexing, moves, decoding, metadata, clustering, corrections, events,
 duplicates, search parsing and the HTTP API. The fixtures seed their randomness from stable
 hashes, so a failure reproduces on the next run instead of disappearing.

@@ -414,6 +414,8 @@ def stats():
         "faces": one("SELECT COUNT(*) FROM faces"),
         "events": one("SELECT COUNT(*) FROM events WHERE kind='event'"),
         "trips": one("SELECT COUNT(*) FROM events WHERE kind='trip'"),
+        "albums": one("SELECT COUNT(*) FROM albums WHERE hidden = 0"),
+        "videos": one("SELECT COUNT(*) FROM photos WHERE status='ok' AND media_type='video' AND live_component=0"),
         "places": one("SELECT COUNT(DISTINCT place_id) FROM photos WHERE place_id IS NOT NULL"),
         "duplicate_groups": one("SELECT COUNT(*) FROM dup_groups WHERE kind != 'similar'"),
         "duplicate_photos": one("SELECT COUNT(DISTINCT photo_id) FROM dup_members m JOIN dup_groups g "

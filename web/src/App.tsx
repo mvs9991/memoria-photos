@@ -13,6 +13,8 @@ const People = lazy(() => import("./pages/People"));
 const PersonDetail = lazy(() => import("./pages/PersonDetail"));
 const UnassignedFaces = lazy(() => import("./pages/UnassignedFaces"));
 const Events = lazy(() => import("./pages/Events"));
+const Albums = lazy(() => import("./pages/Albums"));
+const AlbumDetail = lazy(() => import("./pages/AlbumDetail"));
 const EventDetail = lazy(() => import("./pages/EventDetail"));
 const Places = lazy(() => import("./pages/Places"));
 const PlaceDetail = lazy(() => import("./pages/PlaceDetail"));
@@ -50,6 +52,8 @@ export default function App() {
                 <Route path="/people" element={<People />} />
                 <Route path="/people/unassigned" element={<UnassignedFaces />} />
                 <Route path="/people/:id" element={<PersonDetail />} />
+                <Route path="/albums" element={<Albums />} />
+                <Route path="/albums/:id" element={<AlbumDetail />} />
                 <Route path="/events" element={<Events />} />
                 <Route path="/events/:id" element={<EventDetail />} />
                 <Route path="/places" element={<Places />} />

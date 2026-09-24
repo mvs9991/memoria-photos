@@ -5,7 +5,33 @@ export interface PhotoIndex {
   ratio: number[];
   ts: number[];
   flags: number[];
+  /** seconds, 0 for stills */
+  dur?: number[];
   total: number;
+}
+
+/** Bit flags in PhotoIndex.flags. */
+export const FLAG = { favorite: 1, faces: 2, video: 4, live: 8 } as const;
+
+export interface Album {
+  id: number;
+  name: string;
+  description: string | null;
+  source: "user" | "takeout";
+  photo_count: number;
+  cover_photo_id: number | null;
+  start_ts: number | null;
+  end_ts: number | null;
+}
+
+export interface NameSuggestion {
+  person_id: number;
+  name: string;
+  label: string;
+  cover_face_id: number | null;
+  matched_photos: number;
+  labelled_photos: number;
+  photos_with_name: number;
 }
 
 export interface FaceBox {
@@ -52,13 +78,21 @@ export interface PhotoDetail {
     clipped: number | null; aesthetic: number | null };
   caption: string | null;
   faces: FaceBox[];
-  tags: { name: string; category: string; score: number; confidence: number }[];
+  tags: { name: string; category: string; score: number; confidence: number; by_user: boolean }[];
   duplicates: { group_id: number; kind: string; count: number; relation: string; keep_photo_id: number }[];
   trip: { id: number; title: string } | null;
   event: { id: number; title: string; kind: string } | null;
   favorite: boolean;
   hidden: boolean;
   sha256: string | null;
+  media_type: "image" | "video";
+  duration: number | null;
+  video_codec: string | null;
+  /** a Live photo (paired video) or a motion photo (embedded video) */
+  live: boolean;
+  description: string | null;
+  ocr_text: string | null;
+  albums: { id: number; name: string; source: string }[];
 }
 
 export interface Person {
@@ -120,6 +154,8 @@ export interface Stats {
   faces: number;
   events: number;
   trips: number;
+  albums: number;
+  videos: number;
   places: number;
   duplicate_groups: number;
   duplicate_photos: number;
@@ -186,6 +222,25 @@ export const api = {
     request<{ photos: { id: number; score: number }[] }>(`/photos/${id}/similar${qs({ limit })}`),
   setFlags: (id: number, body: { favorite?: boolean; hidden?: boolean }) =>
     request(`/photos/${id}/flags`, { method: "POST", body: JSON.stringify(body) }),
+  setDescription: (id: number, description: string | null) =>
+    request(`/photos/${id}/description`, { method: "POST", body: JSON.stringify({ description }) }),
+  addTag: (photo_ids: number[], name: string) =>
+    request(`/photos/tags`, { method: "POST", body: JSON.stringify({ photo_ids, name }) }),
+  removeTag: (photo_ids: number[], name: string) =>
+    request(`/photos/tags/remove`, { method: "POST", body: JSON.stringify({ photo_ids, name }) }),
+  tags: () => request<{ tags: { name: string; category: string; count: number; user_count: number }[] }>("/tags"),
+
+  albums: () => request<{ albums: Album[] }>("/albums"),
+  album: (id: number) => request<Album & { photos: PhotoIndex }>(`/albums/${id}`),
+  createAlbum: (name: string, photo_ids: number[] = []) =>
+    request<{ id: number }>(`/albums`, { method: "POST", body: JSON.stringify({ name, photo_ids }) }),
+  updateAlbum: (id: number, body: { name?: string; description?: string; cover_photo_id?: number }) =>
+    request(`/albums/${id}`, { method: "POST", body: JSON.stringify(body) }),
+  deleteAlbum: (id: number) => request(`/albums/${id}`, { method: "DELETE" }),
+  addToAlbum: (id: number, photo_ids: number[]) =>
+    request<{ added: number }>(`/albums/${id}/photos`, { method: "POST", body: JSON.stringify({ photo_ids }) }),
+  removeFromAlbum: (id: number, photo_ids: number[]) =>
+    request(`/albums/${id}/photos/remove`, { method: "POST", body: JSON.stringify({ photo_ids }) }),
 
   timeline: (params: Record<string, any> = {}) => request<any>(`/timeline${qs(params)}`),
   folders: () => request<{ folders: { path: string; count: number }[] }>("/folders"),
@@ -213,6 +268,9 @@ export const api = {
   rejectFaces: (face_ids: number[], person_id: number) =>
     request(`/faces/reject`, { method: "POST", body: JSON.stringify({ face_ids, person_id }) }),
   mergeSuggestions: () => request<{ suggestions: any[] }>("/people/suggestions/merges"),
+  nameSuggestions: () => request<{ suggestions: NameSuggestion[] }>("/people/suggestions/names"),
+  dismissName: (person_id: number, name: string) =>
+    request(`/people/suggestions/names/dismiss`, { method: "POST", body: JSON.stringify({ person_id, name }) }),
   notSame: (a: number, b: number) =>
     request(`/people/not-same`, { method: "POST", body: JSON.stringify({ a, b }) }),
 
@@ -258,4 +316,6 @@ export const api = {
 export const thumbUrl = (id: number, size: "sm" | "m" | "l" = "m") => `${BASE}/thumb/${id}?s=${size}`;
 export const originalUrl = (id: number) => `${BASE}/photos/${id}/original`;
 export const downloadUrl = (id: number) => `${BASE}/photos/${id}/download`;
+export const videoUrl = (id: number) => `${BASE}/photos/${id}/video`;
+export const motionUrl = (id: number) => `${BASE}/photos/${id}/motion`;
 export const faceUrl = (id: number, size = 200) => `${BASE}/faces/${id}/crop?size=${size}`;

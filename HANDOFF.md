@@ -49,12 +49,14 @@ photointel/
   geo.py geodata.py                            offline reverse geocoding (GeoNames)
   vision/    faces.py semantic.py captioner.py vocab.py device.py
   pipeline/  scanner.py indexer.py post.py jobs.py
+  video.py                                     video metadata/frames, motion photos, transcoding
   engine/    clustering.py people.py events.py places.py duplicates.py tags.py
+             live.py albums.py takeout.py ocr.py
   search/    parser.py engine.py llm.py
   api/       app.py routes_*.py images.py
 web/         React + TypeScript UI (Vite)
 eval/        dataset builders, calibration, evaluation, library inspector
-tests/       131 tests, no GPU required
+tests/       164 tests, no GPU required
 ```
 
 **The indexing pipeline** is a feeder thread → N CPU worker threads (read, hash, decode, EXIF,
@@ -208,6 +210,40 @@ the disagreements the sidecar was *worse* — WhatsApp images dated 2018-09-14 b
 Google timestamp of 2020-01-08 15:46, seconds apart across many files, i.e. a bulk upload, not a
 capture. Do not "fix" this without re-measuring.
 
+**Takeout sidecars: each field is trusted for exactly one thing** (`engine/takeout.py`). The date only
+replaces a file-modification-time date (in an unzipped Takeout that is the extraction day) — never EXIF
+or a filename, per the measurement above. Location only fills photos with no GPS, and stays labelled
+`takeout`/medium after geocoding (`geocode_photos` preserves it; a test proves the old code would not).
+Favourite/trash apply on *first* import only, so a user's later change is never undone by a re-run.
+People names are never written to a person: a sidecar says who is in a photo, not which face is whom.
+A name is suggested only when it covers most of that person's labelled photos (share >= 0.6) *and* most
+photos carrying the name show that person (coverage >= 0.5); the second test is what stops a friend who
+appears beside Priya in every photo from being called Priya. Names and people are matched one-to-one.
+Unmeasured on a real export — the thresholds are a starting point.
+
+**Newer Takeouts name sidecars `IMG.jpg.supplemental-metadata.json`, truncated to fit 51 characters.**
+GooglePhotosTakeoutHelper (read at its last commit, Jan 2025) has no rule for this. The matcher accepts a
+truncated prefix only if it is >= 30 characters or runs past the media name, and a `(n)` copy only
+matches a sidecar with the same `(n)`; see `test_sidecar_name_matching`.
+
+**Albums show content, not files.** Takeout writes each album as byte-identical copies of year-folder
+files, which the duplicate finder rightly calls exact duplicates. Membership is resolved through
+`sha256`, so hiding either copy leaves the album intact.
+
+**The motion half of a Live photo is not a photo.** `live_component = 1` keeps it out of listings,
+search embeddings, face clustering (otherwise every Live photo is two sightings of each face) and
+duplicates. A video is only ever an *exact* duplicate: its pHash and embedding describe one frame, and
+without that rule a clip is a "near duplicate" of the still shot beside it (tests prove both).
+
+**`META_VERSION` was not bumped for schema v2.** Bumping it re-analyses every photo (65 minutes for 23k
+on the build machine). Motion-photo detection for already-indexed JPEGs is a post-stage backfill reading
+256 KB per file; old Samsung files that declare the video only in a trailer are found on (re)index instead.
+
+**Automatic tags rank, user tags filter.** A user tag is a hard filter. An automatic tag next to text to
+find (`receipt that says invoice`) only ranks — a receipt the tagger missed must still be found, and a
+screenshot is not excluded then. Removing an automatic tag writes a `user_removed` row that the tagger's
+upsert will not overwrite.
+
 **`.nomedia` is deliberately not honoured.** WhatsApp puts it in `Sent`, which held 1,339 of the
 owner's own photos. Dot-directories are already excluded, which handles real app-cache junk.
 
@@ -330,6 +366,12 @@ the future, everything collapsing into one event, fuzzy duplicate thresholds too
   the method in §4 rather than guessing.
 - 2.2% of faces still sit in clusters that mix identities. The merge/split tools exist because no
   threshold gets this perfect.
+- **Video on real footage** is untested (only generated files): portrait iPhone rotation, HEVC transcode
+  speed on long clips (transcoding is synchronous on first play), Android `creation_time` placeholders.
+- **OCR drops spaces** on some text ("RELIANCEFRESH"); a quoted multi-word search can miss. Unmeasured.
+- **Takeout name suggestions** are unmeasured on a real export (see §4).
+- One `net::ERR_CONTENT_LENGTH_MISMATCH` was logged once in a browser run against the demo library and
+  could not be reproduced in five further runs (cold and warm). Unexplained; watch for it with video.
 - Cosmetic: folder tokens of ≤3 letters are uppercased as probable airport/city codes (BLR, HYD),
   so `Goa Trip 2019` titles as `GOA Trip`. Changing it risks breaking real codes.
 
@@ -337,7 +379,7 @@ the future, everything collapsing into one event, fuzzy duplicate thresholds too
 
 ## 10. Working notes
 
-- Run the suite with `.venv/Scripts/python.exe -m pytest -q`. 131 tests, ~95 s, no GPU needed —
+- Run the suite with `.venv/Scripts/python.exe -m pytest -q`. 164 tests, ~95 s, no GPU needed —
   the neural nets are replaced by deterministic fakes.
 - Test fixtures seed randomness from `zlib.crc32` of the **file name**, not `hash()` (salted per
   process) and not the full path (contains pytest's per-run tmp counter). Both made failures

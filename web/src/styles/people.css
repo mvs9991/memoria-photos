@@ -224,7 +224,8 @@
 .face-bubble { display: flex; flex-direction: column; align-items: center; gap: 4px; font-size: 11.5px; }
 .face-bubble img { width: 62px; height: 62px; border-radius: 50%; object-fit: cover; }
 .face-bubble-name { font-weight: 550; }
-.merge-card-actions { display: flex; gap: 8px; justify-content: center; }
+.merge-card-actions { display: flex; flex-wrap: wrap; gap: 8px; justify-content: center; }
+.suggest-merges { margin-bottom: 32px; }
 .merge-card-score { text-align: center; font-size: 11px; }
 
 /* face review */
@@ -307,3 +308,14 @@
   display: block;
   margin: 18px auto 4px;
 }
+
+/* ---------------- selection bar (grids) ---------------- */
+.selection-bar {
+  position: sticky;
+  top: 8px;
+  z-index: 20;
+  flex-wrap: wrap;
+  box-shadow: var(--sh-3);
+}
+.selection-note { font-size: 12px; }
+.name-suggestion { font-family: var(--font-display); font-size: 24px; color: var(--accent-text); }

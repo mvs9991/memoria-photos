@@ -20,6 +20,18 @@ export default function People() {
     queryFn: () => api.people({ include_hidden: showHidden, sort }),
   });
   const suggestions = useQuery({ queryKey: ["merge-suggestions"], queryFn: api.mergeSuggestions });
+  const names = useQuery({ queryKey: ["name-suggestions"], queryFn: api.nameSuggestions });
+  const acceptName = useMutation({
+    mutationFn: ({ id, name }: { id: number; name: string }) => api.renamePerson(id, name),
+    onSuccess: () => {
+      qc.invalidateQueries({ queryKey: ["people"] });
+      qc.invalidateQueries({ queryKey: ["name-suggestions"] });
+    },
+  });
+  const dismissName = useMutation({
+    mutationFn: ({ id, name }: { id: number; name: string }) => api.dismissName(id, name),
+    onSuccess: () => qc.invalidateQueries({ queryKey: ["name-suggestions"] }),
+  });
 
   const merge = useMutation({
     mutationFn: ({ target, sources }: { target: number; sources: number[] }) => api.mergePeople(target, sources),
@@ -126,6 +138,37 @@ export default function People() {
                   </button>
                 </div>
                 <div className="dim merge-card-score tnum">{Math.round(s.score * 100)}% match</div>
+              </div>
+            ))}
+          </div>
+        </section>
+      )}
+
+      {!mergeMode && (names.data?.suggestions?.length ?? 0) > 0 && (
+        <section className="suggest-merges">
+          <SectionHeader title="Names from Google Photos"
+            sub="Your Takeout export named people in these photos. Memoria never applies a name on its own — check the face, then accept or dismiss." />
+          <div className="merge-cards">
+            {names.data!.suggestions.slice(0, 8).map((n) => (
+              <div key={`${n.person_id}-${n.name}`} className="merge-card">
+                <div className="merge-card-faces">
+                  <FaceBubble faceId={n.cover_face_id} label={n.label} count={n.matched_photos} />
+                  <span className="merge-card-eq dim">→</span>
+                  <span className="name-suggestion">{n.name}</span>
+                </div>
+                <div className="dim merge-card-score">
+                  named “{n.name}” in {n.matched_photos} of their {n.labelled_photos} labelled photos
+                </div>
+                <div className="merge-card-actions">
+                  <button className="btn btn-primary btn-sm"
+                    onClick={() => acceptName.mutate({ id: n.person_id, name: n.name })}>
+                    <Check size={13} /> That's {n.name}
+                  </button>
+                  <Link to={`/people/${n.person_id}`} className="btn btn-quiet btn-sm">Review</Link>
+                  <button className="btn btn-quiet btn-sm" onClick={() => dismissName.mutate({ id: n.person_id, name: n.name })}>
+                    <X size={13} /> Not them
+                  </button>
+                </div>
               </div>
             ))}
           </div>

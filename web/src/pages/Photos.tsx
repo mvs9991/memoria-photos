@@ -1,12 +1,13 @@
 import { useMemo, useState } from "react";
 import { useSearchParams } from "react-router-dom";
 import { useQuery } from "@tanstack/react-query";
-import { CalendarDays, Heart, Images, LayoutGrid, Rows3, SlidersHorizontal, Star, X } from "lucide-react";
+import { CalendarDays, CheckSquare, Heart, Images, LayoutGrid, Rows3, SlidersHorizontal, Star, X } from "lucide-react";
 import { api } from "../lib/api";
 import { monthName } from "../lib/format";
 import { PhotoGrid } from "../components/PhotoGrid";
 import { EmptyState, ErrorState, NoLibrary, SkeletonGrid } from "../components/States";
 import { useViewer } from "../components/ViewerContext";
+import { SelectionBar, useSelection } from "../components/SelectionBar";
 import { useTitle, useLocalState } from "../lib/hooks";
 
 export default function Photos() {
@@ -16,9 +17,12 @@ export default function Photos() {
   const [density, setDensity] = useLocalState<"comfortable" | "compact" | "large">("grid-density", "comfortable");
   const [grouping, setGrouping] = useLocalState<"day" | "month" | "none">("grid-grouping", "day");
   const [showFilters, setShowFilters] = useState(false);
+  const [selecting, setSelecting] = useState(false);
+  const selection = useSelection();
 
   const favorite = params.get("favorite") === "1";
   const source = params.get("source") ?? "";
+  const media = params.get("media") ?? "";
   const order = (params.get("order") as "date_desc" | "date_asc" | "quality") ?? "date_desc";
   // Set by the Timeline's month links. A month without a year means nothing to the API.
   const year = Number(params.get("year")) || undefined;
@@ -26,16 +30,16 @@ export default function Photos() {
   const period = year ? (month ? `${monthName(month)} ${year}` : String(year)) : "";
 
   const query = useQuery({
-    queryKey: ["photos", { favorite, source, order, year, month }],
-    queryFn: () => api.photos({ favorite, source: source || undefined, order, year, month,
+    queryKey: ["photos", { favorite, source, order, year, month, media }],
+    queryFn: () => api.photos({ favorite, source: source || undefined, order, year, month, media: media || undefined,
       include_screenshots: source ? true : undefined }),
   });
   const { data: stats } = useQuery({ queryKey: ["stats"], queryFn: api.stats });
 
   const items = useMemo(() => {
     if (!query.data) return [];
-    const { ids, ratio, ts, flags } = query.data;
-    return ids.map((id, i) => ({ id, ratio: ratio[i], ts: ts[i], flags: flags[i] }));
+    const { ids, ratio, ts, flags, dur } = query.data;
+    return ids.map((id, i) => ({ id, ratio: ratio[i], ts: ts[i], flags: flags[i], dur: dur?.[i] ?? 0 }));
   }, [query.data]);
 
   const targetHeight = density === "compact" ? 150 : density === "large" ? 340 : 230;
@@ -58,6 +62,7 @@ export default function Photos() {
           <p className="dim">
             {query.data ? `${query.data.total.toLocaleString()} photos` : "Loading your library"}
             {period ? ` · ${period}` : ""}
+            {media === "video" ? " · videos" : media === "live" ? " · live photos" : ""}
             {favorite ? " · favourites" : ""}
             {source ? ` · ${source}` : ""}
           </p>
@@ -89,6 +94,10 @@ export default function Photos() {
             <button className={density === "large" ? "on" : ""} onClick={() => setDensity("large")}
               title="Large"><Images size={15} /></button>
           </div>
+          <button className={`btn btn-ghost btn-sm${selecting ? " is-on" : ""}`}
+            onClick={() => { setSelecting((v) => !v); selection.clear(); }} title="Select photos">
+            <CheckSquare size={14} /> {selecting ? "Done" : "Select"}
+          </button>
           <button className={`btn btn-ghost btn-icon${showFilters ? " is-on" : ""}`}
             onClick={() => setShowFilters((v) => !v)} aria-label="Filters" title="Filters">
             <SlidersHorizontal size={15} />
@@ -102,6 +111,12 @@ export default function Photos() {
             onClick={() => setParam("favorite", favorite ? null : "1")}>
             <Heart size={12} /> Favourites
           </button>
+          {[["video", "videos"], ["live", "live photos"]].map(([m, label]) => (
+            <button key={m} className={`chip chip-button${media === m ? " chip-accent" : ""}`}
+              onClick={() => setParam("media", media === m ? null : m)}>
+              {label}
+            </button>
+          ))}
           {["camera", "phone", "whatsapp", "screenshot", "download", "edited"].map((s) => (
             <button key={s} className={`chip chip-button${source === s ? " chip-accent" : ""}`}
               onClick={() => setParam("source", source === s ? null : s)}>
@@ -115,6 +130,8 @@ export default function Photos() {
         </div>
       )}
 
+      <SelectionBar selected={selection.selected} onClear={selection.clear} />
+
       {query.isLoading ? (
         <SkeletonGrid />
       ) : (
@@ -123,6 +140,10 @@ export default function Photos() {
           grouping={grouping}
           targetHeight={targetHeight}
           onOpen={(_, index) => viewer.open(items.map((i) => i.id), index)}
+          selectable
+          selectMode={selecting}
+          selection={selection.selected}
+          onToggleSelect={selection.toggle}
           emptyState={<EmptyState title="No photos match these filters"
             hint="Try clearing the filters or indexing more folders." />}
         />

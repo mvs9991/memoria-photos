@@ -122,6 +122,10 @@ export default function Settings() {
             <button className="btn btn-ghost" onClick={() => startJob.mutate({ kind: "index", retry_errors: true })}>
               Retry failed photos
             </button>
+            <button className="btn btn-ghost" onClick={() => startJob.mutate({ kind: "ocr", all: true })}
+              title="Reads text in every photo, not only screenshots and documents (about a second per photo on CPU)">
+              Read text in all photos
+            </button>
             <button className="btn btn-ghost" onClick={() => startJob.mutate({ kind: "caption", limit: 500 })}
               title="Runs a local vision model over your best photos (about 2 photos per second)">
               Describe photos locally
@@ -166,6 +170,18 @@ export default function Settings() {
           hint="Loads street maps from OpenStreetMap. That tells their servers which areas you are looking at."
           checked={!!s.allow_online_map_tiles}
           onChange={(v) => update.mutate({ allow_online_map_tiles: v })}
+        />
+        <Toggle
+          label="Read text in photos"
+          hint="Local OCR after each index run, on screenshots, documents, receipts and signs. Nothing leaves this machine."
+          checked={!!s.ocr_enabled}
+          onChange={(v) => update.mutate({ ocr_enabled: v })}
+        />
+        <Toggle
+          label="Import Google Takeout details"
+          hint="Albums, descriptions, favourites and missing locations from Takeout's .json files. Names are only ever suggested."
+          checked={!!s.takeout_import}
+          onChange={(v) => update.mutate({ takeout_import: v })}
         />
         <Toggle
           label="Use Claude for complex searches"

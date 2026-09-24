@@ -1,7 +1,7 @@
 import { useEffect, useMemo, useState } from "react";
 import { Link, useSearchParams } from "react-router-dom";
 import { useQuery } from "@tanstack/react-query";
-import { CalendarRange, MapPin, Search, Sparkles, Tag, User, Wand2 } from "lucide-react";
+import { BookImage, CalendarRange, MapPin, ScanText, Search, Sparkles, Tag, User, Wand2 } from "lucide-react";
 import { api, faceUrl, thumbUrl } from "../lib/api";
 import { PhotoGrid } from "../components/PhotoGrid";
 import { EmptyState, ErrorState, SectionHeader, Spinner } from "../components/States";
@@ -11,12 +11,13 @@ import { EventCard } from "./Events";
 
 const CHIP_ICON: Record<string, any> = {
   person: User, place: MapPin, event: CalendarRange, tag: Tag, visual: Sparkles, date: CalendarRange,
-  filter: Wand2, sort: Wand2, keyword: Search,
+  filter: Wand2, sort: Wand2, keyword: Search, album: BookImage, text: ScanText,
 };
 
 const IDEAS = [
   "photos of Ghat", "Ghat and Priya together", "beach photos", "wedding", "show my trips",
   "best photos from 2024", "photos taken in Hyderabad", "temple", "birthday cake", "screenshots",
+  "videos from last summer", "live photos", "receipt that says invoice",
 ];
 
 export default function SearchPage() {

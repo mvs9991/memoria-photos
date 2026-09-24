@@ -3,11 +3,12 @@ import { useCallback, useEffect, useRef, useState } from "react";
 import { Link } from "react-router-dom";
 import { useMutation, useQuery, useQueryClient } from "@tanstack/react-query";
 import {
-  Aperture, Calendar, Camera, ChevronLeft, ChevronRight, Copy, Download, EyeOff, Heart, Info,
-  MapPin, Maximize2, Minus, Plus, Tag, Users, X, Sparkles, HardDrive,
+  Aperture, BookImage, Calendar, Camera, Check, ChevronLeft, ChevronRight, Copy, Download, EyeOff, Heart, Info,
+  MapPin, Minus, Pencil, Plus, ScanText, Tag, Users, X, Sparkles, HardDrive,
 } from "lucide-react";
-import { api, downloadUrl, faceUrl, originalUrl, thumbUrl } from "../lib/api";
-import { exposureLabel, formatBytes, formatDateTime, megapixels } from "../lib/format";
+import { api, downloadUrl, faceUrl, motionUrl, originalUrl, thumbUrl, videoUrl } from "../lib/api";
+import { clock, exposureLabel, formatBytes, formatDateTime, megapixels } from "../lib/format";
+import { AlbumPicker } from "./AlbumPicker";
 
 interface Props {
   ids: number[];
@@ -23,6 +24,9 @@ export function PhotoViewer({ ids, index, onIndex, onClose }: Props) {
   const [zoom, setZoom] = useState(1);
   const [offset, setOffset] = useState({ x: 0, y: 0 });
   const [hoverFaces, setHoverFaces] = useState(false);
+  const [picker, setPicker] = useState(false);
+  const [playingLive, setPlayingLive] = useState(false);
+  useEffect(() => setPlayingLive(false), [id]);
   const dragRef = useRef<{ x: number; y: number; ox: number; oy: number } | null>(null);
   const imgWrapRef = useRef<HTMLDivElement>(null);
 
@@ -45,11 +49,14 @@ export function PhotoViewer({ ids, index, onIndex, onClose }: Props) {
 
   useEffect(() => {
     const onKey = (e: KeyboardEvent) => {
+      if (["INPUT", "TEXTAREA"].includes((e.target as HTMLElement)?.tagName)) return;   // typing a tag
+      if (picker) return;
       if (e.key === "Escape") { zoom > 1 ? (setZoom(1), setOffset({ x: 0, y: 0 })) : onClose(); }
       else if (e.key === "ArrowRight") go(1);
       else if (e.key === "ArrowLeft") go(-1);
       else if (e.key === "i") setShowInfo((v) => !v);
       else if (e.key === "f") favorite.mutate();
+      else if (e.key === "l" && photo?.live) setPlayingLive(true);
       else if (e.key === "+" || e.key === "=") setZoom((z) => Math.min(6, z * 1.4));
       else if (e.key === "-") setZoom((z) => Math.max(1, z / 1.4));
       else if (e.key === "0") { setZoom(1); setOffset({ x: 0, y: 0 }); }
@@ -111,6 +118,10 @@ export function PhotoViewer({ ids, index, onIndex, onClose }: Props) {
             aria-label="Download original">
             <Download size={18} />
           </a>
+          <button className="btn btn-quiet btn-icon" onClick={() => setPicker(true)} title="Add to album"
+            aria-label="Add to album">
+            <BookImage size={18} />
+          </button>
           <button className="btn btn-quiet btn-icon" onClick={() => hide.mutate()} title="Hide from library"
             aria-label="Hide photo">
             <EyeOff size={18} />
@@ -144,8 +155,18 @@ export function PhotoViewer({ ids, index, onIndex, onClose }: Props) {
           }}
         >
           <div className="viewer-img-wrap" style={{ transform: `translate(${offset.x}px, ${offset.y}px) scale(${zoom})` }}>
-            <img key={id} src={zoom > 1.2 ? originalUrl(id) : thumbUrl(id, "l")} alt={photo?.filename ?? ""}
-              className="viewer-img" draggable={false} />
+            {photo?.media_type === "video" ? (
+              <video key={id} src={videoUrl(id)} poster={thumbUrl(id, "l")} controls autoPlay playsInline
+                className="viewer-img" onClick={(e) => e.stopPropagation()} />
+            ) : (
+              <img key={id} src={zoom > 1.2 ? originalUrl(id) : thumbUrl(id, "l")} alt={photo?.filename ?? ""}
+                className="viewer-img" draggable={false} />
+            )}
+            {playingLive && (
+              <video key={`live-${id}`} src={motionUrl(id)} autoPlay muted playsInline
+                className="viewer-img viewer-motion" onEnded={() => setPlayingLive(false)}
+                onError={() => setPlayingLive(false)} />
+            )}
             {hoverFaces && photo?.faces?.map((f) => (
               <span key={f.id} className="viewer-face"
                 style={{ left: `${f.box[0] * 100}%`, top: `${f.box[1] * 100}%`,
@@ -174,6 +195,12 @@ export function PhotoViewer({ ids, index, onIndex, onClose }: Props) {
             <span className="tnum dim">{Math.round(zoom * 100)}%</span>
             <button className="btn btn-quiet btn-icon btn-sm" onClick={() => setZoom((z) => Math.min(6, z * 1.4))}
               aria-label="Zoom in"><Plus size={14} /></button>
+            {photo?.live && (
+              <button className={`btn btn-quiet btn-sm viewer-live${playingLive ? " is-on" : ""}`}
+                onClick={() => setPlayingLive(true)} title="Play the moment (L)" aria-label="Play live photo">
+                LIVE
+              </button>
+            )}
             {photo?.faces && photo.faces.length > 0 && (
               <button className={`btn btn-quiet btn-icon btn-sm${hoverFaces ? " is-on" : ""}`}
                 onClick={() => setHoverFaces((v) => !v)} title="Show faces" aria-label="Show faces">
@@ -183,6 +210,7 @@ export function PhotoViewer({ ids, index, onIndex, onClose }: Props) {
           </div>
         </div>
 
+        {picker && <AlbumPicker photoIds={[id]} onClose={() => setPicker(false)} />}
         {showInfo && photo && <InfoPanel photo={photo} similar={similar?.photos ?? []} onOpenSimilar={(sid) => {
           const pos = ids.indexOf(sid);
           if (pos >= 0) onIndex(pos);
@@ -215,7 +243,13 @@ function InfoPanel({ photo, similar, onOpenSimilar }: {
           {photo.folder || "/"} · {formatBytes(photo.size)} · {photo.width}×{photo.height}
           {photo.width && photo.height ? ` · ${megapixels(photo.width, photo.height)}` : ""}
         </div>
+        {photo.media_type === "video" && (
+          <div className="vi-sub dim">Video · {clock(photo.duration)}{photo.video_codec ? ` · ${photo.video_codec}` : ""}</div>
+        )}
+        {photo.live && <div className="vi-sub dim">Live photo — press L or LIVE to play the moment</div>}
       </div>
+
+      <DescriptionEditor photoId={photo.id} value={photo.description} />
 
       <div className="vi-row">
         <Calendar size={15} className="dim" />
@@ -289,17 +323,23 @@ function InfoPanel({ photo, similar, onOpenSimilar }: {
         </div>
       )}
 
-      {photo.tags.length > 0 && (
+      <TagEditor photoId={photo.id} tags={photo.tags} />
+
+      {photo.albums.length > 0 && (
         <div className="vi-block">
-          <div className="vi-head"><Tag size={14} /> What's in this photo</div>
+          <div className="vi-head"><BookImage size={14} /> In albums</div>
           <div className="vi-tags">
-            {photo.tags.slice(0, 10).map((t) => (
-              <Link key={t.name} to={`/search?q=${encodeURIComponent(t.name)}`} className="chip chip-button"
-                title={`confidence ${(t.confidence * 100).toFixed(0)}%`}>
-                {t.name}
-              </Link>
+            {photo.albums.map((a) => (
+              <Link key={a.id} to={`/albums/${a.id}`} className="chip chip-button">{a.name}</Link>
             ))}
           </div>
+        </div>
+      )}
+
+      {photo.ocr_text && (
+        <div className="vi-block">
+          <div className="vi-head"><ScanText size={14} /> Text in this photo</div>
+          <p className="vi-caption vi-ocr">{photo.ocr_text}</p>
         </div>
       )}
 
@@ -378,6 +418,75 @@ function QualityBar({ label, value }: { label: string; value: number }) {
         <span className="qbar-fill" style={{ width: `${Math.max(2, Math.min(100, value * 100))}%` }} />
       </span>
       <span className="qbar-value tnum dim">{Math.round(value * 100)}</span>
+    </div>
+  );
+}
+
+function DescriptionEditor({ photoId, value }: { photoId: number; value: string | null }) {
+  const qc = useQueryClient();
+  const [editing, setEditing] = useState(false);
+  const [text, setText] = useState(value ?? "");
+  useEffect(() => { setText(value ?? ""); setEditing(false); }, [photoId, value]);
+  const save = useMutation({
+    mutationFn: () => api.setDescription(photoId, text.trim() || null),
+    onSuccess: () => { setEditing(false); qc.invalidateQueries({ queryKey: ["photo", photoId] }); },
+  });
+  if (editing) {
+    return (
+      <form className="vi-block vi-desc-form" onSubmit={(e) => { e.preventDefault(); save.mutate(); }}>
+        <textarea className="field vi-desc-input" autoFocus rows={3} value={text} maxLength={2000}
+          placeholder="What was happening?" onChange={(e) => setText(e.target.value)} aria-label="Description" />
+        <div className="vi-desc-actions">
+          <button className="btn btn-quiet btn-sm" type="button" onClick={() => setEditing(false)}>Cancel</button>
+          <button className="btn btn-primary btn-sm" type="submit"><Check size={13} /> Save</button>
+        </div>
+      </form>
+    );
+  }
+  return value ? (
+    <div className="vi-block">
+      <p className="vi-desc">{value}
+        <button className="btn btn-quiet btn-icon btn-sm" onClick={() => setEditing(true)} title="Edit description"
+          aria-label="Edit description"><Pencil size={12} /></button>
+      </p>
+    </div>
+  ) : (
+    <div className="vi-block">
+      <button className="btn btn-quiet btn-sm" onClick={() => setEditing(true)}><Pencil size={13} /> Add a description</button>
+    </div>
+  );
+}
+
+function TagEditor({ photoId, tags }: {
+  photoId: number;
+  tags: { name: string; confidence: number; by_user: boolean }[];
+}) {
+  const qc = useQueryClient();
+  const [name, setName] = useState("");
+  const refresh = () => {
+    qc.invalidateQueries({ queryKey: ["photo", photoId] });
+    qc.invalidateQueries({ queryKey: ["tags"] });
+  };
+  const add = useMutation({ mutationFn: (n: string) => api.addTag([photoId], n), onSuccess: () => { setName(""); refresh(); } });
+  const remove = useMutation({ mutationFn: (n: string) => api.removeTag([photoId], n), onSuccess: refresh });
+  const shown = [...tags.filter((t) => t.by_user), ...tags.filter((t) => !t.by_user).slice(0, 10)];
+  return (
+    <div className="vi-block">
+      <div className="vi-head"><Tag size={14} /> Tags</div>
+      <div className="vi-tags">
+        {shown.map((t) => (
+          <span key={t.name} className={`chip vi-tag${t.by_user ? " chip-accent" : ""}`}
+            title={t.by_user ? "Your tag" : `Found automatically · confidence ${(t.confidence * 100).toFixed(0)}%`}>
+            <Link to={`/search?q=${encodeURIComponent(t.name)}`}>{t.name}</Link>
+            <button className="vi-tag-x" onClick={() => remove.mutate(t.name)} aria-label={`Remove tag ${t.name}`}
+              title="Remove — it will not be added back automatically"><X size={11} /></button>
+          </span>
+        ))}
+      </div>
+      <form className="vi-tag-add" onSubmit={(e) => { e.preventDefault(); if (name.trim()) add.mutate(name.trim()); }}>
+        <input className="field field-sm" placeholder="Add a tag" value={name} maxLength={60}
+          onChange={(e) => setName(e.target.value)} aria-label="Add a tag" />
+      </form>
     </div>
   );
 }

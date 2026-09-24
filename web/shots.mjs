@@ -12,6 +12,7 @@ const PAGES = [
   ["home", "/"],
   ["photos", "/photos"],
   ["people", "/people"],
+  ["albums", "/albums"],
   ["events", "/events"],
   ["places", "/places"],
   ["map", "/map"],

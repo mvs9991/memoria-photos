@@ -10,6 +10,7 @@ const GROUPS: { title: string; keys: [string, string][] }[] = [
       ["g then p", "Photos"],
       ["g then e", "Events"],
       ["g then u", "People"],
+      ["g then a", "Albums"],
       ["g then t", "Timeline"],
     ],
   },
@@ -19,6 +20,7 @@ const GROUPS: { title: string; keys: [string, string][] }[] = [
       ["← →", "Previous / next photo"],
       ["i", "Show or hide details"],
       ["f", "Favourite"],
+      ["l", "Play a Live photo"],
       ["+ / −", "Zoom in / out"],
       ["0", "Reset zoom"],
       ["double-click", "Zoom to 250%"],
@@ -57,7 +59,7 @@ export function Shortcuts() {
         return;
       }
       if (pendingG) {
-        const go: Record<string, string> = { p: "/photos", e: "/events", u: "/people", t: "/timeline",
+        const go: Record<string, string> = { p: "/photos", e: "/events", u: "/people", a: "/albums", t: "/timeline",
           m: "/map", d: "/duplicates", s: "/search", h: "/" };
         const dest = go[e.key];
         pendingG = false;

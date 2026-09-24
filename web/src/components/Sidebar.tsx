@@ -1,7 +1,7 @@
 import { NavLink } from "react-router-dom";
 import { useQuery } from "@tanstack/react-query";
 import {
-  CalendarRange, Copy, Images, MapPin, PanelLeftClose, PanelLeft, Settings as SettingsIcon,
+  BookImage, CalendarRange, Copy, Images, MapPin, PanelLeftClose, PanelLeft, Settings as SettingsIcon,
   Sparkles, Users, Clock, Map as MapIcon,
 } from "lucide-react";
 import { api } from "../lib/api";
@@ -10,6 +10,7 @@ const NAV = [
   { to: "/", label: "Memories", icon: Sparkles, end: true },
   { to: "/photos", label: "Photos", icon: Images },
   { to: "/people", label: "People", icon: Users },
+  { to: "/albums", label: "Albums", icon: BookImage },
   { to: "/events", label: "Events", icon: CalendarRange },
   { to: "/places", label: "Places", icon: MapPin },
   { to: "/map", label: "Map", icon: MapIcon },
@@ -25,6 +26,7 @@ export function Sidebar({ collapsed, onToggle }: { collapsed: boolean; onToggle:
     "/people": stats?.people,
     "/events": stats ? stats.events + stats.trips : undefined,
     "/places": stats?.places,
+    "/albums": stats?.albums,
     "/duplicates": stats?.duplicate_groups,
   };
 
