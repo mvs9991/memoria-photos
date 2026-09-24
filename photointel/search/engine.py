@@ -110,7 +110,8 @@ class SearchEngine:
             where.append("p.favorite = 1")
         if q.only_screenshots:
             where.append("p.source_kind = 'screenshot'")
-        elif q.exclude_screenshots and (q.semantic_text or q.sort == "quality"):
+        elif q.exclude_screenshots and (q.semantic_text or q.sort == "quality") and not q.text_phrases:
+            # (Searching for words in a photo is exactly when a screenshot is wanted.)
             where.append("COALESCE(p.source_kind,'') != 'screenshot'")
         if q.only_selfies:
             where.append("EXISTS (SELECT 1 FROM faces f WHERE f.photo_id = p.id AND (f.x2 - f.x1) > 0.22) "
@@ -179,6 +180,15 @@ class SearchEngine:
             q.tags = []
             q.semantic_text = query.strip()
             res.interpretation = q.interpretation
+        # "receipt that says invoice": the words in the photo are the precise part. An
+        # automatic tag is a probability, so next to them it ranks instead of filtering —
+        # otherwise a receipt the tagger missed would vanish from the answer.
+        if q.tags and q.text_phrases:
+            for chip in q.interpretation:
+                if chip.get("kind") == "tag" and chip.get("detail") != "your tag":
+                    chip["detail"] = "used to rank, not to filter"
+            q.semantic_text = q.semantic_text or ", ".join(str(t) for t in q.tags)
+            q.tags = []
         sql, args = self._candidate_sql(conn, q)
         candidates = [int(r[0]) for r in conn.execute(sql, args)]
         # A bare tag query ("beach photos") should behave like "show me beach-looking

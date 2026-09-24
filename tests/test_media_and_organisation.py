@@ -522,6 +522,11 @@ def test_ocr_reads_likely_text_photos_and_quoted_search_finds_them(ctx, library,
         assert [p["id"] for p in r["photos"]] == [shot], q
         assert any(ch["kind"] == "text" for ch in r["interpretation"])
     assert c.get("/api/search", params={"q": '"bigbasket"'}).json()["photos"] == []
+    # An automatic tag next to the text only ranks: this screenshot was never tagged "receipt".
+    assert not conn.execute("SELECT 1 FROM photo_tags pt JOIN tags t ON t.id = pt.tag_id "
+                            "WHERE pt.photo_id = ? AND t.name = 'receipt' AND pt.score >= 2", (shot,)).fetchone()
+    r = c.get("/api/search", params={"q": "receipt that says invoice"}).json()
+    assert [p["id"] for p in r["photos"]] == [shot]
     # read once: a second run has nothing left to do
     assert ocr_mod.ocr_photos(ctx, conn, engine=FakeOcr({}))["read"] == 0
     conn.close()
