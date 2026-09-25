@@ -28,9 +28,22 @@ def photo_filter_sql(conn, person: list[int] | None = None, place: int | None = 
                      source: str | None = None, favorite: bool = False, camera: str | None = None,
                      folder: str | None = None, has_faces: bool | None = None,
                      include_screenshots: bool = True, media: str | None = None, min_rating: int = 0,
-                     collapse_stacks: bool = False) -> tuple[str, list]:
+                     collapse_stacks: bool = False, collection: str | None = None, root_id: int | None = None,
+                     folder_exact: bool = False) -> tuple[str, list]:
     where = ["p.status = 'ok'", "p.hidden = 0", "p.live_component = 0"]
     args: list = []
+    if collection == "hidden":           # the one view that shows what "hide" took away
+        where[1] = "p.hidden = 1"
+    elif collection:
+        spec = COLLECTIONS.get(collection)
+        if spec is None:
+            raise HTTPException(400, f"unknown collection {collection!r}")
+        where.append(spec["where"])
+        if collection == "screenshots":
+            include_screenshots = True
+    if root_id is not None:
+        where.append("p.root_id = ?")
+        args.append(root_id)
     for pid in person or []:
         where.append("EXISTS (SELECT 1 FROM faces f WHERE f.photo_id = p.id AND f.person_id = ?)")
         args.append(pid)
@@ -66,7 +79,10 @@ def photo_filter_sql(conn, person: list[int] | None = None, place: int | None = 
     if camera:
         where.append("p.camera_model = ?")
         args.append(camera)
-    if folder:
+    if folder is not None and folder_exact:
+        where.append("p.folder = ?")
+        args.append(folder)
+    elif folder:
         where.append("(p.folder = ? OR p.folder LIKE ?)")
         args.extend([folder, folder + "/%"])
     if favorite:
@@ -85,6 +101,39 @@ def photo_filter_sql(conn, person: list[int] | None = None, place: int | None = 
     elif media == "live":
         where.append("(p.live_video_id IS NOT NULL OR COALESCE(p.motion_offset, 0) > 0)")
     return " AND ".join(where), args
+
+
+# Named sets of photos for the Collections page (media types) and clean-up review queues.
+# The clean-up thresholds are heuristics, not measured detectors — the UI says "review".
+_TEXTY = "('document', 'receipt', 'id card', 'whiteboard')"
+COLLECTIONS: dict[str, dict] = {
+    "videos": {"group": "media", "title": "Videos", "where": "p.media_type = 'video'"},
+    "live": {"group": "media", "title": "Live & motion photos",
+             "where": "(p.live_video_id IS NOT NULL OR COALESCE(p.motion_offset, 0) > 0)"},
+    "panoramas": {"group": "media", "title": "Panoramas",
+                  "where": "p.media_type = 'image' AND p.width > 0 AND p.height > 0 "
+                           "AND (p.width * 1.0 / p.height >= 2.0 OR p.height * 1.0 / p.width >= 2.5) "
+                           "AND COALESCE(p.source_kind, '') != 'screenshot'"},
+    "selfies": {"group": "media", "title": "Selfies",
+                "where": "EXISTS (SELECT 1 FROM faces f WHERE f.photo_id = p.id AND (f.x2 - f.x1) > 0.22) "
+                         "AND p.face_count <= 2"},
+    "raw": {"group": "media", "title": "RAW",
+            "where": "p.ext IN ('.cr2','.cr3','.nef','.arw','.dng','.orf','.rw2','.raf','.srw','.pef','.nrw')"},
+    "stacks": {"group": "media", "title": "Bursts & RAW+JPEG stacks", "where": "p.stack_id = p.id"},
+    "screenshots": {"group": "cleanup", "title": "Screenshots", "where": "p.source_kind = 'screenshot'"},
+    "documents": {"group": "cleanup", "title": "Documents & receipts",
+                  "where": "EXISTS (SELECT 1 FROM photo_tags pt JOIN tags t ON t.id = pt.tag_id WHERE "
+                           f"pt.photo_id = p.id AND t.name IN {_TEXTY} AND pt.score >= 2.0)"},
+    "memes": {"group": "cleanup", "title": "Memes & forwards",
+              "where": "EXISTS (SELECT 1 FROM photo_tags pt JOIN tags t ON t.id = pt.tag_id WHERE "
+                       "pt.photo_id = p.id AND t.name = 'meme' AND pt.score >= 2.0)"},
+    "blurry": {"group": "cleanup", "title": "Possibly blurry",
+               "where": "p.media_type = 'image' AND p.blur IS NOT NULL AND p.blur < 35 "
+                        "AND COALESCE(p.source_kind, '') != 'screenshot'"},
+    "large": {"group": "cleanup", "title": "Large files", "where": "p.size >= 20971520"},
+    "no_location": {"group": "cleanup", "title": "No location", "where": "p.gps_lat IS NULL AND p.place_id IS NULL"},
+    "no_date": {"group": "cleanup", "title": "Unsure of the date", "where": "p.date_confidence = 'low'"},
+}
 
 
 # Bit flags in /photos/index: favourite, has faces, video, live/motion photo, stack cover.
@@ -109,7 +158,8 @@ def photos_index(person: list[int] = Query(default=[]), place: int | None = None
                  folder: str | None = None, has_faces: bool | None = None, include_screenshots: bool = True,
                  media: str | None = Query(None, pattern="^(image|video|live)$"),
                  min_rating: int = Query(0, ge=0, le=5), collapse_stacks: bool = False,
-                 order: str = Query("date_desc", pattern="^(date_desc|date_asc|quality)$"),
+                 order: str = Query("date_desc", pattern="^(date_desc|date_asc|quality|added|size)$"),
+                 collection: str | None = None, root_id: int | None = None, folder_exact: bool = False,
                  limit: int = Query(200000, le=500000)):
     """Columnar photo list for the virtualised grid: ids, aspect ratios, timestamps.
 
@@ -118,11 +168,16 @@ def photos_index(person: list[int] = Query(default=[]), place: int | None = None
     """
     state = get_state()
     conn = state.conn()
-    where, args = photo_filter_sql(conn, person, place, event, year, month, tag, source, favorite, camera,
-                                   folder, has_faces, include_screenshots, media, min_rating, collapse_stacks)
+    where, args = photo_filter_sql(
+        conn, person=person, place=place, event=event, year=year, month=month, tag=tag, source=source,
+        favorite=favorite, camera=camera, folder=folder, has_faces=has_faces,
+        include_screenshots=include_screenshots, media=media, min_rating=min_rating,
+        collapse_stacks=collapse_stacks, collection=collection, root_id=root_id, folder_exact=folder_exact)
     order_sql = {"date_desc": "p.taken_ts DESC, p.id DESC", "date_asc": "p.taken_ts ASC, p.id ASC",
                  # The user's stars outrank any computed score.
-                 "quality": "p.rating DESC, COALESCE(p.quality_score,0) DESC"}[order]
+                 "quality": "p.rating DESC, COALESCE(p.quality_score,0) DESC",
+                 "added": "p.first_seen_at DESC, p.id DESC",
+                 "size": "p.size DESC"}[order]
     rows = conn.execute(
         f"SELECT p.id, p.width, p.height, p.taken_ts, p.face_count, p.favorite, p.media_type, p.duration, "
         f"p.live_video_id, p.motion_offset, p.rating, p.stack_id, "
@@ -304,6 +359,24 @@ def remove_tag(body: TagBody):
 @router.get("/tags")
 def list_tags():
     return {"tags": albums_mod.list_tags(get_state().conn())}
+
+
+class HideBody(BaseModel):
+    photo_ids: list[int]
+    hidden: bool = True
+
+
+@router.post("/photos/hide")
+def hide_photos(body: HideBody):
+    """Hide from (or bring back to) the library views. Files are never touched."""
+    if not body.photo_ids:
+        return {"changed": 0}
+    conn = get_state().conn()
+    marks = ",".join("?" * len(body.photo_ids))
+    n = conn.execute(f"UPDATE photos SET hidden = ? WHERE id IN ({marks})", (int(body.hidden), *body.photo_ids)).rowcount
+    db.audit(conn, "photos_hidden" if body.hidden else "photos_unhidden", "photo", None, {"photos": body.photo_ids[:2000]})
+    conn.commit()
+    return {"changed": n}
 
 
 class RateBody(BaseModel):

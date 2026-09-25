@@ -13,6 +13,7 @@ from typing import Callable
 from .. import db
 from ..engine import duplicates as dup_mod
 from ..engine import events as events_mod
+from ..engine import gpx as gpx_mod
 from ..engine import live as live_mod
 from ..engine import ocr as ocr_mod
 from ..engine import takeout as takeout_mod
@@ -25,7 +26,7 @@ log = logging.getLogger(__name__)
 
 # Order matters: live pairing decides which files are clustered and listed at all;
 # Takeout locations must exist before geocoding; OCR picks its candidates by tag.
-STAGES = ["live-photos", "takeout", "geocode", "tags", "ocr", "quality", "people", "events", "locations",
+STAGES = ["live-photos", "takeout", "gpx", "geocode", "tags", "ocr", "quality", "people", "events", "locations",
           "duplicates", "stacks", "search-index"]
 
 
@@ -50,6 +51,8 @@ def run_post_stages(ctx, conn: sqlite3.Connection, stages: list[str] | None = No
             elif stage == "takeout":
                 if ctx.settings.takeout_import:
                     out[stage] = takeout_mod.import_takeout(ctx, conn)
+            elif stage == "gpx":
+                out[stage] = gpx_mod.geotag_from_tracks(ctx, conn)
             elif stage == "ocr":
                 if ctx.settings.ocr_enabled:
                     out[stage] = ocr_mod.ocr_photos(ctx, conn)

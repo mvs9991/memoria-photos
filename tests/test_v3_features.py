@@ -50,7 +50,7 @@ def test_v2_database_gains_v3_columns(tmp_path):
     for table, cols in db.V3_COLUMNS.items():
         have = {r[1] for r in conn.execute(f"PRAGMA table_info({table})")}
         assert {n for n, _ in cols} <= have
-    assert db.get_meta(conn, "schema_version") == "3"
+    assert db.get_meta(conn, "schema_version") == str(db.SCHEMA_VERSION)
     conn.close()
 
 

@@ -42,6 +42,13 @@ def cmd_serve(ctx: AppContext, args) -> None:
     import uvicorn
 
     from .api.app import create_app
+    from .auth import is_loopback
+
+    if not is_loopback(args.host) and not ctx.settings.access_password_hash and not args.insecure:
+        print("Refusing to serve beyond this machine without a password: anyone on the network could "
+              "browse every photo.\nSet one first:  python -m photointel set-password\n"
+              "(or pass --insecure if you really mean it)", file=sys.stderr)
+        sys.exit(2)
 
     app = create_app(ctx)
     print(f"Memoria running at http://{args.host}:{args.port}")
@@ -93,6 +100,36 @@ def cmd_export_xmp(ctx: AppContext, args) -> None:
         conn.close()
 
 
+def cmd_set_password(ctx: AppContext, args) -> None:
+    import getpass
+
+    from .auth import hash_password, mark_password_changed
+
+    pw = getpass.getpass("New password (empty removes it): ")
+    if pw and pw != getpass.getpass("Again: "):
+        print("Passwords differ; nothing changed.", file=sys.stderr)
+        sys.exit(1)
+    ctx.settings.access_password_hash = hash_password(pw) if pw else ""
+    ctx.settings.save(ctx.paths.data)
+    mark_password_changed(ctx.paths.data)
+    print("Password set." if pw else "Password removed; the app is open to anyone who can reach it.")
+
+
+def cmd_import_gpx(ctx: AppContext, args) -> None:
+    from pathlib import Path
+
+    from .engine.gpx import GpxError, import_file
+
+    conn = ctx.connect()
+    for f in args.files:
+        try:
+            print(f"Track #{import_file(ctx, conn, Path(f))}: {f}")
+        except (GpxError, OSError) as exc:
+            print(f"Skipped {f}: {exc}", file=sys.stderr)
+    conn.close()
+    print("Run `index --post-only --stages gpx,geocode,events,search-index` to place photos by these tracks.")
+
+
 def cmd_status(ctx: AppContext, args) -> None:
     conn = ctx.connect()
     q = lambda sql: conn.execute(sql).fetchone()[0]  # noqa: E731
@@ -135,6 +172,12 @@ def main(argv: list[str] | None = None) -> None:
     p = sub.add_parser("serve", help="run the web application")
     p.add_argument("--host", default="127.0.0.1")
     p.add_argument("--port", type=int, default=8765)
+    p.add_argument("--insecure", action="store_true", help="allow a non-local host without a password")
+
+    sub.add_parser("set-password", help="require a password for the web app (empty input removes it)")
+
+    p = sub.add_parser("import-gpx", help="add GPS tracks, used to place photos that have no GPS")
+    p.add_argument("files", nargs="+")
 
     p = sub.add_parser("geo-setup", help="download offline geocoding data")
     p.add_argument("--countries", help="ISO codes to enrich, e.g. IN,US")
@@ -166,7 +209,8 @@ def main(argv: list[str] | None = None) -> None:
     setup_logging(ctx.paths, level=logging.DEBUG if args.verbose else logging.INFO)
     handlers = {"add-root": cmd_add_root, "index": cmd_index, "serve": cmd_serve, "status": cmd_status,
                 "geo-setup": cmd_geo_setup, "models": cmd_models, "caption": cmd_caption, "ocr": cmd_ocr,
-                "export-xmp": cmd_export_xmp}
+                "export-xmp": cmd_export_xmp,
+                "set-password": cmd_set_password, "import-gpx": cmd_import_gpx}
     t0 = time.time()
     handlers[args.cmd](ctx, args)
     log.debug("%s finished in %.1fs", args.cmd, time.time() - t0)

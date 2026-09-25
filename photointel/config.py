@@ -59,6 +59,7 @@ class Settings:
     llm_model: str = "claude-opus-5"
     anthropic_api_key: str = ""
     me_person_id: int | None = None       # "photos of me"
+    access_password_hash: str = ""        # set = every API route needs a login (see auth.py)
 
     @classmethod
     def load(cls, data_dir: Path) -> "Settings":
@@ -92,6 +93,7 @@ class Settings:
     def public_dict(self) -> dict:
         d = asdict(self)
         d["anthropic_api_key"] = bool(self.anthropic_api_key)  # never echo secrets
+        d["access_password_hash"] = bool(self.access_password_hash)
         return d
 
 

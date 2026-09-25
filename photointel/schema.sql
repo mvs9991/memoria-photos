@@ -355,3 +355,29 @@ CREATE TABLE IF NOT EXISTS photo_overrides (
     lon         REAL,
     updated_at  REAL NOT NULL
 );
+
+-- ---- v4 ----------------------------------------------------------------------------------
+-- Read-only links to one album, for people without a login. Revocable; optional expiry.
+CREATE TABLE IF NOT EXISTS share_links (
+    token          TEXT PRIMARY KEY,               -- unguessable, 128-bit
+    album_id       INTEGER NOT NULL REFERENCES albums(id) ON DELETE CASCADE,
+    allow_download INTEGER NOT NULL DEFAULT 0,
+    expires_at     REAL,
+    created_at     REAL NOT NULL,
+    last_used_at   REAL
+);
+
+-- GPS tracks (.gpx) from a phone, watch or logger: drawn on the map and used to place
+-- photos that have no GPS of their own (a camera without GPS carried alongside).
+CREATE TABLE IF NOT EXISTS gpx_tracks (
+    id        INTEGER PRIMARY KEY,
+    path      TEXT NOT NULL UNIQUE,                -- where it was found or imported to
+    name      TEXT,
+    start_ts  REAL NOT NULL,                       -- true UTC epoch seconds (GPX times are UTC)
+    end_ts    REAL NOT NULL,
+    points    BLOB NOT NULL,                       -- float64 triples (utc_ts, lat, lon)
+    n_points  INTEGER NOT NULL,
+    mtime     REAL NOT NULL,
+    added_at  REAL NOT NULL
+);
+CREATE INDEX IF NOT EXISTS ix_gpx_time ON gpx_tracks(start_ts, end_ts);

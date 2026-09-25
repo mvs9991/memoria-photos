@@ -12,8 +12,9 @@ from fastapi.middleware.cors import CORSMiddleware
 from fastapi.responses import FileResponse, JSONResponse
 from fastapi.staticfiles import StaticFiles
 
+from .. import auth
 from ..context import AppContext
-from . import images, routes_albums, routes_duplicates, routes_events, routes_library, routes_people, routes_search, routes_system
+from . import images, routes_albums, routes_auth, routes_duplicates, routes_explore, routes_events, routes_library, routes_people, routes_search, routes_system
 from .deps import ApiState, set_state
 
 log = logging.getLogger(__name__)
@@ -43,9 +44,20 @@ def create_app(ctx: AppContext) -> FastAPI:
                            allow_methods=["*"], allow_headers=["*"])
         log.warning("PHOTOINTEL_DEV=1: allowing cross-origin requests from the Vite dev server")
 
-    for router in (routes_library.router, routes_albums.router, routes_people.router, routes_events.router, routes_search.router,
+    for router in (routes_auth.router, routes_explore.router, routes_library.router, routes_albums.router, routes_people.router, routes_events.router, routes_search.router,
                    routes_duplicates.router, routes_system.router, images.router):
         app.include_router(router, prefix="/api")
+
+    @app.middleware("http")
+    async def require_login(request: Request, call_next):
+        # With a password set, every API route needs a session except logging in and share
+        # links (which check their own token and only ever serve their album).
+        path = request.url.path
+        if (path.startswith("/api/") and ctx.settings.access_password_hash
+                and not path.startswith(("/api/auth/", "/api/share/"))
+                and not auth.valid_session(ctx.paths.data, request.cookies.get(auth.SESSION_COOKIE))):
+            return JSONResponse({"detail": "login required"}, status_code=401)
+        return await call_next(request)
 
     @app.exception_handler(Exception)
     async def unhandled(request: Request, exc: Exception):  # pragma: no cover - safety net

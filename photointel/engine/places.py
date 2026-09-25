@@ -91,8 +91,8 @@ def geocode_photos(ctx, conn: sqlite3.Connection, force: bool = False, progress=
     # keep saying so after it is geocoded.
     conn.executemany(
         "UPDATE photos SET place_id=?, landmark_id=?, "
-        "location_source = CASE WHEN location_source IN ('takeout', 'user') THEN location_source ELSE 'gps' END, "
-        "location_confidence = CASE WHEN location_source = 'takeout' THEN 'medium' ELSE 'high' END WHERE id=?",
+        "location_source = CASE WHEN location_source IN ('takeout', 'user', 'gpx') THEN location_source ELSE 'gps' END, "
+        "location_confidence = CASE WHEN location_source IN ('takeout', 'gpx') THEN 'medium' ELSE 'high' END WHERE id=?",
         updates)
     conn.commit()
     out = {"geocoded": len(updates), "distinct_places": len(cache), "seconds": round(time.time() - t0, 2)}

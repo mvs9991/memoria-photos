@@ -1,0 +1,157 @@
+"""Login (when a password is set) and read-only share links."""
+from __future__ import annotations
+
+from fastapi import APIRouter, HTTPException, Query, Request, Response
+from pydantic import BaseModel
+
+from .. import auth
+from ..engine import albums as albums_mod
+from .deps import get_state
+from .routes_library import columnar
+
+router = APIRouter()
+
+
+@router.get("/auth/status")
+def status(request: Request):
+    ctx = get_state().ctx
+    protected = bool(ctx.settings.access_password_hash)
+    return {"protected": protected,
+            "logged_in": (not protected) or auth.valid_session(ctx.paths.data, request.cookies.get(auth.SESSION_COOKIE))}
+
+
+class LoginBody(BaseModel):
+    password: str
+
+
+@router.post("/auth/login")
+def login(body: LoginBody, response: Response):
+    ctx = get_state().ctx
+    if not ctx.settings.access_password_hash:
+        return {"ok": True}
+    if not auth.verify_password(body.password, ctx.settings.access_password_hash):
+        raise HTTPException(401, "wrong password")
+    response.set_cookie(auth.SESSION_COOKIE, auth.make_session(ctx.paths.data), httponly=True, samesite="lax",
+                        max_age=auth.SESSION_DAYS * 86400)
+    return {"ok": True}
+
+
+@router.post("/auth/logout")
+def logout(response: Response):
+    response.delete_cookie(auth.SESSION_COOKIE)
+    return {"ok": True}
+
+
+class PasswordBody(BaseModel):
+    current: str | None = None
+    new: str
+
+
+@router.post("/auth/password")
+def set_password(body: PasswordBody, request: Request, response: Response):
+    """Set, change or (with an empty new password) remove the app password."""
+    ctx = get_state().ctx
+    stored = ctx.settings.access_password_hash
+    if stored and not auth.verify_password(body.current or "", stored):
+        raise HTTPException(401, "current password is wrong")
+    if body.new and len(body.new) < 6:
+        raise HTTPException(400, "use at least 6 characters")
+    ctx.settings.access_password_hash = auth.hash_password(body.new) if body.new else ""
+    ctx.settings.save(ctx.paths.data)
+    auth.mark_password_changed(ctx.paths.data)
+    if body.new:   # stay logged in on the browser that set it
+        response.set_cookie(auth.SESSION_COOKIE, auth.make_session(ctx.paths.data), httponly=True,
+                            samesite="lax", max_age=auth.SESSION_DAYS * 86400)
+    return {"protected": bool(body.new)}
+
+
+# ---------------------------------------------------------------- share links (owner side)
+
+class ShareBody(BaseModel):
+    allow_download: bool = False
+    expires_days: float | None = None
+
+
+@router.post("/albums/{album_id}/share")
+def share_album(album_id: int, body: ShareBody):
+    conn = get_state().conn()
+    if conn.execute("SELECT 1 FROM albums WHERE id = ? AND hidden = 0", (album_id,)).fetchone() is None:
+        raise HTTPException(404, "album not found")
+    return auth.create_share(conn, album_id, body.allow_download, body.expires_days)
+
+
+@router.get("/albums/{album_id}/shares")
+def list_shares(album_id: int):
+    rows = get_state().conn().execute(
+        "SELECT token, allow_download, expires_at, created_at, last_used_at FROM share_links WHERE album_id = ? "
+        "ORDER BY created_at DESC", (album_id,)).fetchall()
+    return {"shares": [dict(r) for r in rows]}
+
+
+@router.delete("/shares/{token}")
+def revoke(token: str):
+    auth.revoke_share(get_state().conn(), token)
+    return {"ok": True}
+
+
+# ---------------------------------------------------------------- share links (visitor side)
+
+def _share_photo_ids(conn, share) -> list[int]:
+    if share["kind"] == "smart":
+        return get_state().search.search(conn, share["query"], limit=5000).photo_ids
+    return albums_mod.album_photo_ids(conn, share["album_id"])
+
+
+def _require(token: str):
+    conn = get_state().conn()
+    share = auth.resolve_share(conn, token)
+    if share is None:
+        raise HTTPException(404, "this link has expired or was revoked")
+    return conn, share
+
+
+@router.get("/share/{token}")
+def shared_album(token: str):
+    conn, share = _require(token)
+    ids = _share_photo_ids(conn, share)
+    rows = []
+    for i in range(0, len(ids), 900):
+        chunk = ids[i:i + 900]
+        rows += conn.execute(
+            f"SELECT id, width, height, taken_ts, face_count, favorite, media_type, duration, live_video_id, "
+            f"motion_offset FROM photos WHERE id IN ({','.join('?' * len(chunk))})", chunk).fetchall()
+    order = {pid: n for n, pid in enumerate(ids)}
+    rows.sort(key=lambda r: order[r["id"]])
+    payload = columnar(rows)
+    payload["flags"] = [f & ~1 for f in payload["flags"]]   # the owner's favourites are not shared
+    return {"name": share["name"], "allow_download": bool(share["allow_download"]), "photos": payload}
+
+
+@router.get("/share/{token}/thumb/{photo_id}")
+def shared_thumb(token: str, photo_id: int, s: str = Query("m", pattern="^(sm|m|l)$")):
+    from .images import thumb
+
+    conn, share = _require(token)
+    if photo_id not in set(_share_photo_ids(conn, share)):
+        raise HTTPException(404, "not in this album")
+    return thumb(photo_id, s=s)
+
+
+@router.get("/share/{token}/video/{photo_id}")
+def shared_video(token: str, photo_id: int):
+    from .routes_library import photo_video
+
+    conn, share = _require(token)
+    if photo_id not in set(_share_photo_ids(conn, share)):
+        raise HTTPException(404, "not in this album")
+    return photo_video(photo_id)
+
+
+@router.get("/share/{token}/download/{photo_id}")
+def shared_download(token: str, photo_id: int):
+    from .images import download
+
+    conn, share = _require(token)
+    if not share["allow_download"] or photo_id not in set(_share_photo_ids(conn, share)):
+        raise HTTPException(403, "downloads are not allowed for this link")
+    return download(photo_id)

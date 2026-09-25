@@ -9,7 +9,7 @@ from contextlib import contextmanager
 from pathlib import Path
 from typing import Any, Iterable, Iterator
 
-SCHEMA_VERSION = 3
+SCHEMA_VERSION = 4
 _SCHEMA_FILE = Path(__file__).with_name("schema.sql")
 
 # Columns added to `photos` after v1: (name, SQL type/default).
@@ -98,7 +98,7 @@ def migrate(conn: sqlite3.Connection, from_version: int) -> None:
             f"Database schema v{from_version} is newer than this software (v{SCHEMA_VERSION})."
         )
     # v2: video, live/motion photos, descriptions, OCR. v3: ratings, stacks, birthdays,
-    # smart albums. New tables are in schema.sql; columns are added here, unconditionally:
+    # smart albums. v4: share links and GPX tracks (tables only). New tables are in schema.sql; columns are added here, unconditionally:
     # it is idempotent, and a fresh database needs them too.
     _ensure_columns(conn)
     set_meta(conn, "schema_version", SCHEMA_VERSION)
