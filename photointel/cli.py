@@ -33,7 +33,8 @@ def cmd_index(ctx: AppContext, args) -> None:
 
     stats = run_index_job(ctx, job_id=args.job_id, roots=args.roots or None, retry_errors=args.retry_errors,
                           skip_faces=args.no_faces, skip_semantic=args.no_semantic, post_only=args.post_only,
-                          workers=args.workers, full_recluster=args.full_recluster)
+                          workers=args.workers, full_recluster=args.full_recluster,
+                          post_stages=[s.strip() for s in args.stages.split(",")] if args.stages else None)
     print(json.dumps(stats, indent=2, default=str))
 
 
@@ -82,6 +83,16 @@ def cmd_ocr(ctx: AppContext, args) -> None:
     print(json.dumps(run_ocr_job(ctx, job_id=args.job_id, everything=args.all, limit=args.limit), indent=2))
 
 
+def cmd_export_xmp(ctx: AppContext, args) -> None:
+    from .engine.xmp import export_xmp
+
+    conn = ctx.connect()
+    try:
+        print(json.dumps(export_xmp(conn, args.out, include_auto_tags=args.auto_tags, everything=args.all), indent=2))
+    finally:
+        conn.close()
+
+
 def cmd_status(ctx: AppContext, args) -> None:
     conn = ctx.connect()
     q = lambda sql: conn.execute(sql).fetchone()[0]  # noqa: E731
@@ -119,6 +130,7 @@ def main(argv: list[str] | None = None) -> None:
                    help="rebuild every auto-discovered person from scratch (your named people and "
                         "corrections are kept); needed after changing clustering settings")
     p.add_argument("--workers", type=int)
+    p.add_argument("--stages", help="with --post-only: comma-separated post stages to run (default: all)")
 
     p = sub.add_parser("serve", help="run the web application")
     p.add_argument("--host", default="127.0.0.1")
@@ -142,13 +154,19 @@ def main(argv: list[str] | None = None) -> None:
     p.add_argument("--limit", type=int)
     p.add_argument("--job-id", type=int)
 
+    p = sub.add_parser("export-xmp", help="write XMP sidecars (people, tags, ratings) to a separate folder")
+    p.add_argument("out", help="export folder (must be outside your photo folders)")
+    p.add_argument("--auto-tags", action="store_true", help="also export high-confidence automatic tags")
+    p.add_argument("--all", action="store_true", help="a sidecar for every photo, not only annotated ones")
+
     sub.add_parser("status", help="library summary")
 
     args = parser.parse_args(argv)
     ctx = AppContext(args.data)
     setup_logging(ctx.paths, level=logging.DEBUG if args.verbose else logging.INFO)
     handlers = {"add-root": cmd_add_root, "index": cmd_index, "serve": cmd_serve, "status": cmd_status,
-                "geo-setup": cmd_geo_setup, "models": cmd_models, "caption": cmd_caption, "ocr": cmd_ocr}
+                "geo-setup": cmd_geo_setup, "models": cmd_models, "caption": cmd_caption, "ocr": cmd_ocr,
+                "export-xmp": cmd_export_xmp}
     t0 = time.time()
     handlers[args.cmd](ctx, args)
     log.debug("%s finished in %.1fs", args.cmd, time.time() - t0)

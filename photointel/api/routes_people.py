@@ -95,6 +95,8 @@ def person_detail(person_id: int, photo_limit: int = 500):
         "events": events, "places": places, "years": years, "representative_photos": best,
         "co_occurring": co_occurring(conn, person_id),
         "is_me": state.ctx.settings.me_person_id == person_id,
+        "birth_date": r["birth_date"],
+        "age": people_mod.age_on(r["birth_date"], None),
     }
 
 
@@ -145,6 +147,7 @@ class FlagsBody(BaseModel):
     hidden: bool | None = None
     ignored: bool | None = None
     is_me: bool | None = None
+    birth_date: str | None = None     # 'YYYY-MM-DD', '--MM-DD' (year unknown) or '' to clear
 
 
 @router.post("/people/{person_id}/flags")
@@ -152,6 +155,11 @@ def flags(person_id: int, body: FlagsBody):
     state = get_state()
     conn = state.conn()
     people_mod.set_person_flags(conn, person_id, body.hidden, body.ignored)
+    if body.birth_date is not None:
+        try:
+            people_mod.set_birth_date(conn, person_id, body.birth_date)
+        except ValueError as exc:
+            raise HTTPException(400, str(exc))
     if body.is_me is not None:
         state.ctx.settings.me_person_id = person_id if body.is_me else None
         state.ctx.settings.save(state.ctx.paths.data)

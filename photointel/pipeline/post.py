@@ -18,6 +18,7 @@ from ..engine import ocr as ocr_mod
 from ..engine import takeout as takeout_mod
 from ..engine import people as people_mod
 from ..engine import places as places_mod
+from ..engine import stacks as stacks_mod
 from ..engine import tags as tags_mod
 
 log = logging.getLogger(__name__)
@@ -25,7 +26,7 @@ log = logging.getLogger(__name__)
 # Order matters: live pairing decides which files are clustered and listed at all;
 # Takeout locations must exist before geocoding; OCR picks its candidates by tag.
 STAGES = ["live-photos", "takeout", "geocode", "tags", "ocr", "quality", "people", "events", "locations",
-          "duplicates", "search-index"]
+          "duplicates", "stacks", "search-index"]
 
 
 def run_post_stages(ctx, conn: sqlite3.Connection, stages: list[str] | None = None,
@@ -69,6 +70,8 @@ def run_post_stages(ctx, conn: sqlite3.Connection, stages: list[str] | None = No
                 events_mod.detect_events(ctx, conn)
             elif stage == "duplicates":
                 out[stage] = dup_mod.find_duplicates(ctx, conn)
+            elif stage == "stacks":
+                out[stage] = stacks_mod.build_stacks(conn, enabled=ctx.settings.stacks_enabled)
             elif stage == "search-index":
                 out[stage] = rebuild_fts(conn)
         except Exception as exc:

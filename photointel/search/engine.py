@@ -106,6 +106,9 @@ class SearchEngine:
             where.append("p.media_type = 'video'")
         if q.only_live:
             where.append("(p.live_video_id IS NOT NULL OR COALESCE(p.motion_offset, 0) > 0)")
+        if q.min_rating:
+            where.append("p.rating >= ?")
+            args.append(q.min_rating)
         if q.only_favorites:
             where.append("p.favorite = 1")
         if q.only_screenshots:
@@ -168,7 +171,7 @@ class SearchEngine:
         structured = bool(q.persons_all or q.persons_any or q.place_ids or q.event_ids
                           or q.date.start or q.date.end or q.date.month_only or q.only_favorites
                           or q.only_screenshots or q.only_selfies or q.only_videos or q.only_live
-                          or q.album_ids or q.user_tags or q.text_phrases)
+                          or q.album_ids or q.user_tags or q.text_phrases or q.min_rating)
         # "someone playing tennis" matches the broad tag "playing" and leaves "tennis"
         # as a residue. Using the tag as a hard filter there throws away the word that
         # actually identifies the photo, so with nothing structured to anchor the query
@@ -233,7 +236,7 @@ class SearchEngine:
         if q.sort == "quality":
             if marks:
                 rows = conn.execute(
-                    f"SELECT id FROM photos WHERE id IN ({marks}) ORDER BY COALESCE(quality_score,0) DESC, taken_ts DESC"
+                    f"SELECT id FROM photos WHERE id IN ({marks}) ORDER BY rating DESC, COALESCE(quality_score,0) DESC, taken_ts DESC"
                     f" LIMIT ?", (*candidates, limit * 3)).fetchall()
             else:
                 rows = conn.execute(

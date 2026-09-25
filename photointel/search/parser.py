@@ -71,6 +71,7 @@ class ParsedQuery:
     album_label: str | None = None
     user_tags: list[str] = field(default_factory=list)      # tags a person set: always a hard filter
     text_phrases: list[str] = field(default_factory=list)   # words written in the photo (OCR) or its description
+    min_rating: int = 0
     unmatched: list[str] = field(default_factory=list)
     interpretation: list[dict] = field(default_factory=list)
     source: str = "rules"
@@ -79,7 +80,7 @@ class ParsedQuery:
         return not any([self.persons_all, self.persons_any, self.place_ids, self.event_ids, self.tags,
                         self.date.start, self.date.month_only, self.semantic_text, self.only_favorites,
                         self.only_screenshots, self.only_selfies, self.trips_only, self.only_videos,
-                        self.only_live, self.album_ids, self.user_tags, self.text_phrases])
+                        self.only_live, self.album_ids, self.user_tags, self.text_phrases, self.min_rating])
 
     def chip(self, kind: str, label: str, detail: str | None = None) -> None:
         self.interpretation.append({"kind": kind, "label": label, "detail": detail})
@@ -91,7 +92,10 @@ class Vocabulary:
     def __init__(self, conn: sqlite3.Connection):
         self.persons: dict[str, int] = {}
         self.person_labels: dict[int, str] = {}
-        for r in conn.execute("SELECT id, name, display_no FROM persons WHERE merged_into IS NULL"):
+        self.birth_dates: dict[int, str] = {}
+        for r in conn.execute("SELECT id, name, display_no, birth_date FROM persons WHERE merged_into IS NULL"):
+            if r["birth_date"]:
+                self.birth_dates[r["id"]] = r["birth_date"]
             if r["name"]:
                 self.persons[r["name"].lower()] = r["id"]
                 self.person_labels[r["id"]] = r["name"]
@@ -119,7 +123,9 @@ class Vocabulary:
         self.user_tags: set[str] = {r[0].lower() for r in conn.execute(
             "SELECT DISTINCT t.name FROM tags t JOIN photo_tags pt ON pt.tag_id = t.id WHERE pt.source = 'user'")}
         self.albums: dict[str, list[int]] = {}
-        for r in conn.execute("SELECT id, name FROM albums WHERE hidden = 0"):
+        # Only albums that hold photos. A smart album *is* a search; matching its name would
+        # turn "screenshots" into "photos in the album Screenshots", which holds no rows.
+        for r in conn.execute("SELECT id, name FROM albums WHERE hidden = 0 AND kind = 'manual'"):
             self.albums.setdefault(r["name"].lower(), []).append(r["id"])
         self.tag_aliases = {
             "wedding": "wedding", "weddings": "wedding", "marriage": "wedding", "birthday": "birthday",
@@ -259,8 +265,36 @@ def parse(query: str, conn: sqlite3.Connection, me_person_id: int | None = None,
         if not matched:
             i += 1
 
+    # ---- stars: "5 stars", "4 star photos", "rated" ------------------------------------------
+    stars = re.search(r"\b([1-5])\s*(?:-\s*)?stars?\b", " ".join(tokens))
+    if stars:
+        q.min_rating = int(stars.group(1))
+        consumed |= _token_span(tokens, stars.group(0))
+        q.chip("filter", f"{q.min_rating}★ and up")
+    elif "rated" in tokens:
+        q.min_rating = 1
+        consumed.add(tokens.index("rated"))
+        q.chip("filter", "Rated by you")
+
+    # ---- a person's age: "priya at age 5", "ravi aged 3", "priya when she was 6" -------------
+    age_m = re.search(r"\b(?:at age|age|aged|at the age of|when (?:he|she|they) was|when (?:he|she|they) were)"
+                      r"\s+(\d{1,2})\b", " ".join(tokens))
+    person_hits = [v for kind, _, v in matched_terms if kind == "person"]
+    age_range = None
+    if age_m and len(set(person_hits)) == 1 and vocab.birth_dates.get(person_hits[0], "")[:1].isdigit():
+        birth = datetime.strptime(vocab.birth_dates[person_hits[0]][:10], "%Y-%m-%d")
+        n = int(age_m.group(1))
+        try:
+            lo, hi = birth.replace(year=birth.year + n), birth.replace(year=birth.year + n + 1)
+        except ValueError:  # 29 February
+            lo, hi = datetime(birth.year + n, 3, 1), datetime(birth.year + n + 1, 3, 1)
+        age_range = DateRange(naive_to_ts(lo), naive_to_ts(hi) - 1, f"age {n}")
+        consumed |= _token_span(tokens, age_m.group(0))
+
     # ---- dates --------------------------------------------------------------------------
     date, date_tokens = _parse_dates(tokens, consumed, now)
+    if age_range is not None:
+        date, date_tokens = age_range, set()
     if date:
         q.date = date
         consumed |= date_tokens

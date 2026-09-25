@@ -11,18 +11,28 @@ from .routes_library import columnar
 router = APIRouter()
 
 _GRID_COLS = ("id, width, height, taken_ts, face_count, favorite, media_type, duration, "
-              "live_video_id, motion_offset")
+              "live_video_id, motion_offset, rating")
+
+
+SMART_LIMIT = 5000
+
+
+def _resolver(conn):
+    state = get_state()
+    return lambda query: state.search.search(conn, query, limit=SMART_LIMIT).photo_ids
 
 
 @router.get("/albums")
 def list_albums():
-    return {"albums": albums_mod.list_albums(get_state().conn())}
+    conn = get_state().conn()
+    return {"albums": albums_mod.list_albums(conn, resolve=_resolver(conn))}
 
 
 class AlbumCreate(BaseModel):
     name: str
     description: str | None = None
     photo_ids: list[int] = []
+    query: str | None = None       # set = a smart album (saved search)
 
 
 @router.post("/albums")
@@ -30,6 +40,8 @@ def create_album(body: AlbumCreate):
     if not body.name.strip():
         raise HTTPException(400, "an album needs a name")
     conn = get_state().conn()
+    if body.query and body.query.strip():
+        return {"id": albums_mod.create_smart_album(conn, body.name, body.query)}
     aid = albums_mod.create_album(conn, body.name, body.photo_ids, body.description)
     return {"id": aid}
 
@@ -40,7 +52,10 @@ def album_detail(album_id: int):
     a = conn.execute("SELECT * FROM albums WHERE id = ? AND hidden = 0", (album_id,)).fetchone()
     if a is None:
         raise HTTPException(404, "album not found")
-    ids = albums_mod.album_photo_ids(conn, album_id)
+    if a["kind"] == "smart":
+        ids = _resolver(conn)(a["query"])
+    else:
+        ids = albums_mod.album_photo_ids(conn, album_id)
     rows = []
     for i in range(0, len(ids), 900):
         chunk = ids[i:i + 900]
@@ -49,13 +64,15 @@ def album_detail(album_id: int):
     order = {pid: n for n, pid in enumerate(ids)}
     rows.sort(key=lambda r: order[r["id"]])
     return {"id": a["id"], "name": a["name"], "description": a["description"], "source": a["source"],
-            "photo_count": len(ids), "cover_photo_id": a["cover_photo_id"], "photos": columnar(rows)}
+            "kind": a["kind"], "query": a["query"], "photo_count": len(ids),
+            "cover_photo_id": a["cover_photo_id"], "photos": columnar(rows)}
 
 
 class AlbumUpdate(BaseModel):
     name: str | None = None
     description: str | None = None
     cover_photo_id: int | None = None
+    query: str | None = None
 
 
 @router.post("/albums/{album_id}")
@@ -64,6 +81,9 @@ def update_album(album_id: int, body: AlbumUpdate):
     if conn.execute("SELECT 1 FROM albums WHERE id = ? AND hidden = 0", (album_id,)).fetchone() is None:
         raise HTTPException(404, "album not found")
     albums_mod.rename_album(conn, album_id, body.name, body.description)
+    if body.query is not None and body.query.strip():
+        conn.execute("UPDATE albums SET query = ? WHERE id = ? AND kind = 'smart'", (body.query.strip(), album_id))
+        conn.commit()
     if body.cover_photo_id is not None:
         conn.execute("UPDATE albums SET cover_photo_id = ? WHERE id = ?", (body.cover_photo_id, album_id))
         conn.commit()
@@ -83,8 +103,11 @@ class AlbumPhotos(BaseModel):
 @router.post("/albums/{album_id}/photos")
 def add_photos(album_id: int, body: AlbumPhotos):
     conn = get_state().conn()
-    if conn.execute("SELECT 1 FROM albums WHERE id = ? AND hidden = 0", (album_id,)).fetchone() is None:
+    a = conn.execute("SELECT kind FROM albums WHERE id = ? AND hidden = 0", (album_id,)).fetchone()
+    if a is None:
         raise HTTPException(404, "album not found")
+    if a["kind"] == "smart":
+        raise HTTPException(400, "a smart album follows its search; change the search instead")
     return {"added": albums_mod.add_photos(conn, album_id, body.photo_ids)}
 
 

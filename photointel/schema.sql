@@ -299,7 +299,7 @@ CREATE VIRTUAL TABLE IF NOT EXISTS photo_fts USING fts5(
 );
 
 -- ---- v2 ----------------------------------------------------------------------------------
--- Columns added to `photos` in v2 live in db.py (_ensure_v2_columns): an ALTER must not be
+-- Columns added to existing tables live in db.py (_ensure_columns): an ALTER must not be
 -- attempted by this script on a database that already has them.
 
 -- Words that appear *in* a photo (OCR) and descriptions people wrote. Kept apart from
@@ -342,4 +342,16 @@ CREATE TABLE IF NOT EXISTS takeout_sidecars (
     archived    INTEGER NOT NULL DEFAULT 0,
     trashed     INTEGER NOT NULL DEFAULT 0,
     imported_at REAL NOT NULL
+);
+
+-- ---- v3 ----------------------------------------------------------------------------------
+-- Corrections the user made to a photo's date or place. Kept apart from the values read
+-- from the file so a re-index (which rewrites those) can re-apply them. Never written to
+-- the original.
+CREATE TABLE IF NOT EXISTS photo_overrides (
+    photo_id    INTEGER PRIMARY KEY REFERENCES photos(id) ON DELETE CASCADE,
+    taken_local TEXT,
+    lat         REAL,
+    lon         REAL,
+    updated_at  REAL NOT NULL
 );

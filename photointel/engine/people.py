@@ -14,6 +14,7 @@ import logging
 import sqlite3
 import time
 from collections import Counter, defaultdict
+from datetime import datetime
 
 import numpy as np
 
@@ -272,6 +273,31 @@ def rename_person(conn: sqlite3.Connection, person_id: int, name: str | None) ->
     db.audit(conn, "person_renamed", "person", person_id, {"from": old[0] if old else None, "to": name})
     db.bump_generation(conn, "people")
     conn.commit()
+
+
+def set_birth_date(conn: sqlite3.Connection, person_id: int, value: str) -> None:
+    value = (value or "").strip()
+    if value:
+        try:
+            datetime.strptime(value if not value.startswith("--") else "2000" + value[1:], "%Y-%m-%d")
+        except ValueError:
+            raise ValueError("birth date must be YYYY-MM-DD, or --MM-DD when the year is unknown")
+    conn.execute("UPDATE persons SET birth_date = ?, updated_at = ? WHERE id = ?", (value or None, time.time(), person_id))
+    db.audit(conn, "person_birth_date", "person", person_id, {"birth_date": value or None})
+    db.bump_generation(conn, "people")
+    conn.commit()
+
+
+def age_on(birth_date: str | None, ts: float | None) -> int | None:
+    """Whole years old on the (wall-clock) timestamp, or today when ts is None."""
+    if not birth_date or birth_date.startswith("--"):
+        return None
+    from ..metadata import ts_to_naive
+
+    b = datetime.strptime(birth_date[:10], "%Y-%m-%d")
+    on = ts_to_naive(ts) if ts is not None else datetime.now()
+    years = on.year - b.year - ((on.month, on.day) < (b.month, b.day))
+    return years if years >= 0 else None
 
 
 def set_person_flags(conn: sqlite3.Connection, person_id: int, hidden: bool | None = None,

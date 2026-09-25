@@ -123,14 +123,28 @@ def album_photo_ids(conn: sqlite3.Connection, album_id: int) -> list[int]:
     return [pid for _, pid in sorted(out)]
 
 
-def list_albums(conn: sqlite3.Connection) -> list[dict]:
+def create_smart_album(conn: sqlite3.Connection, name: str, query: str) -> int:
+    """An album that is a saved search: its contents follow the library as it changes."""
+    aid = create_album(conn, name)
+    conn.execute("UPDATE albums SET kind = 'smart', query = ? WHERE id = ?", (query.strip(), aid))
+    conn.commit()
+    return aid
+
+
+def list_albums(conn: sqlite3.Connection, resolve=None) -> list[dict]:
+    """`resolve(query) -> photo ids` runs a smart album's saved search (the API passes the
+    search engine; without it smart albums are listed empty rather than guessed)."""
     out = []
     for a in conn.execute("SELECT * FROM albums WHERE hidden = 0 ORDER BY updated_at DESC").fetchall():
-        ids = album_photo_ids(conn, a["id"])
+        if a["kind"] == "smart":
+            ids = list(resolve(a["query"])) if resolve else []
+        else:
+            ids = album_photo_ids(conn, a["id"])
         cover = a["cover_photo_id"] if a["cover_photo_id"] in ids else None
         if cover is None and ids:
             cover = _best_photo(conn, ids)
         out.append({"id": a["id"], "name": a["name"], "description": a["description"], "source": a["source"],
+                    "kind": a["kind"], "query": a["query"],
                     "photo_count": len(ids), "cover_photo_id": cover,
                     "start_ts": _ts(conn, ids, "MIN"), "end_ts": _ts(conn, ids, "MAX"),
                     "updated_at": a["updated_at"]})

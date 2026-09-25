@@ -11,6 +11,8 @@ from pydantic import BaseModel
 
 from .. import db
 from ..engine import albums as albums_mod
+from ..engine import corrections as corrections_mod
+from ..engine import stacks as stacks_mod
 from ..engine.events import date_range_label, event_title
 from ..engine.people import person_label
 from ..engine.places import place_label
@@ -25,7 +27,8 @@ def photo_filter_sql(conn, person: list[int] | None = None, place: int | None = 
                      year: int | None = None, month: int | None = None, tag: str | None = None,
                      source: str | None = None, favorite: bool = False, camera: str | None = None,
                      folder: str | None = None, has_faces: bool | None = None,
-                     include_screenshots: bool = True, media: str | None = None) -> tuple[str, list]:
+                     include_screenshots: bool = True, media: str | None = None, min_rating: int = 0,
+                     collapse_stacks: bool = False) -> tuple[str, list]:
     where = ["p.status = 'ok'", "p.hidden = 0", "p.live_component = 0"]
     args: list = []
     for pid in person or []:
@@ -70,6 +73,11 @@ def photo_filter_sql(conn, person: list[int] | None = None, place: int | None = 
         where.append("p.favorite = 1")
     if has_faces is True:
         where.append("p.face_count > 0")
+    if min_rating:
+        where.append("p.rating >= ?")
+        args.append(int(min_rating))
+    if collapse_stacks:
+        where.append("p.stack_hidden = 0")
     if media == "video":
         where.append("p.media_type = 'video'")
     elif media == "image":
@@ -79,14 +87,19 @@ def photo_filter_sql(conn, person: list[int] | None = None, place: int | None = 
     return " AND ".join(where), args
 
 
-# Bit flags in /photos/index: favourite, has faces, video, live/motion photo.
-FLAG_FAVORITE, FLAG_FACES, FLAG_VIDEO, FLAG_LIVE = 1, 2, 4, 8
+# Bit flags in /photos/index: favourite, has faces, video, live/motion photo, stack cover.
+FLAG_FAVORITE, FLAG_FACES, FLAG_VIDEO, FLAG_LIVE, FLAG_STACK = 1, 2, 4, 8, 16
 
 
 def photo_flags(r) -> int:
     return ((FLAG_FAVORITE if r["favorite"] else 0) | (FLAG_FACES if (r["face_count"] or 0) > 0 else 0)
             | (FLAG_VIDEO if r["media_type"] == "video" else 0)
-            | (FLAG_LIVE if r["live_video_id"] or (r["motion_offset"] or 0) > 0 else 0))
+            | (FLAG_LIVE if r["live_video_id"] or (r["motion_offset"] or 0) > 0 else 0)
+            | (FLAG_STACK if _get(r, "stack_size", 0) > 1 else 0))
+
+
+def _get(r, key: str, default=None):
+    return r[key] if key in r.keys() else default
 
 
 @router.get("/photos/index")
@@ -95,6 +108,7 @@ def photos_index(person: list[int] = Query(default=[]), place: int | None = None
                  source: str | None = None, favorite: bool = False, camera: str | None = None,
                  folder: str | None = None, has_faces: bool | None = None, include_screenshots: bool = True,
                  media: str | None = Query(None, pattern="^(image|video|live)$"),
+                 min_rating: int = Query(0, ge=0, le=5), collapse_stacks: bool = False,
                  order: str = Query("date_desc", pattern="^(date_desc|date_asc|quality)$"),
                  limit: int = Query(200000, le=500000)):
     """Columnar photo list for the virtualised grid: ids, aspect ratios, timestamps.
@@ -105,19 +119,21 @@ def photos_index(person: list[int] = Query(default=[]), place: int | None = None
     state = get_state()
     conn = state.conn()
     where, args = photo_filter_sql(conn, person, place, event, year, month, tag, source, favorite, camera,
-                                   folder, has_faces, include_screenshots, media)
+                                   folder, has_faces, include_screenshots, media, min_rating, collapse_stacks)
     order_sql = {"date_desc": "p.taken_ts DESC, p.id DESC", "date_asc": "p.taken_ts ASC, p.id ASC",
-                 "quality": "COALESCE(p.quality_score,0) DESC"}[order]
+                 # The user's stars outrank any computed score.
+                 "quality": "p.rating DESC, COALESCE(p.quality_score,0) DESC"}[order]
     rows = conn.execute(
         f"SELECT p.id, p.width, p.height, p.taken_ts, p.face_count, p.favorite, p.media_type, p.duration, "
-        f"p.live_video_id, p.motion_offset FROM photos p "
+        f"p.live_video_id, p.motion_offset, p.rating, p.stack_id, "
+        f"(SELECT COUNT(*) FROM photos s WHERE s.stack_id = p.id) AS stack_size FROM photos p "
         f"WHERE {where} ORDER BY {order_sql} LIMIT ?", (*args, limit)).fetchall()
     return columnar(rows)
 
 
 def columnar(rows) -> dict:
     """The compact grid payload shared by every photo list (library, albums, events)."""
-    ids, ratios, ts, flags, dur = [], [], [], [], []
+    ids, ratios, ts, flags, dur, stars, stack = [], [], [], [], [], [], []
     for r in rows:
         ids.append(r["id"])
         w, h = r["width"] or 4, r["height"] or 3
@@ -125,7 +141,10 @@ def columnar(rows) -> dict:
         ts.append(int(r["taken_ts"] or 0))
         flags.append(photo_flags(r))
         dur.append(round(r["duration"], 1) if r["media_type"] == "video" and r["duration"] else 0)
-    return {"ids": ids, "ratio": ratios, "ts": ts, "flags": flags, "dur": dur, "total": len(ids)}
+        stars.append(_get(r, "rating", 0) or 0)
+        stack.append(_get(r, "stack_size", 0) or 0)
+    return {"ids": ids, "ratio": ratios, "ts": ts, "flags": flags, "dur": dur, "rating": stars,
+            "stack": stack, "total": len(ids)}
 
 
 @router.get("/photos/{photo_id}")
@@ -143,14 +162,17 @@ def photo_detail(photo_id: int):
     if row is None:
         raise HTTPException(404, "photo not found")
     faces = []
+    from ..engine.people import age_on
+
     for f in conn.execute(
-            """SELECT f.*, pe.name, pe.display_no, pe.id AS pid FROM faces f
+            """SELECT f.*, pe.name, pe.display_no, pe.id AS pid, pe.birth_date FROM faces f
                LEFT JOIN persons pe ON pe.id = f.person_id WHERE f.photo_id = ? ORDER BY f.size_px DESC""",
             (photo_id,)):
         faces.append({
             "id": f["id"], "box": [f["x1"], f["y1"], f["x2"], f["y2"]], "person_id": f["pid"],
             "label": person_label(f) if f["pid"] else None, "confidence": f["assign_confidence"],
             "assign_source": f["assign_source"], "quality": f["quality"], "det_score": f["det_score"],
+            "age": age_on(f["birth_date"], row["taken_ts"]) if f["pid"] else None,
         })
     from ..engine.tags import confidence as _tag_conf
 
@@ -199,6 +221,10 @@ def photo_detail(photo_id: int):
         "live": bool(row["live_video_id"] or (row["motion_offset"] or 0) > 0),
         "description": row["description"], "ocr_text": row["ocr_text"] or None,
         "albums": albums_mod.albums_for_photo(conn, photo_id),
+        "rating": row["rating"] or 0,
+        "stack": ({"id": row["stack_id"], "members": stacks_mod.members(conn, row["stack_id"])}
+                  if row["stack_id"] else None),
+        "corrected": {"date": row["date_source"] == "user", "location": row["location_source"] == "user"},
     }
 
 
@@ -278,6 +304,133 @@ def remove_tag(body: TagBody):
 @router.get("/tags")
 def list_tags():
     return {"tags": albums_mod.list_tags(get_state().conn())}
+
+
+class RateBody(BaseModel):
+    photo_ids: list[int]
+    rating: int
+
+
+@router.post("/photos/rate")
+def rate(body: RateBody):
+    if not 0 <= body.rating <= 5:
+        raise HTTPException(400, "rating is 0 (none) to 5")
+    conn = get_state().conn()
+    marks = ",".join("?" * len(body.photo_ids))
+    conn.execute(f"UPDATE photos SET rating = ? WHERE id IN ({marks})", (body.rating, *body.photo_ids))
+    db.audit(conn, "photos_rated", "photo", None, {"photos": body.photo_ids[:2000], "rating": body.rating})
+    conn.commit()
+    return {"rated": len(body.photo_ids), "rating": body.rating}
+
+
+class DateFixBody(BaseModel):
+    photo_ids: list[int]
+    taken_local: str | None = None      # absolute, e.g. "2019-12-25 18:00"
+    shift_seconds: float | None = None  # or move each photo by this much (a wrong camera clock)
+    rebuild_events: bool = True
+
+
+class PlaceFixBody(BaseModel):
+    photo_ids: list[int]
+    lat: float | None = None
+    lon: float | None = None
+    place_id: int | None = None         # or copy a known place's coordinates
+    rebuild_events: bool = True
+
+
+def _after_correction(rebuild: bool, stages: list[str]) -> None:
+    if rebuild:
+        from ..pipeline import jobs as jobs_mod
+
+        jobs_mod.spawn_index_job(get_state().ctx, {"kind": "index", "post_only": True, "stages": stages})
+
+
+@router.post("/photos/correct-date")
+def correct_date(body: DateFixBody):
+    if not body.photo_ids:
+        raise HTTPException(400, "no photos given")
+    try:
+        out = corrections_mod.set_date(get_state().conn(), body.photo_ids, body.taken_local, body.shift_seconds)
+    except ValueError as exc:
+        raise HTTPException(400, str(exc))
+    _after_correction(body.rebuild_events, ["events", "stacks", "search-index"])
+    return out
+
+
+@router.post("/photos/correct-location")
+def correct_location(body: PlaceFixBody):
+    state = get_state()
+    conn = state.conn()
+    lat, lon = body.lat, body.lon
+    if body.place_id is not None:
+        pl = conn.execute("SELECT lat, lon FROM places WHERE id = ?", (body.place_id,)).fetchone()
+        if pl is None or pl["lat"] is None:
+            raise HTTPException(404, "place not found")
+        lat, lon = pl["lat"], pl["lon"]
+    if lat is None or lon is None or not body.photo_ids:
+        raise HTTPException(400, "photos and a location are required")
+    try:
+        out = corrections_mod.set_location(conn, body.photo_ids, lat, lon)
+    except ValueError as exc:
+        raise HTTPException(400, str(exc))
+    from ..engine.places import geocode_photos
+
+    out["geocode"] = geocode_photos(state.ctx, conn)   # name the place now, not after the next index
+    _after_correction(body.rebuild_events, ["events", "search-index"])
+    return out
+
+
+class IdsBody(BaseModel):
+    photo_ids: list[int]
+
+
+@router.post("/photos/corrections/clear")
+def clear_corrections(body: IdsBody):
+    return corrections_mod.clear(get_state().conn(), body.photo_ids)
+
+
+@router.get("/stacks/{stack_id}")
+def stack_members(stack_id: int):
+    ids = stacks_mod.members(get_state().conn(), stack_id)
+    if not ids:
+        raise HTTPException(404, "no such stack")
+    return {"id": stack_id, "members": ids}
+
+
+class CoverBody(BaseModel):
+    photo_id: int
+
+
+@router.post("/stacks/{stack_id}/cover")
+def stack_cover(stack_id: int, body: CoverBody):
+    try:
+        stacks_mod.set_cover(get_state().conn(), body.photo_id)
+    except ValueError as exc:
+        raise HTTPException(400, str(exc))
+    return {"ok": True, "stack_id": body.photo_id}
+
+
+@router.post("/stacks/{stack_id}/unstack")
+def stack_split(stack_id: int):
+    stacks_mod.unstack(get_state().conn(), stack_id)
+    return {"ok": True}
+
+
+class ExportBody(BaseModel):
+    folder: str
+    include_auto_tags: bool = False
+    everything: bool = False
+
+
+@router.post("/export/xmp")
+def export_xmp(body: ExportBody):
+    from ..engine.xmp import ExportError
+    from ..engine.xmp import export_xmp as run_export
+
+    try:
+        return run_export(get_state().conn(), body.folder, body.include_auto_tags, body.everything)
+    except ExportError as exc:
+        raise HTTPException(400, str(exc))
 
 
 class DescriptionBody(BaseModel):
@@ -457,6 +610,44 @@ def memories(limit: int = 12):
             "groups": [{"title": str(y), "photo_ids": ids[:12]} for y, ids in sorted(by_year.items(), reverse=True)],
         })
 
+    # Birthdays coming up (or today): that person's photos from around their past birthdays.
+    for p in conn.execute(
+            "SELECT id, name, display_no, birth_date, cover_face_id FROM persons "
+            "WHERE birth_date IS NOT NULL AND merged_into IS NULL AND ignored = 0").fetchall():
+        md = p["birth_date"][-5:]
+        try:
+            this_year = datetime(now.year, int(md[:2]), int(md[3:]))
+        except ValueError:          # 29 February in a common year
+            this_year = datetime(now.year, 3, 1)
+        days_to = (this_year.date() - now.date()).days
+        if not -1 <= days_to <= 7:
+            continue
+        by_year: dict[int, list[int]] = {}
+        for r in conn.execute(
+                """SELECT DISTINCT ph.id, ph.taken_ts FROM photos ph JOIN faces f ON f.photo_id = ph.id
+                   WHERE f.person_id = ? AND ph.status = 'ok' AND ph.hidden = 0 AND ph.live_component = 0
+                     AND ph.taken_ts IS NOT NULL
+                     AND ABS(julianday(strftime('%Y', ph.taken_ts, 'unixepoch') || '-' || ?) -
+                             julianday(date(ph.taken_ts, 'unixepoch'))) <= 2
+                   ORDER BY ph.rating DESC, COALESCE(ph.quality_score, 0) DESC""", (p["id"], md)):
+            y = ts_to_naive(r["taken_ts"]).year
+            if len(by_year.setdefault(y, [])) < 8:
+                by_year[y].append(r["id"])
+        if not by_year:
+            continue
+        # The age on *this* birthday, from the same clock the window was computed with.
+        turning = this_year.year - int(p["birth_date"][:4]) if p["birth_date"][:1].isdigit() else None
+        when = "today" if days_to == 0 else ("yesterday" if days_to == -1 else f"in {days_to} days")
+        label = person_label(p)
+        verb = "turned" if days_to < 0 else "turns"
+        out["sections"].insert(0, {
+            "kind": "birthday", "title": f"{label}'s birthday",
+            "subtitle": (f"{verb} {turning} {when}" if turning is not None
+                         else f"{when} · {this_year.strftime('%d %B')}"),
+            "person_id": p["id"],
+            "groups": [{"title": str(y), "photo_ids": ids} for y, ids in sorted(by_year.items(), reverse=True)],
+        })
+
     # Recent events
     events = conn.execute(
         """SELECT * FROM events WHERE kind='event' AND photo_count >= 6 ORDER BY start_ts DESC LIMIT ?""",
@@ -494,7 +685,7 @@ def memories(limit: int = 12):
         row = conn.execute(
             """SELECT id FROM photos WHERE status='ok' AND hidden=0 AND live_component=0 AND taken_ts IS NOT NULL
                AND strftime('%Y', taken_ts, 'unixepoch') = ? AND COALESCE(source_kind,'') != 'screenshot'
-               ORDER BY COALESCE(quality_score,0) DESC LIMIT 8""", (str(y),)).fetchall()
+               ORDER BY rating DESC, COALESCE(quality_score,0) DESC LIMIT 8""", (str(y),)).fetchall()
         if row:
             years_ago.append({"title": f"{delta} year{'s' if delta > 1 else ''} ago", "year": y,
                               "photo_ids": [r[0] for r in row]})

@@ -105,7 +105,7 @@ def event_detail(event_id: int):
                 GROUP BY t.id HAVING COUNT(*) >= 2
                 ORDER BY (COUNT(*) * AVG(pt.score)) DESC LIMIT 8""", ids)]
         data["highlights"] = [int(x[0]) for x in conn.execute(
-            f"""SELECT id FROM photos WHERE id IN ({marks}) ORDER BY COALESCE(quality_score,0) DESC LIMIT 10""", ids)]
+            f"""SELECT id FROM photos WHERE id IN ({marks}) ORDER BY rating DESC, COALESCE(quality_score,0) DESC LIMIT 10""", ids)]
         gps = conn.execute(
             f"SELECT gps_lat, gps_lon FROM photos WHERE id IN ({marks}) AND gps_lat IS NOT NULL LIMIT 400", ids
         ).fetchall()

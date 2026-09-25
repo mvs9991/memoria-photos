@@ -51,6 +51,7 @@ class SettingsBody(BaseModel):
     thumb_size: int | None = None
     ocr_enabled: bool | None = None
     takeout_import: bool | None = None
+    stacks_enabled: bool | None = None
 
 
 @router.post("/settings")
@@ -135,6 +136,7 @@ class JobBody(BaseModel):
     skip_faces: bool = False
     skip_semantic: bool = False
     all: bool = False               # ocr: read every photo, not only likely-text ones
+    stages: list[str] | None = None # post_only: run just these post stages
 
 
 @router.post("/jobs")

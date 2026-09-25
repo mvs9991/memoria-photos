@@ -25,6 +25,7 @@ from typing import Callable
 import numpy as np
 
 from .. import db, hashing, imaging, metadata, quality, video
+from ..engine import corrections
 from ..config import VIDEO_EXTENSIONS
 from ..context import AppContext
 
@@ -563,6 +564,7 @@ class Indexer:
                 f"UPDATE photos SET {', '.join(c + '=?' for c in cols)}, meta_version=?, status=?, error=?{location_cols} WHERE id=?",
                 (*vals, META_VERSION, "error" if r.error else "ok", r.error, pid),
             )
+            corrections.apply_overrides(conn, [pid])   # the user's date/place fixes beat the file's
             self.stats["processed"] += 1
         if r.error:
             self.stats["errors"] += 1

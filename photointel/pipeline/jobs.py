@@ -317,6 +317,8 @@ def spawn_index_job(ctx, params: dict) -> int:
         args.append("--retry-errors")
     if params.get("post_only"):
         args.append("--post-only")
+        if params.get("stages"):
+            args += ["--stages", ",".join(params["stages"])]
     if params.get("skip_faces"):
         args.append("--no-faces")
     if params.get("skip_semantic"):

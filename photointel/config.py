@@ -51,6 +51,7 @@ class Settings:
     home_radius_km: float = 60.0
     ocr_enabled: bool = True              # read text in likely-text photos after indexing (local, CPU)
     takeout_import: bool = True           # read Google Takeout sidecars/albums when present
+    stacks_enabled: bool = True           # fold RAW+JPEG pairs and bursts into one timeline item
     # Privacy: all external services are opt-in.
     allow_online_map_tiles: bool = False
     llm_enabled: bool = False

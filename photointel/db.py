@@ -9,7 +9,7 @@ from contextlib import contextmanager
 from pathlib import Path
 from typing import Any, Iterable, Iterator
 
-SCHEMA_VERSION = 2
+SCHEMA_VERSION = 3
 _SCHEMA_FILE = Path(__file__).with_name("schema.sql")
 
 # Columns added to `photos` after v1: (name, SQL type/default).
@@ -24,19 +24,41 @@ V2_PHOTO_COLUMNS = [
     ("ocr_text", "TEXT"),
     ("ocr_model", "INTEGER"),
 ]
-V2_INDEXES = [
+# v3: ratings, stacks, birthdays, smart albums.
+V3_COLUMNS = {
+    "photos": [
+        ("rating", "INTEGER NOT NULL DEFAULT 0"),       # 0 = unrated, 1..5 stars (the user's)
+        ("stack_id", "INTEGER"),                        # photo id of the stack's cover (RAW+JPEG, burst)
+        ("stack_hidden", "INTEGER NOT NULL DEFAULT 0"),  # 1 = folded under its stack's cover in the timeline
+    ],
+    "persons": [
+        ("birth_date", "TEXT"),                         # 'YYYY-MM-DD', or '--MM-DD' when the year is unknown
+    ],
+    "albums": [
+        ("kind", "TEXT NOT NULL DEFAULT 'manual'"),     # manual | smart
+        ("query", "TEXT"),                              # smart: the saved search
+    ],
+}
+MIGRATION_INDEXES = [
     "CREATE INDEX IF NOT EXISTS ix_photos_media ON photos(media_type)",
     "CREATE INDEX IF NOT EXISTS ix_photos_live ON photos(live_component)",
+    "CREATE INDEX IF NOT EXISTS ix_photos_stack ON photos(stack_id)",
 ]
 
 
-def _ensure_v2_columns(conn: sqlite3.Connection) -> None:
-    """Add v2 columns to `photos` if absent. Idempotent; runs for new and old databases alike."""
-    have = {r[1] for r in conn.execute("PRAGMA table_info(photos)")}
-    for name, decl in V2_PHOTO_COLUMNS:
+def _add_columns(conn: sqlite3.Connection, table: str, columns: list[tuple[str, str]]) -> None:
+    have = {r[1] for r in conn.execute(f"PRAGMA table_info({table})")}
+    for name, decl in columns:
         if name not in have:
-            conn.execute(f"ALTER TABLE photos ADD COLUMN {name} {decl}")
-    for sql in V2_INDEXES:
+            conn.execute(f"ALTER TABLE {table} ADD COLUMN {name} {decl}")
+
+
+def _ensure_columns(conn: sqlite3.Connection) -> None:
+    """Add every post-v1 column that is missing. Idempotent; runs for new and old databases."""
+    _add_columns(conn, "photos", V2_PHOTO_COLUMNS)
+    for table, cols in V3_COLUMNS.items():
+        _add_columns(conn, table, cols)
+    for sql in MIGRATION_INDEXES:
         conn.execute(sql)
 
 
@@ -75,9 +97,10 @@ def migrate(conn: sqlite3.Connection, from_version: int) -> None:
         raise RuntimeError(
             f"Database schema v{from_version} is newer than this software (v{SCHEMA_VERSION})."
         )
-    # v2: video, live/motion photos, descriptions, OCR (new tables are in schema.sql).
-    # Run unconditionally: it is idempotent, and a fresh database needs the columns too.
-    _ensure_v2_columns(conn)
+    # v2: video, live/motion photos, descriptions, OCR. v3: ratings, stacks, birthdays,
+    # smart albums. New tables are in schema.sql; columns are added here, unconditionally:
+    # it is idempotent, and a fresh database needs them too.
+    _ensure_columns(conn)
     set_meta(conn, "schema_version", SCHEMA_VERSION)
 
 
