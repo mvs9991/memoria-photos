@@ -1,7 +1,7 @@
 import { useMemo, useState } from "react";
 import { Link, useNavigate, useParams } from "react-router-dom";
 import { useMutation, useQuery, useQueryClient } from "@tanstack/react-query";
-import { ArrowLeft, Check, CheckSquare, ImageMinus, Pencil, Star, Trash2, X } from "lucide-react";
+import { ArrowLeft, Check, CheckSquare, ImageMinus, Pencil, Search, Star, Trash2, X } from "lucide-react";
 import { api } from "../lib/api";
 import { PhotoGrid } from "../components/PhotoGrid";
 import { EmptyState, ErrorState, Spinner } from "../components/States";
@@ -48,8 +48,9 @@ export default function AlbumDetail() {
 
   const items = useMemo(() => {
     if (!data?.photos) return [];
-    const { ids, ratio, ts, flags, dur } = data.photos;
-    return ids.map((pid, i) => ({ id: pid, ratio: ratio[i], ts: ts[i], flags: flags[i], dur: dur?.[i] ?? 0 }));
+    const { ids, ratio, ts, flags, dur, rating } = data.photos;
+    return ids.map((pid, i) => ({ id: pid, ratio: ratio[i], ts: ts[i], flags: flags[i], dur: dur?.[i] ?? 0,
+      rating: rating?.[i] ?? 0 }));
   }, [data]);
 
   if (isError) return <ErrorState error={error} onRetry={() => refetch()} />;
@@ -74,8 +75,10 @@ export default function AlbumDetail() {
                 onClick={() => { setName(data.name); setRenaming(true); }}><Pencil size={14} /></button>
             </h1>
           )}
+          {data.kind === "smart" && <SmartQuery albumId={albumId} query={data.query ?? ""} onSaved={refresh} />}
           <p className="dim">
             {data.photo_count.toLocaleString()} {data.photo_count === 1 ? "item" : "items"}
+            {data.kind === "smart" ? " · updates itself as your library changes" : ""}
             {data.source === "takeout" ? " · imported from Google Photos" : ""}
             {data.description ? ` · ${data.description}` : ""}
           </p>
@@ -98,9 +101,11 @@ export default function AlbumDetail() {
             <Star size={14} /> Use as cover
           </button>
         )}
-        <button className="btn btn-ghost btn-sm" onClick={() => remove.mutate([...selection.selected])}>
-          <ImageMinus size={14} /> Remove from album
-        </button>
+        {data.kind !== "smart" && (
+          <button className="btn btn-ghost btn-sm" onClick={() => remove.mutate([...selection.selected])}>
+            <ImageMinus size={14} /> Remove from album
+          </button>
+        )}
       </>} />
 
       <PhotoGrid items={items} grouping="day" targetHeight={220}
@@ -109,5 +114,18 @@ export default function AlbumDetail() {
         emptyState={<EmptyState title="This album is empty"
           hint="Select photos anywhere in your library and choose “Add to album”." />} />
     </div>
+  );
+}
+
+function SmartQuery({ albumId, query, onSaved }: { albumId: number; query: string; onSaved: () => void }) {
+  const [text, setText] = useState(query);
+  const save = useMutation({ mutationFn: () => api.updateAlbum(albumId, { query: text.trim() }), onSuccess: onSaved });
+  return (
+    <form className="smart-query-form" onSubmit={(e) => { e.preventDefault(); if (text.trim()) save.mutate(); }}>
+      <Search size={14} className="dim" />
+      <input className="field field-sm" value={text} onChange={(e) => setText(e.target.value)}
+        aria-label="Smart album search" />
+      {text.trim() !== query && <button className="btn btn-primary btn-sm" type="submit">Update</button>}
+    </form>
   );
 }

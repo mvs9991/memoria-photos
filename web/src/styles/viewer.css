@@ -211,3 +211,10 @@
 .vi-tag-add .field { width: 100%; }
 .vi-ocr { white-space: pre-line; max-height: 180px; overflow-y: auto; font-family: var(--font-mono); font-size: 12px; }
 @media (hover: none) { .vi-tag-x { opacity: 1; } }
+
+.vi-row .vi-fix { margin-left: auto; flex: none; opacity: 0; transition: opacity var(--t-fast); }
+.vi-row:hover .vi-fix, .vi-fix:focus-visible { opacity: 1; }
+@media (hover: none) { .vi-row .vi-fix { opacity: 1; } }
+.vi-similar-item.is-current { outline: 2px solid var(--accent); outline-offset: -2px; }
+.vi-stack-actions { display: flex; flex-wrap: wrap; gap: 6px; margin-top: 8px; }
+.viewer-top-right .stars { margin-right: 6px; }

@@ -184,6 +184,12 @@ export default function Settings() {
           onChange={(v) => update.mutate({ takeout_import: v })}
         />
         <Toggle
+          label="Fold RAW+JPEG pairs and bursts into stacks"
+          hint="The timeline shows one cover per stack; every frame stays searchable. Applies after the next index."
+          checked={s.stacks_enabled !== false}
+          onChange={(v) => update.mutate({ stacks_enabled: v })}
+        />
+        <Toggle
           label="Use Claude for complex searches"
           hint="Sends only your search text plus the names of people/places in your library — never photos."
           checked={!!s.llm_enabled}
@@ -233,6 +239,8 @@ export default function Settings() {
           Embeddings from different models are never mixed — changing a model re-analyses the affected photos.
         </div>
       </section>
+
+      <XmpExport />
 
       <section className="card setting-card">
         <SectionHeader title="Storage" />
@@ -349,5 +357,28 @@ function FolderPicker({ onClose, onPicked }: { onClose: () => void; onPicked: ()
         </div>
       </div>
     </div>
+  );
+}
+
+function XmpExport() {
+  const [folder, setFolder] = useState("");
+  const [auto, setAuto] = useState(false);
+  const run = useMutation({ mutationFn: () => api.exportXmp(folder.trim(), auto) });
+  return (
+    <section className="card setting-card">
+      <SectionHeader title="Export to other apps"
+        sub="XMP sidecars with people, your tags, ratings, descriptions and corrected dates — readable by digiKam, darktable and Lightroom." />
+      <form className="xmp-form" onSubmit={(e) => { e.preventDefault(); if (folder.trim()) run.mutate(); }}>
+        <input className="field" placeholder="Export folder, e.g. D:\\MemoriaExport" value={folder}
+          onChange={(e) => setFolder(e.target.value)} aria-label="Export folder" />
+        <label className="xmp-auto dim">
+          <input type="checkbox" checked={auto} onChange={(e) => setAuto(e.target.checked)} /> include automatic tags
+        </label>
+        <button className="btn btn-ghost" type="submit" disabled={!folder.trim() || run.isPending}>Export</button>
+      </form>
+      {run.data && <p className="dim">Wrote {run.data.written.toLocaleString()} sidecars to {run.data.folder}.</p>}
+      {run.error && <p className="danger-text">{(run.error as Error).message}</p>}
+      <p className="dim">Sidecars go to the folder you choose, never next to your photos. Copy them beside the files if another app needs them there.</p>
+    </section>
   );
 }

@@ -320,3 +320,85 @@
   text-align: center;
 }
 .modal-head h3 { display: flex; align-items: center; gap: 8px; }
+
+.mem-cake { color: var(--accent); margin-right: 8px; vertical-align: -2px; }
+
+/* ---------------- stars ---------------- */
+.stars { display: inline-flex; gap: 1px; }
+.star {
+  display: grid;
+  place-items: center;
+  padding: 3px;
+  border-radius: 6px;
+  color: var(--text-3);
+  transition: color var(--t-fast), transform var(--t-fast);
+}
+.star:hover { color: var(--accent-text); transform: scale(1.12); }
+.star.on { color: #e9a93b; }
+
+/* ---------------- compare / culling ---------------- */
+.compare {
+  position: fixed;
+  inset: 0;
+  z-index: 250;
+  display: flex;
+  flex-direction: column;
+  background: var(--bg);
+  animation: fade-in 140ms var(--ease);
+}
+.compare-top {
+  display: flex;
+  align-items: center;
+  gap: 14px;
+  padding: 10px 16px;
+  border-bottom: 1px solid var(--hairline);
+}
+.compare-hint { font-size: 12px; flex: 1; min-width: 0; }
+.compare-zoom { display: flex; align-items: center; gap: 6px; }
+.compare-grid { flex: 1; display: grid; gap: 8px; padding: 8px; min-height: 0; }
+.compare-cell { display: flex; flex-direction: column; min-width: 0; min-height: 0; background: var(--surface); border-radius: var(--r-md); overflow: hidden; }
+.compare-cell.is-hidden { opacity: 0.45; }
+.compare-stage {
+  position: relative;
+  flex: 1;
+  min-height: 0;
+  overflow: hidden;
+  display: grid;
+  place-items: center;
+  background: #000;
+  cursor: grab;
+}
+.compare-stage img { max-width: 100%; max-height: 100%; object-fit: contain; transition: transform 90ms linear; user-select: none; }
+.compare-gone {
+  position: absolute;
+  top: 10px;
+  left: 10px;
+  display: inline-flex;
+  gap: 6px;
+  align-items: center;
+  padding: 4px 10px;
+  border-radius: var(--r-pill);
+  background: rgba(0, 0, 0, 0.6);
+  color: #fff;
+  font-size: 12px;
+}
+.compare-info { padding: 10px 12px; display: grid; gap: 5px; }
+.compare-name { font-weight: 600; font-size: 13px; }
+.compare-meta { font-size: 11.5px; }
+.compare-scores { display: flex; gap: 12px; font-size: 12px; }
+.compare-best { color: var(--ok); font-weight: 600; }
+.compare-actions { display: flex; flex-wrap: wrap; align-items: center; gap: 8px; }
+
+/* ---------------- date / place fix ---------------- */
+.fix-body { display: grid; gap: 12px; padding: 14px 18px; }
+.fix-row { display: grid; gap: 5px; font-size: 12.5px; }
+.fix-shift { display: grid; grid-template-columns: repeat(3, 1fr); gap: 10px; }
+.fix-hint { font-size: 12px; margin: 0; }
+
+.smart-query { color: var(--accent-text); }
+.smart-query-form { display: flex; align-items: center; gap: 8px; margin: 6px 0; max-width: 520px; }
+.smart-query-form .field { flex: 1; }
+.birthday-form { margin: 4px 0; flex-wrap: wrap; }
+.xmp-form { display: flex; flex-wrap: wrap; align-items: center; gap: 10px; margin-bottom: 8px; }
+.xmp-form .field { flex: 1; min-width: 240px; }
+.xmp-auto { display: inline-flex; align-items: center; gap: 6px; font-size: 12.5px; }

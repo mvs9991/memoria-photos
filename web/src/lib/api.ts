@@ -7,17 +7,24 @@ export interface PhotoIndex {
   flags: number[];
   /** seconds, 0 for stills */
   dur?: number[];
+  /** the user's stars, 0-5 */
+  rating?: number[];
+  /** on a stack cover: how many files the stack holds (0 otherwise) */
+  stack?: number[];
   total: number;
 }
 
 /** Bit flags in PhotoIndex.flags. */
-export const FLAG = { favorite: 1, faces: 2, video: 4, live: 8 } as const;
+export const FLAG = { favorite: 1, faces: 2, video: 4, live: 8, stack: 16 } as const;
 
 export interface Album {
   id: number;
   name: string;
   description: string | null;
   source: "user" | "takeout";
+  kind: "manual" | "smart";
+  /** a smart album's saved search */
+  query: string | null;
   photo_count: number;
   cover_photo_id: number | null;
   start_ts: number | null;
@@ -43,6 +50,8 @@ export interface FaceBox {
   assign_source: string | null;
   quality: number;
   det_score: number;
+  /** the person's age when the photo was taken, if their birthday is known */
+  age: number | null;
 }
 
 export interface PhotoDetail {
@@ -93,6 +102,9 @@ export interface PhotoDetail {
   description: string | null;
   ocr_text: string | null;
   albums: { id: number; name: string; source: string }[];
+  rating: number;
+  stack: { id: number; members: number[] } | null;
+  corrected: { date: boolean; location: boolean };
 }
 
 export interface Person {
@@ -228,13 +240,31 @@ export const api = {
     request(`/photos/tags`, { method: "POST", body: JSON.stringify({ photo_ids, name }) }),
   removeTag: (photo_ids: number[], name: string) =>
     request(`/photos/tags/remove`, { method: "POST", body: JSON.stringify({ photo_ids, name }) }),
+  rate: (photo_ids: number[], rating: number) =>
+    request(`/photos/rate`, { method: "POST", body: JSON.stringify({ photo_ids, rating }) }),
+  correctDate: (photo_ids: number[], body: { taken_local?: string; shift_seconds?: number }) =>
+    request<{ corrected: number }>(`/photos/correct-date`, { method: "POST", body: JSON.stringify({ photo_ids, ...body }) }),
+  correctLocation: (photo_ids: number[], body: { lat?: number; lon?: number; place_id?: number }) =>
+    request<{ corrected: number }>(`/photos/correct-location`, { method: "POST", body: JSON.stringify({ photo_ids, ...body }) }),
+  clearCorrections: (photo_ids: number[]) =>
+    request(`/photos/corrections/clear`, { method: "POST", body: JSON.stringify({ photo_ids }) }),
+  stack: (id: number) => request<{ id: number; members: number[] }>(`/stacks/${id}`),
+  stackCover: (stackId: number, photo_id: number) =>
+    request(`/stacks/${stackId}/cover`, { method: "POST", body: JSON.stringify({ photo_id }) }),
+  unstack: (stackId: number) => request(`/stacks/${stackId}/unstack`, { method: "POST" }),
+  exportXmp: (folder: string, include_auto_tags = false) =>
+    request<{ written: number; folder: string }>(`/export/xmp`, {
+      method: "POST", body: JSON.stringify({ folder, include_auto_tags }),
+    }),
   tags: () => request<{ tags: { name: string; category: string; count: number; user_count: number }[] }>("/tags"),
 
   albums: () => request<{ albums: Album[] }>("/albums"),
   album: (id: number) => request<Album & { photos: PhotoIndex }>(`/albums/${id}`),
   createAlbum: (name: string, photo_ids: number[] = []) =>
     request<{ id: number }>(`/albums`, { method: "POST", body: JSON.stringify({ name, photo_ids }) }),
-  updateAlbum: (id: number, body: { name?: string; description?: string; cover_photo_id?: number }) =>
+  createSmartAlbum: (name: string, query: string) =>
+    request<{ id: number }>(`/albums`, { method: "POST", body: JSON.stringify({ name, query }) }),
+  updateAlbum: (id: number, body: { name?: string; description?: string; cover_photo_id?: number; query?: string }) =>
     request(`/albums/${id}`, { method: "POST", body: JSON.stringify(body) }),
   deleteAlbum: (id: number) => request(`/albums/${id}`, { method: "DELETE" }),
   addToAlbum: (id: number, photo_ids: number[]) =>
@@ -254,7 +284,7 @@ export const api = {
     request<{ faces: any[] }>(`/faces/unassigned${qs(params)}`),
   renamePerson: (id: number, name: string | null) =>
     request(`/people/${id}/rename`, { method: "POST", body: JSON.stringify({ name }) }),
-  personFlags: (id: number, body: { hidden?: boolean; ignored?: boolean; is_me?: boolean }) =>
+  personFlags: (id: number, body: { hidden?: boolean; ignored?: boolean; is_me?: boolean; birth_date?: string }) =>
     request(`/people/${id}/flags`, { method: "POST", body: JSON.stringify(body) }),
   mergePeople: (target_id: number, source_ids: number[]) =>
     request(`/people/merge`, { method: "POST", body: JSON.stringify({ target_id, source_ids }) }),

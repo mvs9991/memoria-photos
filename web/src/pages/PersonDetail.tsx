@@ -2,7 +2,7 @@ import { useMemo, useState } from "react";
 import { Link, useNavigate, useParams } from "react-router-dom";
 import { useMutation, useQuery, useQueryClient } from "@tanstack/react-query";
 import {
-  ArrowLeft, Check, EyeOff, MapPin, Pencil, Scissors, Star, UserCheck, UserX, Users, X,
+  ArrowLeft, Cake, Check, EyeOff, MapPin, Pencil, Scissors, Star, UserCheck, UserX, Users, X,
 } from "lucide-react";
 import { api, faceUrl, thumbUrl } from "../lib/api";
 import { PhotoGrid } from "../components/PhotoGrid";
@@ -112,6 +112,7 @@ export default function PersonDetail() {
               </button>
             </h1>
           )}
+          <Birthday personId={personId} value={p.birth_date} age={p.age} />
           <p className="dim person-meta">
             {p.photo_count.toLocaleString()} photos · {p.face_count.toLocaleString()} faces
             {p.first_seen_ts && ` · first seen ${formatDate(p.first_seen_ts)}`}
@@ -267,5 +268,39 @@ export default function PersonDetail() {
         </div>
       )}
     </div>
+  );
+}
+
+function Birthday({ personId, value, age }: { personId: number; value: string | null; age: number | null }) {
+  const qc = useQueryClient();
+  const [editing, setEditing] = useState(false);
+  const [text, setText] = useState(value ?? "");
+  const save = useMutation({
+    mutationFn: (v: string) => api.personFlags(personId, { birth_date: v }),
+    onSuccess: () => { setEditing(false); qc.invalidateQueries({ queryKey: ["person", personId] }); },
+  });
+  const pretty = value
+    ? (value.startsWith("--") ? formatDate(Date.UTC(2000, Number(value.slice(2, 4)) - 1, Number(value.slice(5, 7))) / 1000).replace(" 2000", "")
+      : formatDate(Date.UTC(Number(value.slice(0, 4)), Number(value.slice(5, 7)) - 1, Number(value.slice(8, 10))) / 1000))
+    : null;
+  if (editing) {
+    return (
+      <form className="rename-form birthday-form" onSubmit={(e) => { e.preventDefault(); save.mutate(text.trim()); }}>
+        <input className="field field-sm" type="date" value={text.startsWith("--") ? "" : text}
+          onChange={(e) => setText(e.target.value)} aria-label="Birthday" />
+        <button className="btn btn-primary btn-sm" type="submit">Save</button>
+        {value && <button className="btn btn-quiet btn-sm" type="button" onClick={() => save.mutate("")}>Remove</button>}
+        <button className="btn btn-quiet btn-sm" type="button" onClick={() => setEditing(false)}>Cancel</button>
+        {save.error && <span className="danger-text">{(save.error as Error).message}</span>}
+      </form>
+    );
+  }
+  return (
+    <p className="dim person-meta">
+      <Cake size={13} style={{ verticalAlign: -2, marginRight: 6 }} />
+      {pretty ? <>Born {pretty}{age != null ? ` · ${age} years old` : ""}</> : "No birthday set"}
+      <button className="btn btn-quiet btn-sm" onClick={() => { setText(value ?? ""); setEditing(true); }}
+        style={{ marginLeft: 6 }}>{pretty ? "Edit" : "Add birthday"}</button>
+    </p>
   );
 }

@@ -55,6 +55,12 @@ photos ──► scan ──► decode / EXIF / hash / thumbnail ──► faces
 | **Albums & tags** | Your own albums and tags. Albums in a Google Takeout export are imported; hiding a duplicate copy never empties an album. Removing an automatic tag is remembered. |
 | **Google Takeout** | Reads the `.json` sidecars for albums, descriptions, favourites, trash and missing locations. People names Google knew are *suggested* for the faces Memoria found — never applied without you. |
 | **Text in photos** | Local OCR on screenshots, documents, receipts and signs: search `"invoice 2024"` or `receipt that says reliance`. |
+| **Stacks** | RAW+JPEG pairs and burst sequences fold into one timeline item with the best frame on top; every frame stays searchable. Split a stack and it stays split. |
+| **Ratings, culling & compare** | 1–5 stars (keys 1–5 in the viewer) that outrank computed quality in "best photos". Compare 2–4 photos side by side with synced zoom and keep the best — the rest are only hidden. |
+| **Smart albums** | Save any search ("Priya at the beach", "5 star photos from 2024") as an album that keeps itself up to date. |
+| **Birthdays & ages** | Add a birthday to a person: their past birthdays show up in Memories as the day approaches, faces show their age, and `Priya at age 5` searches that year of their life. |
+| **Fix dates & places** | Shift a wrong camera clock or set a date/place for a selection. Stored in Memoria and re-applied after re-indexing — the files are never written. |
+| **Export to other apps** | XMP sidecars (people with face regions, your tags, stars, descriptions, corrected dates/places) for digiKam, darktable and Lightroom — written to a folder you choose, never next to your photos. |
 | **Quality** | Sharpness, exposure, resolution and an aesthetic proxy, so "best photos of X" means something. |
 | **Timeline / Map / Memories** | Year → month → event browsing, a map of everywhere you've been, and an "on this day" home screen. |
 
@@ -113,6 +119,7 @@ Re-running `index` only processes what is new or changed.
 | `index --post-only` | Just rebuild people/events/duplicates from existing analysis |
 | `index --retry-errors` | Retry photos that previously failed |
 | `caption --limit 500` | Describe photos with a local vision model (~2/s) |
+| `export-xmp <folder> [--auto-tags]` | Write XMP sidecars to a folder outside your library |
 | `ocr [--all]` | Read text in photos. After each index only likely-text photos (screenshots, documents, receipts…) are read; `--all` reads everything |
 | `status` | Library summary |
 | `serve --port 8765` | Run the web app |
@@ -348,6 +355,10 @@ against COCO instance annotations), `embed_lfw.py`, `scale_benchmark.py`.
   ("RELIANCE FRESH" was read as "RELIANCEFRESH"), so a quoted multi-word search can miss.
 - **Takeout name suggestions are unmeasured.** The share/coverage rule is tested on constructed
   cases, not on a real export with known answers.
+- **Burst stacking thresholds are unmeasured.** Frames must be ≤ 1.5 s apart, within 18 bits of pHash
+  and ≥ 0.93 embedding similarity; chosen from the duplicate finder's existing bars and checked on
+  generated frames only. RAW+JPEG pairing is exercised with a stand-in file name, since no real RAW
+  file has been available (see RAW above).
 
 ---
 
@@ -413,12 +424,12 @@ photointel/
   pipeline/   scanner.py indexer.py post.py jobs.py
   video.py                                  video metadata, frames, motion photos, transcoding
   engine/     clustering.py people.py events.py places.py duplicates.py tags.py
-              live.py albums.py takeout.py ocr.py
+              live.py albums.py takeout.py ocr.py stacks.py corrections.py xmp.py
   search/     parser.py engine.py llm.py
   api/        app.py routes_*.py images.py
 web/          React + TypeScript UI
 eval/         dataset builders, calibration, end-to-end evaluation
-tests/        164 tests, no GPU required
+tests/        175 tests, no GPU required
 ```
 
 The layering is deliberate: vision → features → database → relationship engines → search → UI.
@@ -431,7 +442,7 @@ face recogniser.
 python -m pytest tests/ -q
 ```
 
-They stub the neural nets, so all 164 tests run on CPU in about 70 seconds and still cover
+They stub the neural nets, so all 175 tests run on CPU in about 70 seconds and still cover
 scanning, incremental re-indexing, moves, decoding, metadata, clustering, corrections, events,
 duplicates, search parsing and the HTTP API. The fixtures seed their randomness from stable
 hashes, so a failure reproduces on the next run instead of disappearing.

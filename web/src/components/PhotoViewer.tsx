@@ -4,11 +4,14 @@ import { Link } from "react-router-dom";
 import { useMutation, useQuery, useQueryClient } from "@tanstack/react-query";
 import {
   Aperture, BookImage, Calendar, Camera, Check, ChevronLeft, ChevronRight, Copy, Download, EyeOff, Heart, Info,
-  MapPin, Minus, Pencil, Plus, ScanText, Tag, Users, X, Sparkles, HardDrive,
+  Layers, MapPin, Minus, Pencil, Plus, ScanText, Tag, Users, X, Sparkles, HardDrive,
 } from "lucide-react";
 import { api, downloadUrl, faceUrl, motionUrl, originalUrl, thumbUrl, videoUrl } from "../lib/api";
 import { clock, exposureLabel, formatBytes, formatDateTime, megapixels } from "../lib/format";
 import { AlbumPicker } from "./AlbumPicker";
+import { CorrectionDialog } from "./CorrectionDialog";
+import { StarRating } from "./StarRating";
+import { useViewer } from "./ViewerContext";
 
 interface Props {
   ids: number[];
@@ -57,6 +60,10 @@ export function PhotoViewer({ ids, index, onIndex, onClose }: Props) {
       else if (e.key === "i") setShowInfo((v) => !v);
       else if (e.key === "f") favorite.mutate();
       else if (e.key === "l" && photo?.live) setPlayingLive(true);
+      else if (/^[1-5]$/.test(e.key) && photo) {
+        const n = Number(e.key);
+        rate.mutate(photo.rating === n ? 0 : n);
+      }
       else if (e.key === "+" || e.key === "=") setZoom((z) => Math.min(6, z * 1.4));
       else if (e.key === "-") setZoom((z) => Math.max(1, z / 1.4));
       else if (e.key === "0") { setZoom(1); setOffset({ x: 0, y: 0 }); }
@@ -79,6 +86,13 @@ export function PhotoViewer({ ids, index, onIndex, onClose }: Props) {
 
   const favorite = useMutation({
     mutationFn: () => api.setFlags(id, { favorite: !photo?.favorite }),
+    onSuccess: () => {
+      qc.invalidateQueries({ queryKey: ["photo", id] });
+      qc.invalidateQueries({ queryKey: ["photos"] });
+    },
+  });
+  const rate = useMutation({
+    mutationFn: (rating: number) => api.rate([id], rating),
     onSuccess: () => {
       qc.invalidateQueries({ queryKey: ["photo", id] });
       qc.invalidateQueries({ queryKey: ["photos"] });
@@ -110,6 +124,7 @@ export function PhotoViewer({ ids, index, onIndex, onClose }: Props) {
           </span>
         </div>
         <div className="viewer-top-right">
+          {photo && <StarRating value={photo.rating} onChange={(r) => rate.mutate(r)} size={16} />}
           <button className={`btn btn-quiet btn-icon${photo?.favorite ? " is-on" : ""}`}
             onClick={() => favorite.mutate()} title="Favourite (F)" aria-label="Favourite">
             <Heart size={18} fill={photo?.favorite ? "currentColor" : "none"} />
@@ -226,6 +241,7 @@ function InfoPanel({ photo, similar, onOpenSimilar }: {
   similar: { id: number; score: number }[];
   onOpenSimilar: (id: number) => void;
 }) {
+  const [fixing, setFixing] = useState<"date" | "place" | null>(null);
   const cam = photo.camera;
   const camText = [cam.make, cam.model].filter(Boolean).join(" ");
   const settings = [
@@ -256,13 +272,24 @@ function InfoPanel({ photo, similar, onOpenSimilar }: {
         <div>
           <div>{formatDateTime(photo.taken_ts)}</div>
           <div className="dim vi-small">
-            from {photo.date_source ?? "unknown"}
+            {photo.corrected.date ? "corrected by you" : `from ${photo.date_source ?? "unknown"}`}
             {photo.date_confidence && photo.date_confidence !== "high" && (
               <span className="chip chip-sm" style={{ marginLeft: 6 }}>{photo.date_confidence} confidence</span>
             )}
           </div>
         </div>
+        <button className="btn btn-quiet btn-sm vi-fix" onClick={() => setFixing("date")} title="Fix the date">
+          <Pencil size={12} /> Fix
+        </button>
       </div>
+      {!photo.place && (
+        <div className="vi-row">
+          <MapPin size={15} className="dim" />
+          <div className="dim">No location</div>
+          <button className="btn btn-quiet btn-sm vi-fix" onClick={() => setFixing("place")}><Pencil size={12} /> Set place</button>
+        </div>
+      )}
+      {fixing && <CorrectionDialog photoIds={[photo.id]} mode={fixing} onClose={() => setFixing(null)} />}
 
       {photo.place && (
         <div className="vi-row">
@@ -271,9 +298,13 @@ function InfoPanel({ photo, similar, onOpenSimilar }: {
             <Link to={`/places/${photo.place.id}`} className="link">{photo.place.label}</Link>
             {photo.landmark && <div className="vi-small">{photo.landmark}</div>}
             <div className="dim vi-small">
-              {photo.place.source === "gps" ? "from GPS" : `inferred (${photo.place.confidence})`}
+              {photo.place.source === "gps" ? "from GPS" : photo.place.source === "user" ? "set by you"
+                : photo.place.source === "takeout" ? "from Google Photos" : `inferred (${photo.place.confidence})`}
             </div>
           </div>
+          <button className="btn btn-quiet btn-sm vi-fix" onClick={() => setFixing("place")} title="Change the place">
+            <Pencil size={12} /> Fix
+          </button>
         </div>
       )}
 
@@ -310,7 +341,7 @@ function InfoPanel({ photo, similar, onOpenSimilar }: {
               f.person_id ? (
                 <Link key={f.id} to={`/people/${f.person_id}`} className="vi-face" title={f.label ?? ""}>
                   <img src={faceUrl(f.id, 96)} alt={f.label ?? "face"} />
-                  <span>{f.label}</span>
+                  <span>{f.label}{f.age != null ? `, ${f.age}` : ""}</span>
                 </Link>
               ) : (
                 <div key={f.id} className="vi-face is-unknown" title="Not assigned to a person">
@@ -322,6 +353,8 @@ function InfoPanel({ photo, similar, onOpenSimilar }: {
           </div>
         </div>
       )}
+
+      {photo.stack && <StackStrip photoId={photo.id} stack={photo.stack} />}
 
       <TagEditor photoId={photo.id} tags={photo.tags} />
 
@@ -487,6 +520,37 @@ function TagEditor({ photoId, tags }: {
         <input className="field field-sm" placeholder="Add a tag" value={name} maxLength={60}
           onChange={(e) => setName(e.target.value)} aria-label="Add a tag" />
       </form>
+    </div>
+  );
+}
+
+function StackStrip({ photoId, stack }: { photoId: number; stack: { id: number; members: number[] } }) {
+  const qc = useQueryClient();
+  const viewer = useViewer();
+  const refresh = () => {
+    qc.invalidateQueries({ queryKey: ["photos"] });
+    stack.members.forEach((m) => qc.invalidateQueries({ queryKey: ["photo", m] }));
+  };
+  const cover = useMutation({ mutationFn: () => api.stackCover(stack.id, photoId), onSuccess: refresh });
+  const split = useMutation({ mutationFn: () => api.unstack(stack.id), onSuccess: refresh });
+  return (
+    <div className="vi-block">
+      <div className="vi-head"><Layers size={14} /> Stack of {stack.members.length}</div>
+      <div className="vi-similar">
+        {stack.members.map((m, i) => (
+          <button key={m} className={`vi-similar-item${m === photoId ? " is-current" : ""}`}
+            onClick={() => viewer.open(stack.members, i)} title={m === stack.id ? "Cover" : "Open"}>
+            <img src={thumbUrl(m, "sm")} alt="" loading="lazy" />
+          </button>
+        ))}
+      </div>
+      <div className="vi-stack-actions">
+        {photoId !== stack.id && (
+          <button className="btn btn-quiet btn-sm" onClick={() => cover.mutate()}>Use this as the cover</button>
+        )}
+        <button className="btn btn-quiet btn-sm" onClick={() => split.mutate()}
+          title="Show every file separately — remembered for next time">Unstack</button>
+      </div>
     </div>
   );
 }

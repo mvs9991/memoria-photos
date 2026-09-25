@@ -51,12 +51,12 @@ photointel/
   pipeline/  scanner.py indexer.py post.py jobs.py
   video.py                                     video metadata/frames, motion photos, transcoding
   engine/    clustering.py people.py events.py places.py duplicates.py tags.py
-             live.py albums.py takeout.py ocr.py
+             live.py albums.py takeout.py ocr.py stacks.py corrections.py xmp.py
   search/    parser.py engine.py llm.py
   api/       app.py routes_*.py images.py
 web/         React + TypeScript UI (Vite)
 eval/        dataset builders, calibration, evaluation, library inspector
-tests/       164 tests, no GPU required
+tests/       175 tests, no GPU required
 ```
 
 **The indexing pipeline** is a feeder thread → N CPU worker threads (read, hash, decode, EXIF,
@@ -244,6 +244,35 @@ find (`receipt that says invoice`) only ranks — a receipt the tagger missed mu
 screenshot is not excluded then. Removing an automatic tag writes a `user_removed` row that the tagger's
 upsert will not overwrite.
 
+**Where the v3 features came from, and what was left out.** They were chosen by reading the code of the
+most-starred projects (Sept 2026): smart albums (lap, PhotoPrism), stacks (Immich, PhotoPrism, lap),
+ratings and culling/compare (Immich, lap), birthdays (Immich), date/place edits (Immich, Nextcloud
+Memories), XMP export (PhotoPrism, Immich). Left out on purpose: multilingual search (SigLIP2 may already
+handle it — unmeasured, so not claimed), pet recognition (Ente's cat/dog models: licence and accuracy
+unverified), and anything that writes to originals (Memories' Takeout migration writes EXIF into files;
+lap and Damselfly move/delete them). Memoria's differences from those projects — query parsing, events/
+trips, duplicate classes, quality ranking — are design differences; no head-to-head accuracy was measured.
+
+**Corrections are overrides, not edits.** A user's date/place lives in `photo_overrides` and is re-applied
+by the indexer after every metadata write (a test proves a changed file keeps its corrected date; without
+the re-apply it reverts to EXIF). Clearing a correction sets `meta_version = NULL` so the file is re-read.
+Geocoding keeps `location_source = 'user'` like it keeps `'takeout'`.
+
+**Stacks fold only the timeline.** `stack_hidden` is honoured by `/photos/index?collapse_stacks=true`
+(the Photos page) and nowhere else: search, people, places and albums still see every frame, and faces in
+every frame still count. pHash alone could not separate a burst from a different scene shot a second
+later (17 bits apart vs 12 for true burst frames on the test images), so the embedding must agree too —
+a test fails without that check. A split stack is remembered by the hash of its members.
+
+**A smart album is a search, so it is not album vocabulary.** "Save as smart album" names the album after
+its query; left in the parser's album list, the name then captured its own query ("screenshots" →
+photos in album Screenshots → none). Found in a browser run, fixed, and pinned by a test that fails on
+the old code.
+
+**Overlays opened from a sticky bar are portalled to `<body>`.** `backdrop-filter` on `.review-bar`
+makes it the containing block for `position: fixed` children, which squashed the compare view into the
+bar. `components/Portal.tsx` is the fix; use it for any new modal opened from inside a bar.
+
 **`.nomedia` is deliberately not honoured.** WhatsApp puts it in `Sent`, which held 1,339 of the
 owner's own photos. Dot-directories are already excluded, which handles real app-cache junk.
 
@@ -379,7 +408,7 @@ the future, everything collapsing into one event, fuzzy duplicate thresholds too
 
 ## 10. Working notes
 
-- Run the suite with `.venv/Scripts/python.exe -m pytest -q`. 164 tests, ~95 s, no GPU needed —
+- Run the suite with `.venv/Scripts/python.exe -m pytest -q`. 175 tests, ~95 s, no GPU needed —
   the neural nets are replaced by deterministic fakes.
 - Test fixtures seed randomness from `zlib.crc32` of the **file name**, not `hash()` (salted per
   process) and not the full path (contains pytest's per-run tmp counter). Both made failures

@@ -23,6 +23,8 @@ export default function Photos() {
   const favorite = params.get("favorite") === "1";
   const source = params.get("source") ?? "";
   const media = params.get("media") ?? "";
+  const unfold = params.get("frames") === "all";     // show every file of RAW+JPEG pairs and bursts
+  const minRating = Number(params.get("rating")) || 0;
   const order = (params.get("order") as "date_desc" | "date_asc" | "quality") ?? "date_desc";
   // Set by the Timeline's month links. A month without a year means nothing to the API.
   const year = Number(params.get("year")) || undefined;
@@ -30,16 +32,18 @@ export default function Photos() {
   const period = year ? (month ? `${monthName(month)} ${year}` : String(year)) : "";
 
   const query = useQuery({
-    queryKey: ["photos", { favorite, source, order, year, month, media }],
+    queryKey: ["photos", { favorite, source, order, year, month, media, unfold, minRating }],
     queryFn: () => api.photos({ favorite, source: source || undefined, order, year, month, media: media || undefined,
+      collapse_stacks: !unfold, min_rating: minRating || undefined,
       include_screenshots: source ? true : undefined }),
   });
   const { data: stats } = useQuery({ queryKey: ["stats"], queryFn: api.stats });
 
   const items = useMemo(() => {
     if (!query.data) return [];
-    const { ids, ratio, ts, flags, dur } = query.data;
-    return ids.map((id, i) => ({ id, ratio: ratio[i], ts: ts[i], flags: flags[i], dur: dur?.[i] ?? 0 }));
+    const { ids, ratio, ts, flags, dur, rating, stack } = query.data;
+    return ids.map((id, i) => ({ id, ratio: ratio[i], ts: ts[i], flags: flags[i], dur: dur?.[i] ?? 0,
+      rating: rating?.[i] ?? 0, stack: stack?.[i] ?? 0 }));
   }, [query.data]);
 
   const targetHeight = density === "compact" ? 150 : density === "large" ? 340 : 230;
@@ -110,6 +114,17 @@ export default function Photos() {
           <button className={`chip chip-button${favorite ? " chip-accent" : ""}`}
             onClick={() => setParam("favorite", favorite ? null : "1")}>
             <Heart size={12} /> Favourites
+          </button>
+          {[1, 3, 5].map((r) => (
+            <button key={r} className={`chip chip-button${minRating === r ? " chip-accent" : ""}`}
+              onClick={() => setParam("rating", minRating === r ? null : String(r))}>
+              {"★".repeat(r)}{r < 5 ? "+" : ""}
+            </button>
+          ))}
+          <button className={`chip chip-button${unfold ? " chip-accent" : ""}`}
+            onClick={() => setParam("frames", unfold ? null : "all")}
+            title="Stacks fold RAW+JPEG pairs and bursts into one item">
+            {unfold ? "every frame" : "stacks folded"}
           </button>
           {[["video", "videos"], ["live", "live photos"]].map(([m, label]) => (
             <button key={m} className={`chip chip-button${media === m ? " chip-accent" : ""}`}

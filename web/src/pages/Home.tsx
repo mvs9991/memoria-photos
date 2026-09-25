@@ -1,6 +1,6 @@
 import { Link } from "react-router-dom";
 import { useQuery } from "@tanstack/react-query";
-import { ArrowRight, CalendarRange, Images, MapPin, Sparkles, Users } from "lucide-react";
+import { ArrowRight, Cake, CalendarRange, Images, MapPin, Sparkles, Users } from "lucide-react";
 import { api, faceUrl, thumbUrl } from "../lib/api";
 import { useViewer } from "../components/ViewerContext";
 import { ErrorState, NoLibrary, Spinner } from "../components/States";
@@ -47,14 +47,19 @@ export default function Home() {
       {memories.isLoading && <Spinner label="Gathering memories" />}
 
       {sections.map((section: any) => {
-        if (section.kind === "on_this_day" || section.kind === "years_ago") {
+        if (section.kind === "on_this_day" || section.kind === "years_ago" || section.kind === "birthday") {
           return (
             <section key={section.kind} className="mem-section">
               <div className="section-head">
                 <div>
-                  <h2>{section.title}</h2>
+                  <h2>{section.kind === "birthday" && <Cake size={18} className="mem-cake" />}{section.title}</h2>
                   {section.subtitle && <p className="dim section-sub">{section.subtitle}</p>}
                 </div>
+                {section.person_id && (
+                  <Link to={`/people/${section.person_id}`} className="btn btn-quiet btn-sm">
+                    See all <ArrowRight size={14} />
+                  </Link>
+                )}
               </div>
               <div className="mem-groups">
                 {section.groups.map((g: any) => (

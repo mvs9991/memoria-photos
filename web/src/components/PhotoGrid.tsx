@@ -7,7 +7,7 @@
  * 100k-photo library at a steady frame rate.
  */
 import { useCallback, useEffect, useLayoutEffect, useMemo, useRef, useState } from "react";
-import { Check, Heart, Play } from "lucide-react";
+import { Check, Heart, Layers, Play, Star } from "lucide-react";
 import { FLAG, thumbUrl } from "../lib/api";
 import { clock, formatDay, formatMonth, toDate } from "../lib/format";
 
@@ -18,13 +18,16 @@ export interface GridItem {
   flags?: number;
   /** video length in seconds */
   dur?: number;
+  rating?: number;
+  /** stack size on a stack cover */
+  stack?: number;
   score?: number | null;
 }
 
 interface Row {
   top: number;
   height: number;
-  items: { id: number; w: number; h: number; index: number; flags: number; dur: number }[];
+  items: { id: number; w: number; h: number; index: number; flags: number; dur: number; rating: number; stack: number }[];
 }
 
 interface Section {
@@ -162,7 +165,8 @@ export function PhotoGrid({
           const w = i === buf.length - 1 && !isLast
             ? Math.max(1, width - x)
             : Math.round(it.ratio * h);
-          const cell = { id: it.id, w, h, index: index++, flags: it.flags ?? 0, dur: it.dur ?? 0 };
+          const cell = { id: it.id, w, h, index: index++, flags: it.flags ?? 0, dur: it.dur ?? 0,
+            rating: it.rating ?? 0, stack: it.stack ?? 0 };
           x += w + gap;
           return cell;
         });
@@ -229,6 +233,8 @@ export function PhotoGrid({
                       h={cell.h}
                       flags={cell.flags}
                       dur={cell.dur}
+                      rating={cell.rating}
+                      stack={cell.stack}
                       index={cell.index}
                       selected={selection?.has(cell.id) ?? false}
                       selectable={selectable}
@@ -250,8 +256,9 @@ export function PhotoGrid({
   );
 }
 
-function Tile({ id, w, h, flags, dur, index, selected, selectable, selectMode, onOpen, onToggleSelect }: {
-  id: number; w: number; h: number; flags: number; dur: number; index: number; selected: boolean; selectable: boolean;
+function Tile({ id, w, h, flags, dur, rating, stack, index, selected, selectable, selectMode, onOpen, onToggleSelect }: {
+  id: number; w: number; h: number; flags: number; dur: number; rating: number; stack: number; index: number;
+  selected: boolean; selectable: boolean;
   selectMode: boolean;
   onOpen?: (id: number, index: number) => void; onToggleSelect?: (id: number) => void;
 }) {
@@ -291,6 +298,15 @@ function Tile({ id, w, h, flags, dur, index, selected, selectable, selectMode, o
         <span className="tile-media tnum"><Play size={10} fill="currentColor" /> {clock(dur)}</span>
       )}
       {(flags & FLAG.live) > 0 && <span className="tile-media">LIVE</span>}
+      {(flags & FLAG.stack) > 0 && (
+        <span className="tile-media tile-stack tnum" title={`Stack of ${stack}`}><Layers size={10} /> {stack}</span>
+      )}
+      {rating > 0 && (
+        <span className="tile-stars" aria-label={`${rating} stars`}
+          style={(flags & FLAG.favorite) ? { right: 27 } : undefined}>
+          {Array.from({ length: rating }).map((_, i) => <Star key={i} size={9} fill="currentColor" />)}
+        </span>
+      )}
       {selectable && (
         <button
           className={`tile-select${selected ? " on" : ""}`}

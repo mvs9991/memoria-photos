@@ -2,6 +2,7 @@
 import { useState } from "react";
 import { useMutation, useQuery, useQueryClient } from "@tanstack/react-query";
 import { BookImage, Check, Plus, X } from "lucide-react";
+import { Portal } from "./Portal";
 import { api, thumbUrl } from "../lib/api";
 import { Spinner } from "./States";
 
@@ -32,6 +33,7 @@ export function AlbumPicker({ photoIds, onClose, onDone }: {
 
   const count = photoIds.length === 1 ? "this photo" : `${photoIds.length.toLocaleString()} photos`;
   return (
+    <Portal>
     <div className="modal-backdrop" onClick={onClose}>
       <div className="modal" onClick={(e) => e.stopPropagation()} role="dialog" aria-label="Add to album">
         <div className="modal-head">
@@ -69,5 +71,6 @@ export function AlbumPicker({ photoIds, onClose, onDone }: {
         </div>
       </div>
     </div>
+    </Portal>
   );
 }

@@ -200,3 +200,16 @@
   gap: var(--grid-gap);
 }
 .skeleton-grid > * { border-radius: 4px; }
+
+/* stack count sits top-right so it never collides with the video/LIVE marker */
+.tile-stack { left: auto; right: 7px; bottom: auto; top: 7px; }
+.tile-stars {
+  position: absolute;
+  right: 7px;
+  bottom: 7px;
+  display: inline-flex;
+  gap: 1px;
+  color: #ffd27a;
+  filter: drop-shadow(0 1px 2px rgba(0, 0, 0, 0.7));
+  pointer-events: none;
+}

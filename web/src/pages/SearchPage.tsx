@@ -1,7 +1,7 @@
 import { useEffect, useMemo, useState } from "react";
-import { Link, useSearchParams } from "react-router-dom";
-import { useQuery } from "@tanstack/react-query";
-import { BookImage, CalendarRange, MapPin, ScanText, Search, Sparkles, Tag, User, Wand2 } from "lucide-react";
+import { Link, useNavigate, useSearchParams } from "react-router-dom";
+import { useMutation, useQuery, useQueryClient } from "@tanstack/react-query";
+import { BookImage, BookmarkPlus, CalendarRange, MapPin, ScanText, Search, Sparkles, Tag, User, Wand2 } from "lucide-react";
 import { api, faceUrl, thumbUrl } from "../lib/api";
 import { PhotoGrid } from "../components/PhotoGrid";
 import { EmptyState, ErrorState, SectionHeader, Spinner } from "../components/States";
@@ -89,6 +89,7 @@ export default function SearchPage() {
             <span className="dim search-timing tnum">
               {data.total.toLocaleString()} results · {data.took_ms} ms
             </span>
+            <SaveSmartAlbum query={q} />
           </div>
 
           {data.people?.length > 0 && (
@@ -152,5 +153,20 @@ export default function SearchPage() {
         </>
       )}
     </div>
+  );
+}
+
+function SaveSmartAlbum({ query }: { query: string }) {
+  const qc = useQueryClient();
+  const navigate = useNavigate();
+  const save = useMutation({
+    mutationFn: () => api.createSmartAlbum(query.charAt(0).toUpperCase() + query.slice(1), query),
+    onSuccess: (r) => { qc.invalidateQueries({ queryKey: ["albums"] }); navigate(`/albums/${r.id}`); },
+  });
+  return (
+    <button className="btn btn-quiet btn-sm" onClick={() => save.mutate()} disabled={save.isPending}
+      title="Keep this search as an album that updates itself">
+      <BookmarkPlus size={14} /> Save as smart album
+    </button>
   );
 }

@@ -25,7 +25,8 @@ export default function Albums() {
   if (isError) return <ErrorState error={error} onRetry={() => refetch()} />;
   if (isLoading) return <Spinner full label="Loading albums" />;
   const albums = data?.albums ?? [];
-  const mine = albums.filter((a) => a.source === "user");
+  const mine = albums.filter((a) => a.source === "user" && a.kind !== "smart");
+  const smart = albums.filter((a) => a.kind === "smart");
   const imported = albums.filter((a) => a.source !== "user");
 
   return (
@@ -49,10 +50,11 @@ export default function Albums() {
 
       {albums.length === 0 ? (
         <EmptyState icon={<BookImage size={26} />} title="No albums yet"
-          hint="Create one here, or select photos in any grid and choose “Add to album”. Albums in a Google Takeout export are imported automatically." />
+          hint="Create one here, select photos in any grid and choose “Add to album”, or save a search as a smart album. Albums in a Google Takeout export are imported automatically." />
       ) : (
         <>
-          {mine.length > 0 && <AlbumGrid albums={mine} title={imported.length ? "Your albums" : undefined} />}
+          {smart.length > 0 && <AlbumGrid albums={smart} title="Smart albums" />}
+          {mine.length > 0 && <AlbumGrid albums={mine} title={imported.length || smart.length ? "Your albums" : undefined} />}
           {imported.length > 0 && <AlbumGrid albums={imported} title="From Google Photos" />}
         </>
       )}
@@ -80,6 +82,7 @@ function AlbumGrid({ albums, title }: { albums: Album[]; title?: string }) {
             <div className="event-tile-body">
               <h3 className="event-tile-title">{a.name}</h3>
               <p className="dim event-tile-sub">
+                {a.kind === "smart" && <span className="smart-query">“{a.query}” · </span>}
                 {a.photo_count.toLocaleString()} {a.photo_count === 1 ? "item" : "items"}
                 {a.start_ts && a.end_ts ? ` · ${formatRange(a.start_ts, a.end_ts)}` : ""}
               </p>
