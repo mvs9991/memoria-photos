@@ -7,6 +7,7 @@ import { useMutation, useQuery, useQueryClient } from "@tanstack/react-query";
 import { CalendarClock, MapPin, X } from "lucide-react";
 import { Portal } from "./Portal";
 import { api } from "../lib/api";
+import { MiniMap } from "./MiniMap";
 
 export function CorrectionDialog({ photoIds, mode, onClose }: {
   photoIds: number[];
@@ -106,8 +107,10 @@ export function CorrectionDialog({ photoIds, mode, onClose }: {
                 ))}
                 {matches.length === 0 && <li className="dim" style={{ padding: 10 }}>No place of yours matches — enter coordinates below.</li>}
               </ul>
+              <MiniMap points={[]} height={200} picked={parsedCoords}
+                onPick={(lat, lon) => setCoords(`${lat}, ${lon}`)} />
               <label className="fix-row">
-                <span className="dim">or coordinates</span>
+                <span className="dim">or click the map / type coordinates</span>
                 <input className="field" placeholder="17.3850, 78.4867" value={coords}
                   onChange={(e) => setCoords(e.target.value)} aria-label="Latitude, longitude" />
               </label>

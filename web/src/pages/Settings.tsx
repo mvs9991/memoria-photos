@@ -8,6 +8,7 @@ import { api } from "../lib/api";
 import { ErrorState, SectionHeader, Spinner } from "../components/States";
 import { formatBytes, formatDuration, relativeTime } from "../lib/format";
 import { useTitle } from "../lib/hooks";
+import { FrameCard, GpxCard, SecurityCard } from "../components/SettingsExtras";
 
 export default function Settings() {
   useTitle("Settings");
@@ -240,7 +241,10 @@ export default function Settings() {
         </div>
       </section>
 
+      <SecurityCard />
+      <GpxCard />
       <XmpExport />
+      <FrameCard />
 
       <section className="card setting-card">
         <SectionHeader title="Storage" />

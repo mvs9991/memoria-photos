@@ -18,13 +18,17 @@ const PAGES = [
   ["map", "/map"],
   ["timeline", "/timeline"],
   ["duplicates", "/duplicates"],
+  ["collections", "/collections"],
+  ["folders", "/folders"],
+  ["insights", "/insights"],
   ["search", "/search?q=beach+photos"],
   ["settings", "/settings"],
 ];
 
 mkdirSync(OUT, { recursive: true });
 
-const browser = await chromium.launch();
+// PW_CHANNEL=msedge (or chrome) uses an installed browser when Playwright's own is not downloaded.
+const browser = await chromium.launch(process.env.PW_CHANNEL ? { channel: process.env.PW_CHANNEL } : {});
 const errors = [];
 
 /**

@@ -1,5 +1,5 @@
 /** Actions for photos selected in a grid: add to album, tag, plus page-specific extras. */
-import { useState } from "react";
+import { useCallback, useEffect, useState } from "react";
 import { useMutation, useQueryClient } from "@tanstack/react-query";
 import { BookImage, CalendarClock, Columns2, MapPin, Tag, X } from "lucide-react";
 import { api } from "../lib/api";
@@ -8,10 +8,13 @@ import { CompareView } from "./CompareView";
 import { CorrectionDialog } from "./CorrectionDialog";
 import { StarRating } from "./StarRating";
 
-export function SelectionBar({ selected, onClear, extra }: {
+export function SelectionBar({ selected, onClear, extra, allIds, onSelectAll }: {
   selected: Set<number>;
   onClear: () => void;
   extra?: React.ReactNode;
+  /** every photo in the grid, for "Select all" */
+  allIds?: number[];
+  onSelectAll?: (ids: number[]) => void;
 }) {
   const qc = useQueryClient();
   const [picker, setPicker] = useState(false);
@@ -45,6 +48,11 @@ export function SelectionBar({ selected, onClear, extra }: {
   return (
     <div className="review-bar selection-bar" role="toolbar" aria-label="Selected photos">
       <span className="tnum"><strong>{selected.size.toLocaleString()}</strong> selected</span>
+      {allIds && onSelectAll && selected.size < allIds.length && (
+        <button className="btn btn-quiet btn-sm" onClick={() => onSelectAll(allIds)} title="Ctrl+A">
+          Select all {allIds.length.toLocaleString()}
+        </button>
+      )}
       <button className="btn btn-primary btn-sm" onClick={() => setPicker(true)}>
         <BookImage size={14} /> Add to album
       </button>
@@ -76,10 +84,30 @@ export function SelectionBar({ selected, onClear, extra }: {
 
 export function useSelection() {
   const [selected, setSelected] = useState<Set<number>>(new Set());
-  const toggle = (id: number) => setSelected((s) => {
+  const toggle = useCallback((id: number) => setSelected((s) => {
     const next = new Set(s);
     next.has(id) ? next.delete(id) : next.add(id);
     return next;
-  });
-  return { selected, toggle, clear: () => setSelected(new Set()) };
+  }), []);
+  const addMany = useCallback((ids: number[]) => setSelected((s) => new Set([...s, ...ids])), []);
+  const setAll = useCallback((ids: number[]) => setSelected(new Set(ids)), []);
+  const clear = useCallback(() => setSelected(new Set()), []);
+  return { selected, toggle, addMany, setAll, clear };
+}
+
+/** Ctrl/Cmd+A selects every photo in the grid while select mode is on. */
+export function useSelectAllShortcut(active: boolean, ids: number[], setAll: (ids: number[]) => void) {
+  useEffect(() => {
+    if (!active) return;
+    const onKey = (e: KeyboardEvent) => {
+      const t = e.target as HTMLElement | null;
+      if (t && (t.tagName === "INPUT" || t.tagName === "TEXTAREA" || t.isContentEditable)) return;
+      if ((e.ctrlKey || e.metaKey) && e.key.toLowerCase() === "a") {
+        e.preventDefault();
+        setAll(ids);
+      }
+    };
+    window.addEventListener("keydown", onKey);
+    return () => window.removeEventListener("keydown", onKey);
+  }, [active, ids, setAll]);
 }

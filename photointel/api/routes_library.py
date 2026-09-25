@@ -119,7 +119,7 @@ COLLECTIONS: dict[str, dict] = {
                          "AND p.face_count <= 2"},
     "raw": {"group": "media", "title": "RAW",
             "where": "p.ext IN ('.cr2','.cr3','.nef','.arw','.dng','.orf','.rw2','.raf','.srw','.pef','.nrw')"},
-    "stacks": {"group": "media", "title": "Bursts & RAW+JPEG stacks", "where": "p.stack_id = p.id"},
+    "stacks": {"group": "media", "title": "Stacks", "where": "p.stack_id = p.id"},
     "screenshots": {"group": "cleanup", "title": "Screenshots", "where": "p.source_kind = 'screenshot'"},
     "documents": {"group": "cleanup", "title": "Documents & receipts",
                   "where": "EXISTS (SELECT 1 FROM photo_tags pt JOIN tags t ON t.id = pt.tag_id WHERE "

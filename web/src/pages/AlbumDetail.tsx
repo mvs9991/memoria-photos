@@ -1,11 +1,13 @@
 import { useMemo, useState } from "react";
 import { Link, useNavigate, useParams } from "react-router-dom";
 import { useMutation, useQuery, useQueryClient } from "@tanstack/react-query";
-import { ArrowLeft, Check, CheckSquare, ImageMinus, Pencil, Search, Star, Trash2, X } from "lucide-react";
-import { api } from "../lib/api";
+import { ArrowLeft, Check, CheckSquare, FolderOutput, ImageMinus, Link2, MonitorPlay, Pencil, Search, Star, Trash2, X } from "lucide-react";
+import { api, FLAG } from "../lib/api";
 import { PhotoGrid } from "../components/PhotoGrid";
 import { EmptyState, ErrorState, Spinner } from "../components/States";
-import { SelectionBar, useSelection } from "../components/SelectionBar";
+import { SelectionBar, useSelectAllShortcut, useSelection } from "../components/SelectionBar";
+import { Slideshow } from "../components/Slideshow";
+import { HtmlExportDialog, ShareDialog } from "../components/ShareDialog";
 import { useViewer } from "../components/ViewerContext";
 import { useTitle } from "../lib/hooks";
 
@@ -19,6 +21,7 @@ export default function AlbumDetail() {
   const [name, setName] = useState("");
   const [selecting, setSelecting] = useState(false);
   const selection = useSelection();
+  const [dialog, setDialog] = useState<"share" | "export" | "slideshow" | null>(null);
 
   const { data, isLoading, isError, error, refetch } = useQuery({
     queryKey: ["album", albumId],
@@ -53,6 +56,9 @@ export default function AlbumDetail() {
       rating: rating?.[i] ?? 0 }));
   }, [data]);
 
+  const allIds = useMemo(() => items.map((i) => i.id), [items]);
+  useSelectAllShortcut(selecting, allIds, selection.setAll);
+
   if (isError) return <ErrorState error={error} onRetry={() => refetch()} />;
   if (isLoading || !data) return <Spinner full label="Loading album" />;
 
@@ -84,6 +90,12 @@ export default function AlbumDetail() {
           </p>
         </div>
         <div className="toolbar">
+          <button className="btn btn-ghost btn-sm" onClick={() => setDialog("slideshow")} disabled={!items.length}>
+            <MonitorPlay size={14} /> Slideshow
+          </button>
+          <button className="btn btn-ghost btn-sm" onClick={() => setDialog("share")}><Link2 size={14} /> Share</button>
+          <button className="btn btn-ghost btn-sm" onClick={() => setDialog("export")} disabled={!items.length}
+            title="Save as a web page that opens anywhere"><FolderOutput size={14} /> Export</button>
           <button className={`btn btn-ghost btn-sm${selecting ? " is-on" : ""}`}
             onClick={() => { setSelecting((v) => !v); selection.clear(); }}>
             <CheckSquare size={14} /> {selecting ? "Done" : "Select"}
@@ -95,7 +107,13 @@ export default function AlbumDetail() {
         </div>
       </div>
 
-      <SelectionBar selected={selection.selected} onClear={selection.clear} extra={<>
+      {dialog === "share" && <ShareDialog albumId={albumId} albumName={data.name} onClose={() => setDialog(null)} />}
+      {dialog === "export" && <HtmlExportDialog albumId={albumId} albumName={data.name} onClose={() => setDialog(null)} />}
+      {dialog === "slideshow" && <Slideshow items={items.map((i) => ({ id: i.id, video: (i.flags & FLAG.video) > 0 }))}
+        onClose={() => setDialog(null)} />}
+
+      <SelectionBar selected={selection.selected} onClear={selection.clear} allIds={allIds} onSelectAll={selection.setAll}
+        extra={<>
         {selection.selected.size === 1 && (
           <button className="btn btn-ghost btn-sm" onClick={() => cover.mutate([...selection.selected][0])}>
             <Star size={14} /> Use as cover
@@ -111,6 +129,7 @@ export default function AlbumDetail() {
       <PhotoGrid items={items} grouping="day" targetHeight={220}
         onOpen={(_, index) => viewer.open(items.map((i) => i.id), index)}
         selectable selectMode={selecting} selection={selection.selected} onToggleSelect={selection.toggle}
+        onSelectRange={selection.addMany}
         emptyState={<EmptyState title="This album is empty"
           hint="Select photos anywhere in your library and choose “Add to album”." />} />
     </div>

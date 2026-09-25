@@ -13,6 +13,7 @@ import "./styles/people.css";
 import "./styles/events.css";
 import "./styles/viewer.css";
 import "./styles/misc.css";
+import "./styles/explore.css";
 import "leaflet/dist/leaflet.css";
 
 import App from "./App";

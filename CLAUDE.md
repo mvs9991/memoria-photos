@@ -24,18 +24,21 @@ tried and rejected, and what is still unverified. `README.md` documents the prod
 ## Commands
 
 ```bash
-.venv/Scripts/python.exe -m pytest -q          # 175 tests, ~95s, no GPU needed
+.venv/Scripts/python.exe -m pytest -q          # 187 tests, ~95s, no GPU needed
 python -m photointel add-root "D:/Photos"
 python -m photointel index                     # resumable; only processes what changed
 python -m photointel index --post-only --full-recluster   # after changing clustering settings
 python -m photointel ocr [--all]               # read text in photos (post-index reads likely-text ones)
 python -m photointel export-xmp <folder>       # XMP sidecars for other apps (refuses folders in a root)
+python -m photointel import-gpx <files>        # GPS tracks, then --post-only --stages gpx,geocode,events,search-index
+python -m photointel set-password              # required before `serve --host 0.0.0.0` (or pass --insecure)
 python -m photointel serve                     # http://127.0.0.1:8765
 python eval/inspect_library.py --data ./data   # sanity report for a real library
 ```
 
 Rebuild the UI with `npm run build` in `web/`. Screenshot-review every screen with
-`node web/shots.mjs <outdir> http://127.0.0.1:8765` — it fails on console errors, failed API
+`node web/shots.mjs <outdir> http://127.0.0.1:8765` (prefix `PW_CHANNEL=msedge` if Playwright's
+Chromium is not installed) — it fails on console errors, failed API
 requests, and a non-virtualising photo grid.
 
 ## Environment

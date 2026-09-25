@@ -61,6 +61,13 @@ photos ──► scan ──► decode / EXIF / hash / thumbnail ──► faces
 | **Birthdays & ages** | Add a birthday to a person: their past birthdays show up in Memories as the day approaches, faces show their age, and `Priya at age 5` searches that year of their life. |
 | **Fix dates & places** | Shift a wrong camera clock or set a date/place for a selection. Stored in Memoria and re-applied after re-indexing — the files are never written. |
 | **Export to other apps** | XMP sidecars (people with face regions, your tags, stars, descriptions, corrected dates/places) for digiKam, darktable and Lightroom — written to a folder you choose, never next to your photos. |
+| **Collections & clean-up** | Videos, Live photos, panoramas, selfies, RAW and stacks in one place, plus review lists — screenshots, documents, memes, possibly blurry, large files, no location, unsure date — where the only action is *hide*. A Hidden list brings anything back. |
+| **Folders** | Browse the library the way it sits on disk, with counts and a cover per folder. |
+| **Insights & year in review** | Photos per month, busiest day, who appears most and who appears together, new faces, places, furthest from home, trips, cameras, and the best photos of the year — all counted, nothing estimated. |
+| **Slideshow & photo frame** | Full-screen slideshow of any grid (crossfade, shuffle, speed, videos play). `/frame` turns a tablet or TV into a frame with a clock; `/api/random/image` feeds dashboards such as Home Assistant. |
+| **GPS tracks** | Drop a `.gpx` from a phone, watch or bike computer next to the photos (or upload it): photos from a camera without GPS are placed by time, and the route is drawn on the map and on the trip. |
+| **Sharing & password** | An optional password for the app. Read-only links to one album — nothing else is reachable through them — with optional downloads, expiry and revoke. |
+| **Web gallery export** | Any album as a folder with an `index.html` that opens offline in any browser or on any web host. |
 | **Quality** | Sharpness, exposure, resolution and an aesthetic proxy, so "best photos of X" means something. |
 | **Timeline / Map / Memories** | Year → month → event browsing, a map of everywhere you've been, and an "on this day" home screen. |
 
@@ -121,8 +128,11 @@ Re-running `index` only processes what is new or changed.
 | `caption --limit 500` | Describe photos with a local vision model (~2/s) |
 | `export-xmp <folder> [--auto-tags]` | Write XMP sidecars to a folder outside your library |
 | `ocr [--all]` | Read text in photos. After each index only likely-text photos (screenshots, documents, receipts…) are read; `--all` reads everything |
+| `import-gpx <files…>` | Add GPS tracks (copied into the data directory); then `index --post-only --stages gpx,geocode,events,search-index` |
+| `set-password` | Require a password to open the web app (empty input removes it) |
 | `status` | Library summary |
 | `serve --port 8765` | Run the web app |
+| `serve --host 0.0.0.0` | Serve to your network — refused without a password unless you add `--insecure` |
 
 Everything a library owns lives in one data directory (`./data`, or `--data` / `$PHOTOINTEL_DATA`).
 A few things are properties of the *machine* rather than the library, so a second library can
@@ -229,6 +239,9 @@ the *same* structured filter, and names it invents that aren't in your library a
   list — never photos, paths, EXIF or coordinates. Sending images is a separate switch, off by
   default, and applies only to photos you explicitly ask about.
 - Original files are never modified, moved or deleted. "Hide" only affects your library views.
+- The app listens on this machine only. Serving it to a network requires a password (PBKDF2, signed
+  session cookie). Share links expose one album and nothing else, and can be revoked. There is no
+  built-in HTTPS: anything beyond a home network should go through a reverse proxy that adds it.
 
 ---
 
@@ -355,6 +368,13 @@ against COCO instance annotations), `embed_lfw.py`, `scale_benchmark.py`.
   ("RELIANCE FRESH" was read as "RELIANCEFRESH"), so a quoted multi-word search can miss.
 - **Takeout name suggestions are unmeasured.** The share/coverage rule is tested on constructed
   cases, not on a real export with known answers.
+- **GPS-track placement is tested on generated tracks only.** A photo is matched by time: its EXIF
+  offset if present, otherwise this computer's time zone on that date. A camera set to another zone
+  without an offset tag, or a clock that drifted, places photos wrongly — they are labelled `gpx`,
+  medium confidence, and "Fix date → shift" corrects the clock first.
+- **Clean-up lists are heuristics, not measured detectors.** "Possibly blurry" is a sharpness score
+  below 35, "large" is ≥ 20 MB, memes and documents come from the tagger. They are review lists; none
+  hides anything by itself.
 - **Burst stacking thresholds are unmeasured.** Frames must be ≤ 1.5 s apart, within 18 bits of pHash
   and ≥ 0.93 embedding similarity; chosen from the duplicate finder's existing bars and checked on
   generated frames only. RAW+JPEG pairing is exercised with a stand-in file name, since no real RAW
@@ -429,7 +449,7 @@ photointel/
   api/        app.py routes_*.py images.py
 web/          React + TypeScript UI
 eval/         dataset builders, calibration, end-to-end evaluation
-tests/        175 tests, no GPU required
+tests/        187 tests, no GPU required
 ```
 
 The layering is deliberate: vision → features → database → relationship engines → search → UI.
@@ -442,7 +462,7 @@ face recogniser.
 python -m pytest tests/ -q
 ```
 
-They stub the neural nets, so all 175 tests run on CPU in about 70 seconds and still cover
+They stub the neural nets, so all 187 tests run on CPU in about 70 seconds and still cover
 scanning, incremental re-indexing, moves, decoding, metadata, clustering, corrections, events,
 duplicates, search parsing and the HTTP API. The fixtures seed their randomness from stable
 hashes, so a failure reproduces on the next run instead of disappearing.

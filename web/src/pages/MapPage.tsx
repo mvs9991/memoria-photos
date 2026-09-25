@@ -18,6 +18,10 @@ export default function MapPage() {
     queryFn: () => api.mapPoints(person ? { person } : {}),
   });
   const settings = useQuery({ queryKey: ["settings"], queryFn: api.settings });
+  const gpx = useQuery({ queryKey: ["gpx-tracks"], queryFn: () => api.gpxTracks() });
+  const [showTracks, setShowTracks] = useState(true);
+  const tracks = useMemo(() => (showTracks ? (gpx.data?.tracks ?? []).map((t) => t.points) : []),
+    [gpx.data, showTracks]);
 
   const clustered = useMemo(() => {
     if (person) {
@@ -38,7 +42,7 @@ export default function MapPage() {
 
   if (places.isError) return <ErrorState error={places.error} onRetry={() => places.refetch()} />;
   if (places.isLoading) return <Spinner full label="Loading map" />;
-  if (!clustered.length) {
+  if (!clustered.length && !tracks.length) {
     return <EmptyState icon={<MapPin size={26} />} title="No photos with locations"
       hint="Photos need GPS metadata (or an event with GPS) to appear on the map." />;
   }
@@ -48,8 +52,15 @@ export default function MapPage() {
       <div className="page-head">
         <div>
           <h1 className="display">Map</h1>
-          <p className="dim">{clustered.length.toLocaleString()} locations</p>
+          <p className="dim">{clustered.length.toLocaleString()} locations
+            {gpx.data?.tracks.length ? ` · ${gpx.data.tracks.length} GPS track${gpx.data.tracks.length === 1 ? "" : "s"}` : ""}</p>
         </div>
+        <div className="toolbar">
+        {(gpx.data?.tracks.length ?? 0) > 0 && (
+          <button className={`chip chip-button${showTracks ? " chip-accent" : ""}`} onClick={() => setShowTracks((v) => !v)}>
+            tracks
+          </button>
+        )}
         <select className="field field-sm" value={person ?? ""} aria-label="Filter by person"
           onChange={(e) => setPerson(e.target.value ? Number(e.target.value) : null)}>
           <option value="">Everyone</option>
@@ -57,10 +68,11 @@ export default function MapPage() {
             <option key={p.id} value={p.id}>{p.label}</option>
           ))}
         </select>
+        </div>
       </div>
 
       <div className="card map-full">
-        <MiniMap points={clustered} height={620} onSelect={(p: any) => p.id && navigate(`/places/${p.id}`)} />
+        <MiniMap points={clustered} height={620} tracks={tracks} onSelect={(p: any) => p.id && navigate(`/places/${p.id}`)} />
       </div>
 
       {!settings.data?.settings?.allow_online_map_tiles && (

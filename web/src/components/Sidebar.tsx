@@ -2,7 +2,7 @@ import { NavLink } from "react-router-dom";
 import { useQuery } from "@tanstack/react-query";
 import {
   BookImage, CalendarRange, Copy, Images, MapPin, PanelLeftClose, PanelLeft, Settings as SettingsIcon,
-  Sparkles, Users, Clock, Map as MapIcon,
+  Sparkles, Users, Clock, Map as MapIcon, LayoutGrid, FolderTree, ChartColumn,
 } from "lucide-react";
 import { api } from "../lib/api";
 
@@ -11,10 +11,13 @@ const NAV = [
   { to: "/photos", label: "Photos", icon: Images },
   { to: "/people", label: "People", icon: Users },
   { to: "/albums", label: "Albums", icon: BookImage },
+  { to: "/collections", label: "Collections", icon: LayoutGrid },
   { to: "/events", label: "Events", icon: CalendarRange },
   { to: "/places", label: "Places", icon: MapPin },
   { to: "/map", label: "Map", icon: MapIcon },
   { to: "/timeline", label: "Timeline", icon: Clock },
+  { to: "/folders", label: "Folders", icon: FolderTree },
+  { to: "/insights", label: "Insights", icon: ChartColumn },
   { to: "/duplicates", label: "Duplicates", icon: Copy },
 ];
 

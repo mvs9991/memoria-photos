@@ -1,13 +1,14 @@
 import { useMemo, useState } from "react";
 import { useSearchParams } from "react-router-dom";
 import { useQuery } from "@tanstack/react-query";
-import { CalendarDays, CheckSquare, Heart, Images, LayoutGrid, Rows3, SlidersHorizontal, Star, X } from "lucide-react";
-import { api } from "../lib/api";
+import { CalendarDays, CheckSquare, Heart, Images, LayoutGrid, MonitorPlay, Rows3, SlidersHorizontal, Star, X } from "lucide-react";
+import { api, FLAG } from "../lib/api";
 import { monthName } from "../lib/format";
 import { PhotoGrid } from "../components/PhotoGrid";
 import { EmptyState, ErrorState, NoLibrary, SkeletonGrid } from "../components/States";
 import { useViewer } from "../components/ViewerContext";
-import { SelectionBar, useSelection } from "../components/SelectionBar";
+import { SelectionBar, useSelectAllShortcut, useSelection } from "../components/SelectionBar";
+import { Slideshow } from "../components/Slideshow";
 import { useTitle, useLocalState } from "../lib/hooks";
 
 export default function Photos() {
@@ -19,6 +20,7 @@ export default function Photos() {
   const [showFilters, setShowFilters] = useState(false);
   const [selecting, setSelecting] = useState(false);
   const selection = useSelection();
+  const [slideshow, setSlideshow] = useState(false);
 
   const favorite = params.get("favorite") === "1";
   const source = params.get("source") ?? "";
@@ -45,6 +47,9 @@ export default function Photos() {
     return ids.map((id, i) => ({ id, ratio: ratio[i], ts: ts[i], flags: flags[i], dur: dur?.[i] ?? 0,
       rating: rating?.[i] ?? 0, stack: stack?.[i] ?? 0 }));
   }, [query.data]);
+
+  const allIds = useMemo(() => items.map((i) => i.id), [items]);
+  useSelectAllShortcut(selecting, allIds, selection.setAll);
 
   const targetHeight = density === "compact" ? 150 : density === "large" ? 340 : 230;
 
@@ -98,8 +103,12 @@ export default function Photos() {
             <button className={density === "large" ? "on" : ""} onClick={() => setDensity("large")}
               title="Large"><Images size={15} /></button>
           </div>
+          <button className="btn btn-ghost btn-sm" onClick={() => setSlideshow(true)} disabled={!items.length}
+            title="Slideshow of these photos">
+            <MonitorPlay size={14} /> Slideshow
+          </button>
           <button className={`btn btn-ghost btn-sm${selecting ? " is-on" : ""}`}
-            onClick={() => { setSelecting((v) => !v); selection.clear(); }} title="Select photos">
+            onClick={() => { setSelecting((v) => !v); selection.clear(); }} title="Select photos (then Shift-click a range, Ctrl+A for all)">
             <CheckSquare size={14} /> {selecting ? "Done" : "Select"}
           </button>
           <button className={`btn btn-ghost btn-icon${showFilters ? " is-on" : ""}`}
@@ -145,7 +154,10 @@ export default function Photos() {
         </div>
       )}
 
-      <SelectionBar selected={selection.selected} onClear={selection.clear} />
+      <SelectionBar selected={selection.selected} onClear={selection.clear} allIds={allIds}
+        onSelectAll={selection.setAll} />
+      {slideshow && <Slideshow items={items.map((i) => ({ id: i.id, video: (i.flags & FLAG.video) > 0 }))}
+        onClose={() => setSlideshow(false)} />}
 
       {query.isLoading ? (
         <SkeletonGrid />
@@ -159,6 +171,7 @@ export default function Photos() {
           selectMode={selecting}
           selection={selection.selected}
           onToggleSelect={selection.toggle}
+          onSelectRange={selection.addMany}
           emptyState={<EmptyState title="No photos match these filters"
             hint="Try clearing the filters or indexing more folders." />}
         />

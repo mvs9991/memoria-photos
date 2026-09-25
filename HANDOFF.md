@@ -56,7 +56,7 @@ photointel/
   api/       app.py routes_*.py images.py
 web/         React + TypeScript UI (Vite)
 eval/        dataset builders, calibration, evaluation, library inspector
-tests/       175 tests, no GPU required
+tests/       187 tests, no GPU required
 ```
 
 **The indexing pipeline** is a feeder thread → N CPU worker threads (read, hash, decode, EXIF,
@@ -273,6 +273,27 @@ the old code.
 makes it the containing block for `position: fixed` children, which squashed the compare view into the
 bar. `components/Portal.tsx` is the fix; use it for any new modal opened from inside a bar.
 
+**A password guards `/api`, not the pages.** The middleware in `api/app.py` answers 401 for every
+`/api` route except `/api/auth/*` and `/api/share/*` when a password is set; the React login screen is
+only presentation. Sessions are HMAC-signed with `data/secret.key` and last 30 days; changing the
+password writes `data/password.changed`, which invalidates every older session. `serve` refuses a
+non-loopback host without a password (`--insecure` overrides). Tests fail without the middleware and
+without the refusal.
+
+**A share link reaches exactly one album.** Every `/api/share/{token}/…` route re-checks that the photo
+belongs to the token's album (smart albums re-run their search), strips the owner's favourite flag,
+and serves downloads only if the link allows them. A test fails without the membership check. Tokens
+are 128-bit, stored in `share_links`, and die with the album or on revoke.
+
+**GPS tracks never override a better location.** Only photos with no GPS, a high/medium date, and no
+Takeout or user location are placed; the result is `location_source = 'gpx'`, medium confidence, and
+the geocoder keeps that label. Both neighbouring track points must be within 5 minutes of the photo.
+A test fails without the `gps_lat IS NULL` rule.
+
+**Clean-up lists only hide.** `POST /photos/hide` sets `hidden`; the Hidden collection
+(`collection=hidden` flips the visibility filter) is the way back. Nothing on the Collections page
+touches a file, and the thresholds (blur < 35, ≥ 20 MB) are heuristics, not measured.
+
 **`.nomedia` is deliberately not honoured.** WhatsApp puts it in `Sent`, which held 1,339 of the
 owner's own photos. Dot-directories are already excluded, which handles real app-cache junk.
 
@@ -401,6 +422,15 @@ the future, everything collapsing into one event, fuzzy duplicate thresholds too
 - **Takeout name suggestions** are unmeasured on a real export (see §4).
 - One `net::ERR_CONTENT_LENGTH_MISMATCH` was logged once in a browser run against the demo library and
   could not be reproduced in five further runs (cold and warm). Unexplained; watch for it with video.
+- **GPX placement** is tested on generated tracks only. Photo time → UTC uses the EXIF offset, else this
+  machine's zone on that date; a camera set to another zone without an offset tag lands wrongly.
+- **Clean-up thresholds** (blur < 35, ≥ 20 MB, tagger's meme/document) are unmeasured heuristics.
+- **Auth has had no security review.** It is PBKDF2 (240k rounds) + an HMAC session cookie with no
+  HTTPS of its own and no rate limit on login. Fine behind a home router; put a TLS reverse proxy in
+  front of anything wider.
+- Observed in the v4 demo: a Takeout album copy and its year-folder twin (same pixels, same second) are
+  folded into one *stack* as well as grouped as duplicates. Harmless — the copy leaves the timeline —
+  but the stack is a burst of one photo. Not changed; worth a rule if it confuses anyone.
 - Cosmetic: folder tokens of ≤3 letters are uppercased as probable airport/city codes (BLR, HYD),
   so `Goa Trip 2019` titles as `GOA Trip`. Changing it risks breaking real codes.
 
@@ -408,14 +438,15 @@ the future, everything collapsing into one event, fuzzy duplicate thresholds too
 
 ## 10. Working notes
 
-- Run the suite with `.venv/Scripts/python.exe -m pytest -q`. 175 tests, ~95 s, no GPU needed —
+- Run the suite with `.venv/Scripts/python.exe -m pytest -q`. 187 tests, ~95 s, no GPU needed —
   the neural nets are replaced by deterministic fakes.
 - Test fixtures seed randomness from `zlib.crc32` of the **file name**, not `hash()` (salted per
   process) and not the full path (contains pytest's per-run tmp counter). Both made failures
   irreproducible.
 - The UI review tool is `web/shots.mjs` — it screenshots every screen, fails on console errors, any
   failed API request, and now asserts the grid is virtualising. Run it after UI changes:
-  `node shots.mjs <outdir> http://127.0.0.1:8765`. It waits for images to decode and for animations
+  `node shots.mjs <outdir> http://127.0.0.1:8765` (add `PW_CHANNEL=msedge` when Playwright's own
+  Chromium is not downloaded — its CDN timed out on the build machine). It waits for images to decode and for animations
   to settle, because an early capture once produced blank tiles and a half-counted "279 photos" on a
   1,489-photo library that looked exactly like a rendering bug.
 - `npm run build` in `web/` rebuilds the SPA into `web/dist`, which the server serves.

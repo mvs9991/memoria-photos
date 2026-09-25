@@ -6,6 +6,7 @@ import { Spinner } from "./components/States";
 import { ViewerProvider } from "./components/ViewerContext";
 import { ErrorBoundary } from "./components/ErrorBoundary";
 import { Shortcuts } from "./components/Shortcuts";
+import { AuthGate } from "./components/AuthGate";
 
 const Home = lazy(() => import("./pages/Home"));
 const Photos = lazy(() => import("./pages/Photos"));
@@ -23,8 +24,33 @@ const Timeline = lazy(() => import("./pages/Timeline"));
 const Duplicates = lazy(() => import("./pages/Duplicates"));
 const SearchPage = lazy(() => import("./pages/SearchPage"));
 const Settings = lazy(() => import("./pages/Settings"));
+const Collections = lazy(() => import("./pages/Collections"));
+const CollectionDetail = lazy(() => import("./pages/Collections").then((m) => ({ default: m.CollectionDetail })));
+const Folders = lazy(() => import("./pages/Folders"));
+const Insights = lazy(() => import("./pages/Insights"));
+const Frame = lazy(() => import("./pages/Frame"));
+const SharedAlbum = lazy(() => import("./pages/SharedAlbum"));
 
 export default function App() {
+  const location = useLocation();
+  // A share link is public and has no app around it; the frame is full-screen but private.
+  if (location.pathname.startsWith("/s/")) {
+    return (
+      <Suspense fallback={<Spinner label="Loading" full />}>
+        <Routes><Route path="/s/:token" element={<SharedAlbum />} /></Routes>
+      </Suspense>
+    );
+  }
+  return (
+    <AuthGate>
+      {location.pathname === "/frame" ? (
+        <Suspense fallback={<Spinner label="Loading" full />}><Frame /></Suspense>
+      ) : <Shell />}
+    </AuthGate>
+  );
+}
+
+function Shell() {
   const location = useLocation();
   const [collapsed, setCollapsed] = useState(() => localStorage.getItem("nav-collapsed") === "1");
 
@@ -54,6 +80,10 @@ export default function App() {
                 <Route path="/people/:id" element={<PersonDetail />} />
                 <Route path="/albums" element={<Albums />} />
                 <Route path="/albums/:id" element={<AlbumDetail />} />
+                <Route path="/collections" element={<Collections />} />
+                <Route path="/collections/:key" element={<CollectionDetail />} />
+                <Route path="/folders" element={<Folders />} />
+                <Route path="/insights" element={<Insights />} />
                 <Route path="/events" element={<Events />} />
                 <Route path="/events/:id" element={<EventDetail />} />
                 <Route path="/places" element={<Places />} />

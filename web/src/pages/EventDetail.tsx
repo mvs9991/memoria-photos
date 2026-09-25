@@ -1,8 +1,9 @@
 import { useMemo, useState } from "react";
 import { Link, useParams } from "react-router-dom";
 import { useMutation, useQuery, useQueryClient } from "@tanstack/react-query";
-import { ArrowLeft, Check, MapPin, Pencil, Sparkles, Users, X } from "lucide-react";
-import { api, faceUrl, thumbUrl } from "../lib/api";
+import { ArrowLeft, Check, MapPin, MonitorPlay, Pencil, Sparkles, Users, X } from "lucide-react";
+import { api, faceUrl, FLAG, thumbUrl } from "../lib/api";
+import { Slideshow } from "../components/Slideshow";
 import { PhotoGrid } from "../components/PhotoGrid";
 import { ErrorState, SectionHeader, Spinner } from "../components/States";
 import { useViewer } from "../components/ViewerContext";
@@ -16,12 +17,21 @@ export default function EventDetail() {
   const viewer = useViewer();
   const [renaming, setRenaming] = useState(false);
   const [title, setTitle] = useState("");
+  const [slideshow, setSlideshow] = useState(false);
 
   const { data, isLoading, isError, error, refetch } = useQuery({
     queryKey: ["event", eventId],
     queryFn: () => api.event(eventId),
   });
   useTitle(data?.title);
+  // Event times are wall-clock; GPX times are UTC. Pad by the widest time-zone offset so
+  // a track recorded on the day is found wherever it was, then keep what overlaps.
+  const gpx = useQuery({
+    queryKey: ["gpx-tracks", data?.start_ts, data?.end_ts],
+    queryFn: () => api.gpxTracks({ start_ts: data.start_ts - 14 * 3600, end_ts: data.end_ts + 14 * 3600 }),
+    enabled: !!data?.start_ts,
+  });
+  const tracks = useMemo(() => (gpx.data?.tracks ?? []).map((t) => t.points), [gpx.data]);
 
   const rename = useMutation({
     mutationFn: (value: string | null) => api.renameEvent(eventId, value),
@@ -35,7 +45,7 @@ export default function EventDetail() {
   const items = useMemo(() => {
     if (!data?.photos) return [];
     return data.photos.ids.map((pid: number, i: number) => ({
-      id: pid, ratio: data.photos.ratio[i], ts: data.photos.ts[i],
+      id: pid, ratio: data.photos.ratio[i], ts: data.photos.ts[i], flags: data.photos.flags?.[i] ?? 0,
     }));
   }, [data]);
 
@@ -112,10 +122,10 @@ export default function EventDetail() {
             </div>
           </div>
         )}
-        {data.map_points?.length > 0 && (
+        {(data.map_points?.length > 0 || tracks.length > 0) && (
           <div className="fact-card fact-card-map">
-            <div className="fact-head"><MapPin size={13} /> Where</div>
-            <MiniMap points={data.map_points} height={160} />
+            <div className="fact-head"><MapPin size={13} /> Where{tracks.length ? " · with GPS track" : ""}</div>
+            <MiniMap points={data.map_points ?? []} height={160} tracks={tracks} />
           </div>
         )}
       </div>
@@ -156,7 +166,12 @@ export default function EventDetail() {
       )}
 
       <section>
-        <SectionHeader title="All photos" count={items.length} />
+        <SectionHeader title="All photos" count={items.length} action={
+          <button className="btn btn-ghost btn-sm" onClick={() => setSlideshow(true)} disabled={!items.length}>
+            <MonitorPlay size={14} /> Slideshow
+          </button>} />
+        {slideshow && <Slideshow items={items.map((i: any) => ({ id: i.id, video: (i.flags & FLAG.video) > 0 }))}
+          onClose={() => setSlideshow(false)} />}
         <PhotoGrid items={items} grouping="day" targetHeight={220}
           onOpen={(_, index) => viewer.open(items.map((i: any) => i.id), index)} />
       </section>

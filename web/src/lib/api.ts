@@ -182,6 +182,57 @@ export interface Stats {
   roots: { id: number; path: string; last_scan_at: number | null }[];
 }
 
+export interface Collection {
+  key: string;
+  title: string;
+  group: "media" | "cleanup";
+  count: number;
+  cover_photo_id: number | null;
+}
+
+export interface FolderNode {
+  root_id: number;
+  name: string;
+  path: string;
+  count: number;
+  cover_photo_id: number | null;
+}
+
+export interface Insights {
+  year: number | null;
+  years: number[];
+  totals: { photos: number; videos: number; video_minutes: number; people: number; places: number;
+    countries: number; trips: number; events: number };
+  months: number[];
+  busiest_day: { date: string; photos: number } | null;
+  people: { id: number; label: string; cover_face_id: number | null; photos: number }[];
+  constellation: { a: number; b: number; photos: number }[];
+  new_people: { id: number; label: string; cover_face_id: number | null }[];
+  places: { id: number; city: string | null; country: string | null; photos: number }[];
+  countries: string[];
+  furthest_from_home: { place_id: number; city: string | null; country: string | null; km: number; home: string } | null;
+  cameras: { camera: string; photos: number }[];
+  tags: { name: string; photos: number }[];
+  trips: { id: number; title: string; start_ts: number; end_ts: number; photos: number; cover_photo_id: number | null }[];
+  best_photo_ids: number[];
+}
+
+export interface GpxTrack {
+  id: number;
+  name: string;
+  start_ts: number;
+  end_ts: number;
+  points: [number, number][];
+}
+
+export interface ShareLink {
+  token: string;
+  allow_download: number | boolean;
+  expires_at: number | null;
+  created_at: number;
+  last_used_at: number | null;
+}
+
 const BASE = "/api";
 
 export class ApiError extends Error {
@@ -204,6 +255,10 @@ async function request<T>(path: string, init?: RequestInit): Promise<T> {
       detail = body.detail || body.error || detail;
     } catch {
       /* non-JSON error body */
+    }
+    // A password was set (or the session ran out) while the app was open.
+    if (res.status === 401 && !path.startsWith("/auth/") && !path.startsWith("/share/")) {
+      window.dispatchEvent(new Event("memoria:login-required"));
     }
     throw new ApiError(detail, res.status);
   }
@@ -340,6 +395,43 @@ export const api = {
   models: () => request<any>("/models"),
   errors: () => request<any>("/errors"),
   audit: (params: Record<string, any> = {}) => request<any>(`/audit${qs(params)}`),
+  hide: (photo_ids: number[], hidden = true) =>
+    request<{ changed: number }>(`/photos/hide`, { method: "POST", body: JSON.stringify({ photo_ids, hidden }) }),
+  collections: () => request<{ collections: Collection[]; recently_added_cover: number | null; duplicate_groups: number }>(
+    "/collections"),
+  browseFolders: (root_id?: number, path = "") =>
+    request<{ root_id: number | null; path: string; folders: FolderNode[]; direct_count: number }>(
+      `/folders/browse${qs({ root_id, path })}`),
+  /** photos directly in one folder ("" is the root itself, which qs() would drop) */
+  photosInFolder: (root_id: number, folder: string) =>
+    request<PhotoIndex>(`/photos/index?${new URLSearchParams({ root_id: String(root_id), folder, folder_exact: "true",
+      order: "date_asc" })}`),
+  insights: (year?: number) => request<Insights>(`/insights${qs({ year })}`),
+  random: (params: Record<string, any> = {}) => request<{ ids: number[] }>(`/random${qs(params)}`),
+  gpxTracks: (params: { start_ts?: number; end_ts?: number } = {}) =>
+    request<{ tracks: GpxTrack[] }>(`/gpx/tracks${qs(params)}`),
+  uploadGpx: (file: File) => {
+    const form = new FormData();
+    form.append("file", file);
+    return request<{ id: number }>(`/gpx`, { method: "POST", body: form, headers: {} });
+  },
+  exportAlbumHtml: (id: number, folder: string) =>
+    request<{ exported: number; skipped: number; folder: string }>(`/albums/${id}/export-html`, {
+      method: "POST", body: JSON.stringify({ folder }),
+    }),
+
+  authStatus: () => request<{ protected: boolean; logged_in: boolean }>("/auth/status"),
+  login: (password: string) => request(`/auth/login`, { method: "POST", body: JSON.stringify({ password }) }),
+  logout: () => request(`/auth/logout`, { method: "POST" }),
+  setPassword: (current: string, next: string) =>
+    request<{ protected: boolean }>(`/auth/password`, { method: "POST", body: JSON.stringify({ current, new: next }) }),
+  shareAlbum: (id: number, allow_download: boolean, expires_days: number | null) =>
+    request<ShareLink>(`/albums/${id}/share`, { method: "POST", body: JSON.stringify({ allow_download, expires_days }) }),
+  shares: (id: number) => request<{ shares: ShareLink[] }>(`/albums/${id}/shares`),
+  revokeShare: (token: string) => request(`/shares/${token}`, { method: "DELETE" }),
+  shared: (token: string) =>
+    request<{ name: string; allow_download: boolean; photos: PhotoIndex }>(`/share/${token}`),
+
   clearCache: (kind: string) => request<any>(`/cache/clear${qs({ kind })}`, { method: "POST" }),
 };
 
@@ -348,4 +440,9 @@ export const originalUrl = (id: number) => `${BASE}/photos/${id}/original`;
 export const downloadUrl = (id: number) => `${BASE}/photos/${id}/download`;
 export const videoUrl = (id: number) => `${BASE}/photos/${id}/video`;
 export const motionUrl = (id: number) => `${BASE}/photos/${id}/motion`;
+export const sharedThumbUrl = (token: string, id: number, size: "sm" | "m" | "l" = "m") =>
+  `${BASE}/share/${token}/thumb/${id}?s=${size}`;
+export const sharedVideoUrl = (token: string, id: number) => `${BASE}/share/${token}/video/${id}`;
+export const sharedDownloadUrl = (token: string, id: number) => `${BASE}/share/${token}/download/${id}`;
+export const randomImageUrl = (params: Record<string, any> = {}) => `${BASE}/random/image${qs(params)}`;
 export const faceUrl = (id: number, size = 200) => `${BASE}/faces/${id}/crop?size=${size}`;

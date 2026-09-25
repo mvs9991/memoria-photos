@@ -52,6 +52,10 @@ interface Props {
   selectable?: boolean;
   /** a plain click selects instead of opening */
   selectMode?: boolean;
+  /** shift-click: select everything between the last clicked tile and this one */
+  onSelectRange?: (ids: number[]) => void;
+  /** thumbnail URL override (the public share page uses token-scoped URLs) */
+  thumbFor?: (id: number, size: "sm" | "m") => string;
   scrubber?: boolean;
   emptyState?: React.ReactNode;
   headerExtra?: React.ReactNode;
@@ -69,9 +73,21 @@ export function PhotoGrid({
   onToggleSelect,
   selectable = false,
   selectMode = false,
+  onSelectRange,
+  thumbFor,
   scrubber = true,
   emptyState,
 }: Props) {
+  const anchorRef = useRef<number | null>(null);
+  const handleSelect = useCallback((id: number, index: number, shift: boolean) => {
+    if (shift && onSelectRange && anchorRef.current !== null) {
+      const [a, b] = [Math.min(anchorRef.current, index), Math.max(anchorRef.current, index)];
+      onSelectRange(items.slice(a, b + 1).map((it) => it.id));
+    } else {
+      onToggleSelect?.(id);
+    }
+    anchorRef.current = index;
+  }, [items, onSelectRange, onToggleSelect]);
   const hostRef = useRef<HTMLDivElement>(null);
   const [width, setWidth] = useState(0);
   const [scrollTop, setScrollTop] = useState(0);
@@ -240,7 +256,8 @@ export function PhotoGrid({
                       selectable={selectable}
                       selectMode={selectMode}
                       onOpen={onOpen}
-                      onToggleSelect={onToggleSelect}
+                      onSelect={handleSelect}
+                      thumbFor={thumbFor}
                     />
                   ))}
                 </div>
@@ -256,11 +273,12 @@ export function PhotoGrid({
   );
 }
 
-function Tile({ id, w, h, flags, dur, rating, stack, index, selected, selectable, selectMode, onOpen, onToggleSelect }: {
+function Tile({ id, w, h, flags, dur, rating, stack, index, selected, selectable, selectMode, onOpen, onSelect, thumbFor }: {
   id: number; w: number; h: number; flags: number; dur: number; rating: number; stack: number; index: number;
   selected: boolean; selectable: boolean;
   selectMode: boolean;
-  onOpen?: (id: number, index: number) => void; onToggleSelect?: (id: number) => void;
+  onOpen?: (id: number, index: number) => void; onSelect: (id: number, index: number, shift: boolean) => void;
+  thumbFor?: (id: number, size: "sm" | "m") => string;
 }) {
   const [loaded, setLoaded] = useState(false);
   const size = w > 420 || h > 420 ? "m" : "sm";
@@ -269,7 +287,7 @@ function Tile({ id, w, h, flags, dur, rating, stack, index, selected, selectable
       className={`tile${selected ? " is-selected" : ""}`}
       style={{ width: w, height: h }}
       onClick={(e) => {
-        if (selectable && (selectMode || e.metaKey || e.ctrlKey || e.shiftKey)) onToggleSelect?.(id);
+        if (selectable && (selectMode || e.metaKey || e.ctrlKey || e.shiftKey)) onSelect(id, index, e.shiftKey);
         else onOpen?.(id, index);
       }}
       role="button"
@@ -277,14 +295,14 @@ function Tile({ id, w, h, flags, dur, rating, stack, index, selected, selectable
       onKeyDown={(e) => {
         if (e.key === "Enter" || e.key === " ") {
           e.preventDefault();
-          if (selectable && selectMode) onToggleSelect?.(id);
+          if (selectable && selectMode) onSelect(id, index, e.shiftKey);
           else onOpen?.(id, index);
         }
       }}
       aria-label={(flags & FLAG.video) ? `Video ${id}` : `Photo ${id}`}
     >
       <img
-        src={thumbUrl(id, size)}
+        src={thumbFor ? thumbFor(id, size) : thumbUrl(id, size)}
         loading="lazy"
         decoding="async"
         alt=""
@@ -312,7 +330,7 @@ function Tile({ id, w, h, flags, dur, rating, stack, index, selected, selectable
           className={`tile-select${selected ? " on" : ""}`}
           onClick={(e) => {
             e.stopPropagation();
-            onToggleSelect?.(id);
+            onSelect(id, index, e.shiftKey);
           }}
           aria-label={selected ? "Deselect" : "Select"}
         >
