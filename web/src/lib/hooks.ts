@@ -1,4 +1,12 @@
 import { useCallback, useEffect, useRef, useState } from "react";
+import { useQuery } from "@tanstack/react-query";
+import { api, type Role } from "./api";
+
+/** The signed-in person's role; "owner" for a library without accounts. */
+export function useRole(): Role {
+  const { data } = useQuery({ queryKey: ["auth"], queryFn: api.authStatus, staleTime: Infinity });
+  return data?.user?.role ?? "owner";
+}
 
 export function useTheme() {
   const [theme, setTheme] = useState<"dark" | "light">(() => {

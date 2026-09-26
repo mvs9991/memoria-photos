@@ -27,7 +27,8 @@ export default function Albums() {
   const albums = data?.albums ?? [];
   const mine = albums.filter((a) => a.source === "user" && a.kind !== "smart");
   const smart = albums.filter((a) => a.kind === "smart");
-  const imported = albums.filter((a) => a.source !== "user");
+  const imported = albums.filter((a) => a.source === "takeout");
+  const icloud = albums.filter((a) => a.source === "icloud");
 
   return (
     <div className="page">
@@ -56,6 +57,7 @@ export default function Albums() {
           {smart.length > 0 && <AlbumGrid albums={smart} title="Smart albums" />}
           {mine.length > 0 && <AlbumGrid albums={mine} title={imported.length || smart.length ? "Your albums" : undefined} />}
           {imported.length > 0 && <AlbumGrid albums={imported} title="From Google Photos" />}
+          {icloud.length > 0 && <AlbumGrid albums={icloud} title="From iCloud" />}
         </>
       )}
     </div>

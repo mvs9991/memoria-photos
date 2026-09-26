@@ -32,7 +32,7 @@ export interface Album {
   id: number;
   name: string;
   description: string | null;
-  source: "user" | "takeout";
+  source: "user" | "takeout" | "icloud";
   kind: "manual" | "smart";
   /** a smart album's saved search */
   query: string | null;
@@ -237,6 +237,24 @@ export interface GpxTrack {
   start_ts: number;
   end_ts: number;
   points: [number, number][];
+}
+
+export type Role = "owner" | "family" | "guest";
+
+export interface Account {
+  id: number;
+  username: string;
+  role: Role;
+  disabled: number | boolean;
+  created_at: number;
+  last_login_at: number | null;
+}
+
+export interface AuthStatus {
+  protected: boolean;
+  accounts: boolean;
+  logged_in: boolean;
+  user: { id: number | null; username: string | null; role: Role } | null;
 }
 
 export interface ShareLink {
@@ -465,8 +483,34 @@ export const api = {
       method: "POST", body: JSON.stringify({ folder }),
     }),
 
-  authStatus: () => request<{ protected: boolean; logged_in: boolean }>("/auth/status"),
-  login: (password: string) => request(`/auth/login`, { method: "POST", body: JSON.stringify({ password }) }),
+  authStatus: () => request<AuthStatus>("/auth/status"),
+  login: (password: string, username?: string) =>
+    request(`/auth/login`, { method: "POST", body: JSON.stringify({ password, username }) }),
+  accounts: () => request<{ enabled: boolean; accounts: Account[] }>("/accounts"),
+  enableAccounts: (username: string) =>
+    request<Account>(`/accounts/enable`, { method: "POST", body: JSON.stringify({ username }) }),
+  createAccount: (username: string, password: string, role: Role) =>
+    request<Account>(`/accounts`, { method: "POST", body: JSON.stringify({ username, password, role }) }),
+  updateAccount: (id: number, body: { role?: Role; password?: string; disabled?: boolean }) =>
+    request<Account>(`/accounts/${id}`, { method: "POST", body: JSON.stringify(body) }),
+  removeAccount: (id: number) => request(`/accounts/${id}`, { method: "DELETE" }),
+  changeMyPassword: (current: string, next: string) =>
+    request(`/accounts/me/password`, { method: "POST", body: JSON.stringify({ current, new: next }) }),
+
+  lockedStatus: () => request<{ pin_set: boolean; open: boolean; count: number }>("/locked/status"),
+  setLockedPin: (next: string, current?: string) =>
+    request(`/locked/pin`, { method: "POST", body: JSON.stringify({ new: next, current }) }),
+  openLocked: (pin: string) => request<{ open: boolean; minutes: number }>(`/locked/open`, {
+    method: "POST", body: JSON.stringify({ pin }),
+  }),
+  closeLocked: () => request(`/locked/close`, { method: "POST" }),
+  lockedPhotos: () => request<PhotoIndex>("/locked/photos"),
+  lock: (photo_ids: number[]) =>
+    request<{ locked: number }>(`/photos/lock`, { method: "POST", body: JSON.stringify({ photo_ids }) }),
+  unlock: (photo_ids: number[]) =>
+    request<{ unlocked: number }>(`/photos/unlock`, { method: "POST", body: JSON.stringify({ photo_ids }) }),
+  archive: (photo_ids: number[], archived = true) =>
+    request<{ changed: number }>(`/photos/archive`, { method: "POST", body: JSON.stringify({ photo_ids, archived }) }),
   logout: () => request(`/auth/logout`, { method: "POST" }),
   setPassword: (current: string, next: string) =>
     request<{ protected: boolean }>(`/auth/password`, { method: "POST", body: JSON.stringify({ current, new: next }) }),

@@ -9,6 +9,7 @@ import { Download, FolderOutput, X } from "lucide-react";
 import { Portal } from "./Portal";
 import { api, downloadZip, type ExportSpec } from "../lib/api";
 import { formatBytes } from "../lib/format";
+import { useRole } from "../lib/hooks";
 
 const LAYOUTS: [NonNullable<ExportSpec["layout"]>, string, string][] = [
   ["date", "By date", "2024/07/IMG_1234.jpg"],
@@ -57,6 +58,7 @@ export function ExportDialog({ spec, title, onClose, footer }: {
   }, [onClose]);
 
   const remote = !["localhost", "127.0.0.1", "[::1]"].includes(window.location.hostname);
+  const owner = useRole() === "owner";
   const n = preview.data?.items ?? 0;
   const pct = job?.progress_total ? Math.round((job.progress_done / job.progress_total) * 100) : 0;
 
@@ -108,7 +110,7 @@ export function ExportDialog({ spec, title, onClose, footer }: {
             </div>
 
             <div className="export-targets">
-              <form className="export-target" onSubmit={(e) => { e.preventDefault(); if (folder.trim()) start.mutate(); }}>
+              {owner && <form className="export-target" onSubmit={(e) => { e.preventDefault(); if (folder.trim()) start.mutate(); }}>
                 <span className="export-target-title">Copy to a folder{remote ? " on the Memoria computer" : ""}</span>
                 <div className="export-row">
                   <input className="field" placeholder="e.g. E:\Backup\Priya" value={folder}
@@ -126,7 +128,7 @@ export function ExportDialog({ spec, title, onClose, footer }: {
                   </div>
                 )}
                 {start.error && <p className="danger-text">{(start.error as Error).message}</p>}
-              </form>
+              </form>}
               <div className="export-target">
                 <span className="export-target-title">Download to this device</span>
                 <button className="btn btn-ghost" onClick={() => downloadZip(full)} disabled={!n}>

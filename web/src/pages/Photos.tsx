@@ -38,7 +38,7 @@ export default function Photos() {
   const query = useQuery({
     queryKey: ["photos", { favorite, source, order, year, month, media, unfold, minRating }],
     queryFn: () => api.photos({ favorite, source: source || undefined, order, year, month, media: media || undefined,
-      collapse_stacks: !unfold, min_rating: minRating || undefined,
+      collapse_stacks: !unfold, min_rating: minRating || undefined, archived: "exclude",
       include_screenshots: source ? true : undefined }),
   });
   const { data: stats } = useQuery({ queryKey: ["stats"], queryFn: api.stats });

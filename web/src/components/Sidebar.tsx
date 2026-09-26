@@ -2,7 +2,7 @@ import { NavLink } from "react-router-dom";
 import { useQuery } from "@tanstack/react-query";
 import {
   BookImage, CalendarRange, Copy, Images, MapPin, PanelLeftClose, PanelLeft, Settings as SettingsIcon,
-  Sparkles, Users, Clock, Map as MapIcon, LayoutGrid, FolderTree, ChartColumn, Trash2, Upload,
+  Sparkles, Users, Clock, Map as MapIcon, LayoutGrid, FolderTree, ChartColumn, Trash2, Upload, Lock, CircleUser,
 } from "lucide-react";
 import { api } from "../lib/api";
 
@@ -24,6 +24,9 @@ const NAV = [
 
 export function Sidebar({ collapsed, onToggle }: { collapsed: boolean; onToggle: () => void }) {
   const { data: stats } = useQuery({ queryKey: ["stats"], queryFn: api.stats, refetchInterval: 60_000 });
+  const { data: auth } = useQuery({ queryKey: ["auth"], queryFn: api.authStatus, staleTime: Infinity });
+  const role = auth?.user?.role ?? "owner";
+  const nav = NAV.filter((n) => !(n.to === "/upload" && role === "guest"));
 
   const counts: Record<string, number | undefined> = {
     "/photos": stats?.photos,
@@ -54,7 +57,7 @@ export function Sidebar({ collapsed, onToggle }: { collapsed: boolean; onToggle:
       </div>
 
       <nav className="nav-links">
-        {NAV.map(({ to, label, icon: Icon, end }) => (
+        {nav.map(({ to, label, icon: Icon, end }) => (
           <NavLink key={to} to={to} end={end} className={({ isActive }) => `nav-link${isActive ? " is-active" : ""}`}
             title={collapsed ? label : undefined}>
             <Icon size={18} strokeWidth={1.9} />
@@ -67,7 +70,14 @@ export function Sidebar({ collapsed, onToggle }: { collapsed: boolean; onToggle:
       </nav>
 
       <div className="nav-foot">
-        {(stats?.trash ?? 0) > 0 && (
+        {role === "owner" && (
+          <NavLink to="/locked" className={({ isActive }) => `nav-link${isActive ? " is-active" : ""}`}
+            title={collapsed ? "Locked folder" : undefined}>
+            <Lock size={18} strokeWidth={1.9} />
+            <span className="nav-label">Locked</span>
+          </NavLink>
+        )}
+        {role === "owner" && (stats?.trash ?? 0) > 0 && (
           <NavLink to="/trash" className={({ isActive }) => `nav-link${isActive ? " is-active" : ""}`}
             title={collapsed ? "Trash" : undefined}>
             <Trash2 size={18} strokeWidth={1.9} />
@@ -80,6 +90,12 @@ export function Sidebar({ collapsed, onToggle }: { collapsed: boolean; onToggle:
           <SettingsIcon size={18} strokeWidth={1.9} />
           <span className="nav-label">Settings</span>
         </NavLink>
+        {auth?.accounts && auth.user?.username && (
+          <NavLink to="/settings" className="nav-link nav-user" title={collapsed ? auth.user.username : `Signed in as ${auth.user.username}`}>
+            <CircleUser size={18} strokeWidth={1.9} />
+            <span className="nav-label">{auth.user.username}</span>
+          </NavLink>
+        )}
         {stats && (
           <div className="nav-stat">
             <span className="tnum">{stats.photos.toLocaleString()}</span> photos

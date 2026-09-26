@@ -1,7 +1,8 @@
 /** Actions for photos selected in a grid: add to album, tag, plus page-specific extras. */
 import { useCallback, useEffect, useState } from "react";
 import { useMutation, useQueryClient } from "@tanstack/react-query";
-import { BookImage, CalendarClock, Columns2, FolderOutput, MapPin, RotateCw, Tag, Trash2, X } from "lucide-react";
+import { Archive, BookImage, CalendarClock, Columns2, FolderOutput, Lock, MapPin, RotateCw, Tag, Trash2, X } from "lucide-react";
+import { useRole } from "../lib/hooks";
 import { api } from "../lib/api";
 import { AlbumPicker } from "./AlbumPicker";
 import { CompareView } from "./CompareView";
@@ -25,6 +26,17 @@ export function SelectionBar({ selected, onClear, extra, allIds, onSelectAll }: 
   const [exporting, setExporting] = useState(false);
   const [trashing, setTrashing] = useState(false);
   const canDelete = useAllowDelete();
+  const role = useRole();
+  const archive = useMutation({
+    mutationFn: () => api.archive(ids, true),
+    onSuccess: () => { setNote(`Archived ${ids.length.toLocaleString()} — find them in Collections → Archive`);
+      qc.invalidateQueries({ queryKey: ["photos"] }); onClear(); },
+  });
+  const lock = useMutation({
+    mutationFn: () => api.lock(ids),
+    onSuccess: () => { qc.invalidateQueries(); onClear(); },
+    onError: (e: Error) => setNote(e.message),
+  });
   const [stars, setStars] = useState(0);
   const [tag, setTag] = useState("");
   const [note, setNote] = useState<string | null>(null);
@@ -90,6 +102,17 @@ export function SelectionBar({ selected, onClear, extra, allIds, onSelectAll }: 
         <FolderOutput size={14} /> Export
       </button>
       {extra}
+      {role !== "guest" && (
+        <button className="btn btn-ghost btn-sm" onClick={() => archive.mutate()}
+          title="Out of the timeline; still in search, albums and people">
+          <Archive size={14} /> Archive
+        </button>
+      )}
+      {role === "owner" && (
+        <button className="btn btn-ghost btn-sm" onClick={() => lock.mutate()} title="Move to the PIN-protected Locked folder">
+          <Lock size={14} /> Lock
+        </button>
+      )}
       {canDelete && (
         <button className="btn btn-quiet btn-sm selection-trash" onClick={() => setTrashing(true)}
           title="Move the files to the Trash (restorable for 30 days)">

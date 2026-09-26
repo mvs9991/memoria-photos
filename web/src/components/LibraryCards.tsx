@@ -5,6 +5,7 @@ import { useMutation, useQuery, useQueryClient } from "@tanstack/react-query";
 import { HardDriveDownload } from "lucide-react";
 import { api } from "../lib/api";
 import { relativeTime } from "../lib/format";
+import { useRole } from "../lib/hooks";
 import { SectionHeader } from "./States";
 
 const EVERY: [number, string][] = [[0, "only when I press Index"], [15, "every 15 minutes"], [60, "every hour"],
@@ -112,6 +113,10 @@ export function BackupCard() {
 
 /** A reminder on the home screen while there is no recent backup (dismissable for two weeks). */
 export function BackupReminder() {
+  return useRole() === "owner" ? <OwnerBackupReminder /> : null;
+}
+
+function OwnerBackupReminder() {
   const status = useQuery({ queryKey: ["backup"], queryFn: api.backupStatus, staleTime: 300_000 });
   const stats = useQuery({ queryKey: ["stats"], queryFn: api.stats });
   const [hidden, setHidden] = useState(() => {

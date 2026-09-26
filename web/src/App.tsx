@@ -30,6 +30,7 @@ const Folders = lazy(() => import("./pages/Folders"));
 const Insights = lazy(() => import("./pages/Insights"));
 const Trash = lazy(() => import("./pages/Trash"));
 const Upload = lazy(() => import("./pages/Upload"));
+const Locked = lazy(() => import("./pages/Locked"));
 const Frame = lazy(() => import("./pages/Frame"));
 const SharedAlbum = lazy(() => import("./pages/SharedAlbum"));
 
@@ -88,6 +89,7 @@ function Shell() {
                 <Route path="/insights" element={<Insights />} />
                 <Route path="/trash" element={<Trash />} />
                 <Route path="/upload" element={<Upload />} />
+                <Route path="/locked" element={<Locked />} />
                 <Route path="/events" element={<Events />} />
                 <Route path="/events/:id" element={<EventDetail />} />
                 <Route path="/places" element={<Places />} />

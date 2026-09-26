@@ -20,27 +20,41 @@ export function AuthGate({ children }: { children: React.ReactNode }) {
   }, [qc]);
 
   if (status.isLoading) return <Spinner full label="Opening Memoria" />;
-  if (status.data?.protected && !status.data.logged_in) return <Login />;
+  if (status.data?.protected && !status.data.logged_in) return <Login accounts={!!status.data.accounts} />;
   return <>{children}</>;
 }
 
-function Login() {
+function Login({ accounts }: { accounts: boolean }) {
   const qc = useQueryClient();
+  const [name, setName] = useState(() => {
+    try { return localStorage.getItem("last-user") ?? ""; } catch { return ""; }
+  });
   const [password, setPassword] = useState("");
   const login = useMutation({
-    mutationFn: () => api.login(password),
-    onSuccess: () => qc.resetQueries(),
+    mutationFn: () => api.login(password, accounts ? name.trim() : undefined),
+    onSuccess: () => {
+      try { if (accounts) localStorage.setItem("last-user", name.trim()); } catch { /* private mode */ }
+      qc.resetQueries();
+    },
   });
+  const ready = !!password && (!accounts || !!name.trim());
   return (
     <div className="login-page">
-      <form className="card login-card" onSubmit={(e) => { e.preventDefault(); if (password) login.mutate(); }}>
+      <form className="card login-card" onSubmit={(e) => { e.preventDefault(); if (ready) login.mutate(); }}>
         <span className="brand-mark login-mark" aria-hidden><Lock size={20} /></span>
         <h1 className="display">Memoria</h1>
-        <p className="dim">This library is protected. Enter its password.</p>
-        <input className="field" type="password" autoFocus value={password} autoComplete="current-password"
+        <p className="dim">{accounts ? "Sign in to your family's photo library." : "This library is protected. Enter its password."}</p>
+        {accounts && (
+          <input className="field" autoFocus={!name} value={name} autoComplete="username" placeholder="Your name"
+            onChange={(e) => setName(e.target.value)} aria-label="Name" />
+        )}
+        <input className="field" type="password" autoFocus={!accounts || !!name} value={password}
+          autoComplete="current-password" placeholder="Password"
           onChange={(e) => setPassword(e.target.value)} aria-label="Password" />
-        {login.error && <p className="danger-text">Wrong password.</p>}
-        <button className="btn btn-primary" type="submit" disabled={!password || login.isPending}>Unlock</button>
+        {login.error && <p className="danger-text">{accounts ? "Wrong name or password." : "Wrong password."}</p>}
+        <button className="btn btn-primary" type="submit" disabled={!ready || login.isPending}>
+          {accounts ? "Sign in" : "Unlock"}
+        </button>
       </form>
     </div>
   );

@@ -10,13 +10,16 @@ import { Trash2, X } from "lucide-react";
 import { Portal } from "./Portal";
 import { api } from "../lib/api";
 import { formatBytes } from "../lib/format";
+import { useRole } from "../lib/hooks";
 
 export const TYPE_TO_CONFIRM_AT = 25;
 
 /** Delete buttons only appear when deleting is allowed (Settings → Trash). */
 export function useAllowDelete(): boolean {
-  const settings = useQuery({ queryKey: ["settings"], queryFn: api.settings, staleTime: 60_000 });
-  return settings.data?.settings?.allow_delete ?? false;
+  const role = useRole();
+  const settings = useQuery({ queryKey: ["settings"], queryFn: api.settings, staleTime: 60_000,
+    enabled: role === "owner" });
+  return role === "owner" && (settings.data?.settings?.allow_delete ?? false);
 }
 
 export function TrashDialog({ photoIds, onClose, onDone }: {

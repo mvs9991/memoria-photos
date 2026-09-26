@@ -7,11 +7,33 @@ import {
 import { api } from "../lib/api";
 import { ErrorState, SectionHeader, Spinner } from "../components/States";
 import { formatBytes, formatDuration, relativeTime } from "../lib/format";
-import { useTitle } from "../lib/hooks";
+import { useRole, useTitle } from "../lib/hooks";
+import { AccountsCard, MyAccountCard } from "../components/AccountsCard";
 import { FrameCard, GpxCard, SecurityCard, TrashCard } from "../components/SettingsExtras";
 import { BackupCard, ScheduleCard } from "../components/LibraryCards";
 
 export default function Settings() {
+  const role = useRole();
+  return role === "owner" ? <OwnerSettings /> : <MemberSettings />;
+}
+
+/** Family and guests: their own account; the library's settings are the owner's. */
+function MemberSettings() {
+  useTitle("Settings");
+  return (
+    <div className="page settings-page">
+      <div className="page-head">
+        <div>
+          <h1 className="display">Settings</h1>
+          <p className="dim">The library's folders, backup and privacy settings are managed by its owner.</p>
+        </div>
+      </div>
+      <MyAccountCard />
+    </div>
+  );
+}
+
+function OwnerSettings() {
   useTitle("Settings");
   const qc = useQueryClient();
   const settings = useQuery({ queryKey: ["settings"], queryFn: api.settings });
@@ -248,7 +270,9 @@ export default function Settings() {
         </div>
       </section>
 
+      <MyAccountCard />
       <SecurityCard />
+      <AccountsCard />
       <BackupCard />
       <ScheduleCard />
       <TrashCard />
