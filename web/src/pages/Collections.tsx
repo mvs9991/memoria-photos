@@ -10,7 +10,7 @@ import { Link, useParams } from "react-router-dom";
 import { useMutation, useQuery, useQueryClient } from "@tanstack/react-query";
 import {
   ArrowLeft, CalendarX, Camera, CheckSquare, Clock, Copy, Eye, EyeOff, FileText, Film, Focus, GalleryHorizontal,
-  HardDrive, Layers, MapPinOff, MessageSquareText, Monitor, ScanFace, Sparkle,
+  Archive, HardDrive, Layers, MapPinOff, MessageSquareText, Monitor, PawPrint, ScanFace, Sparkle,
 } from "lucide-react";
 import { api, thumbUrl, type Collection, gridItems } from "../lib/api";
 import { PhotoGrid } from "../components/PhotoGrid";
@@ -22,7 +22,7 @@ import { useTitle } from "../lib/hooks";
 const ICONS: Record<string, React.ComponentType<{ size?: number }>> = {
   videos: Film, live: Sparkle, panoramas: GalleryHorizontal, selfies: ScanFace, raw: Camera, stacks: Layers,
   screenshots: Monitor, documents: FileText, memes: MessageSquareText, blurry: Focus, large: HardDrive,
-  no_location: MapPinOff, no_date: CalendarX, hidden: EyeOff,
+  no_location: MapPinOff, no_date: CalendarX, hidden: EyeOff, pets: PawPrint, archive: Archive,
 };
 
 const HINTS: Record<string, string> = {

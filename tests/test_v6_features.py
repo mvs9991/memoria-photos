@@ -455,3 +455,100 @@ def test_a_trim_copies_part_of_a_video_without_touching_it(ctx, tmp_path, client
     assert 1.5 <= seconds <= 4.5                    # from the key frame at or before 2 s, to 4 s
     assert sha(lib / "clip.mp4") == before
     assert client.post(f"/api/photos/{pid}/trim", json={"start": 3, "end": 2}).status_code == 400
+
+
+# ----------------------------------------------------------------- colours
+
+def test_colour_names():
+    import numpy as np
+
+    from photointel.engine.colors import NAMES, classify, dominant, normalise
+
+    px = np.array([[220, 30, 30], [240, 140, 20], [230, 220, 40], [40, 180, 60], [40, 90, 200], [130, 50, 190],
+                   [240, 120, 190], [110, 70, 30], [10, 10, 12], [245, 245, 245], [128, 128, 130]], np.uint8)
+    assert [NAMES[i] for i in classify(px)] == ["red", "orange", "yellow", "green", "blue", "purple", "pink",
+                                                "brown", "black", "white", "grey"]
+    half = Image.new("RGB", (100, 100), (40, 90, 200))
+    half.paste((245, 245, 245), (0, 0, 100, 40))
+    assert dominant(half) == ["blue", "white"]
+    assert normalise("Gray") == "grey" and normalise("reds") == "red" and normalise("car") is None
+
+
+def test_search_by_colour(ctx, library, client):
+    from photointel.pipeline.post import run_post_stages
+
+    index(ctx, library)
+    conn = ctx.connect()
+    run_post_stages(ctx, conn, stages=["colors", "search-index"])
+    by_name = {r["id"]: r["filename"] for r in conn.execute("SELECT id, filename FROM photos WHERE status = 'ok'")}
+    blue_truth = {i for i, c in conn.execute("SELECT id, colors FROM photos WHERE status = 'ok'") if "blue" in (c or "").split(",")}
+    assert {by_name[i] for i in blue_truth} >= {f"IMG_2024030{i}_1100{i:02d}.jpg" for i in range(6)}
+
+    blue = client.get("/api/search", params={"q": "blue photos"}).json()
+    assert {p["id"] for p in blue["photos"]} == blue_truth
+    assert any(c["kind"] == "filter" and "blue" in c["label"] for c in blue["interpretation"])
+    orange = {by_name[p["id"]] for p in client.get("/api/search", params={"q": "orange"}).json()["photos"]}
+    assert orange == {f"IMG_x{i}.jpg" for i in range(5)}
+    # with other words the phrase goes to the visual search, not a colour filter
+    car = client.get("/api/search", params={"q": "red car"}).json()
+    assert not any(c["kind"] == "filter" for c in car["interpretation"])
+    conn.close()
+
+
+def test_cookies_are_secure_over_https(ctx, app=None):
+    from photointel.api.app import create_app
+
+    c = TestClient(create_app(ctx), base_url="https://testserver")
+    c.post("/api/auth/password", json={"new": "owner-pass"})
+    r = c.post("/api/auth/login", json={"password": "owner-pass"})
+    assert "secure" in r.headers["set-cookie"].lower()
+    plain = TestClient(create_app(ctx))
+    r = plain.post("/api/auth/login", json={"password": "owner-pass"})
+    assert "secure" not in r.headers["set-cookie"].lower()
+
+
+def test_pets_collection(ctx, library, client):
+    index(ctx, library)
+    conn = ctx.connect()
+    tid = conn.execute("INSERT INTO tags(name, category) VALUES ('dog', 'animal')").lastrowid
+    pid = pid_of(ctx, "IMG_x3.jpg")
+    conn.execute("INSERT INTO photo_tags(photo_id, tag_id, score, source) VALUES (?, ?, 3.0, 'auto')", (pid, tid))
+    conn.commit()
+    assert client.get("/api/photos/index", params={"collection": "pets"}).json()["ids"] == [pid]
+    conn.close()
+
+
+# ----------------------------------------------------------------- creations
+
+def test_collage_animation_and_movie(ctx, library, client, monkeypatch):
+    import av
+
+    from photointel.engine import creations
+    from photointel.pipeline import jobs
+
+    monkeypatch.setattr(jobs, "_spawn", lambda args: None)
+    index(ctx, library)
+    ids = client.get("/api/photos/index", params={"year": 2024, "month": 7}).json()["ids"]   # the 5 Goa photos
+    originals = {p: sha(p) for p in library.rglob("*.jpg")}
+
+    c = client.post("/api/create/collage", json={"photo_ids": ids[:4]}).json()
+    img = Image.open(c["path"])
+    assert c["photos"] == 4 and img.width == 2400 and "Creations" in Path(c["path"]).parts
+    assert Path(c["path"]).parent.name == "07"                       # filed by the photos' date
+    assert client.post("/api/create/collage", json={"photo_ids": ids[:1]}).status_code == 400
+
+    # three different-looking photos (the five Goa ones are pixel-identical, and GIF merges repeats)
+    distinct = [pid_of(ctx, n) for n in ("IMG_x0.jpg", "IMG_20240300_110000.jpg", "Screenshot_20240610-101010.png")]
+    a = client.post("/api/create/animation", json={"photo_ids": distinct, "fps": 5}).json()
+    gif = Image.open(a["path"])
+    assert gif.format == "GIF" and getattr(gif, "n_frames", 1) == 3
+
+    conn = ctx.connect()
+    m = creations.movie(ctx, conn, ids[:3], seconds_each=1.0, size=(320, 180), fps=10, fade=0.3)
+    with av.open(m["path"]) as v:
+        stream = v.streams.video[0]
+        frames = sum(1 for _ in v.decode(stream))
+        assert (stream.codec_context.width, stream.codec_context.height) == (320, 180)
+    assert frames == 3 * 10 - 2 * 3                                    # two crossfades of 3 frames overlap
+    assert {p: sha(p) for p in originals} == originals               # the photos are only read
+    conn.close()

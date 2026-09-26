@@ -147,3 +147,60 @@ def trim(photo_id: int, body: TrimBody):
     _, root = uploads_mod.ensure_upload_root(state.ctx, conn)
     out["job_id"] = jobs.spawn_index_job(state.ctx, {"kind": "index", "roots": [str(root)]})
     return out
+
+
+# ---------------------------------------------------------------- creations
+
+class CreateBody(BaseModel):
+    photo_ids: list[int]
+    seconds_each: float = 3.0
+    fps: int = 6
+
+
+@router.post("/create/{kind}")
+def create(kind: str, body: CreateBody):
+    """A collage or an animation now; a movie as a job (it takes a while to encode)."""
+    import threading
+
+    from ..engine import creations
+
+    state = get_state()
+    conn = state.conn()
+    if kind not in ("collage", "animation", "movie"):
+        raise HTTPException(404, "unknown creation")
+    try:
+        if kind == "collage":
+            out = creations.collage(state.ctx, conn, body.photo_ids)
+        elif kind == "animation":
+            out = creations.animation(state.ctx, conn, body.photo_ids, fps=body.fps)
+        else:
+            if not 2 <= len(body.photo_ids) <= 150:
+                raise creations.CreateError("choose 2 to 150 photos for a movie")
+            job_id = jobs.create_job(conn, "create", {"kind": "movie", "photos": len(body.photo_ids)})
+            threading.Thread(target=_movie_job, args=(state.ctx, job_id, body.photo_ids, body.seconds_each),
+                             daemon=True, name=f"movie-{job_id}").start()
+            return {"job_id": job_id}
+    except creations.CreateError as exc:
+        raise HTTPException(400, str(exc))
+    _, root = uploads_mod.ensure_upload_root(state.ctx, conn)
+    out["job_id"] = jobs.spawn_index_job(state.ctx, {"kind": "index", "roots": [str(root)]})
+    return out
+
+
+def _movie_job(ctx, job_id: int, photo_ids: list[int], seconds_each: float) -> None:
+    from ..engine import creations
+
+    reporter = jobs.JobReporter(ctx, job_id)
+    reporter.start()
+    conn = ctx.connect()
+    try:
+        stop = lambda: bool(conn.execute("SELECT cancel_requested FROM jobs WHERE id=?", (job_id,)).fetchone()[0])  # noqa: E731
+        out = creations.movie(ctx, conn, photo_ids, seconds_each=seconds_each, should_stop=stop,
+                              progress=lambda d, t: reporter.progress("movie", d, t, f"Made {d} of {t} photos"))
+        reporter.finish("done", f"Made {out['path'].split(chr(92))[-1].split('/')[-1]}")
+        _, root = uploads_mod.ensure_upload_root(ctx, conn)
+        jobs.spawn_index_job(ctx, {"kind": "index", "roots": [str(root)]})
+    except Exception as exc:
+        reporter.finish("failed", "Could not make the movie", str(exc))
+    finally:
+        conn.close()

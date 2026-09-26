@@ -127,6 +127,11 @@ COLLECTIONS: dict[str, dict] = {
     "raw": {"group": "media", "title": "RAW",
             "where": "p.ext IN ('.cr2','.cr3','.nef','.arw','.dng','.orf','.rw2','.raf','.srw','.pef','.nrw')"},
     "stacks": {"group": "media", "title": "Stacks", "where": "p.stack_id = p.id"},
+    # Pets: the tagger's dog and cat. Which dog is not recognised: that needs a pet-identity
+    # model, and none that runs offline is part of Memoria.
+    "pets": {"group": "media", "title": "Pets",
+             "where": "EXISTS (SELECT 1 FROM photo_tags pt JOIN tags t ON t.id = pt.tag_id WHERE "
+                      "pt.photo_id = p.id AND t.name IN ('dog', 'cat') AND pt.score >= 2.0)"},
     "screenshots": {"group": "cleanup", "title": "Screenshots", "where": "p.source_kind = 'screenshot'"},
     "documents": {"group": "cleanup", "title": "Documents & receipts",
                   "where": "EXISTS (SELECT 1 FROM photo_tags pt JOIN tags t ON t.id = pt.tag_id WHERE "

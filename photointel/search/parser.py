@@ -72,6 +72,7 @@ class ParsedQuery:
     user_tags: list[str] = field(default_factory=list)      # tags a person set: always a hard filter
     text_phrases: list[str] = field(default_factory=list)   # words written in the photo (OCR) or its description
     min_rating: int = 0
+    colors: list[str] = field(default_factory=list)          # dominant colours, for a colour-only query
     unmatched: list[str] = field(default_factory=list)
     interpretation: list[dict] = field(default_factory=list)
     source: str = "rules"
@@ -80,7 +81,8 @@ class ParsedQuery:
         return not any([self.persons_all, self.persons_any, self.place_ids, self.event_ids, self.tags,
                         self.date.start, self.date.month_only, self.semantic_text, self.only_favorites,
                         self.only_screenshots, self.only_selfies, self.trips_only, self.only_videos,
-                        self.only_live, self.album_ids, self.user_tags, self.text_phrases, self.min_rating])
+                        self.only_live, self.album_ids, self.user_tags, self.text_phrases, self.min_rating,
+                        self.colors])
 
     def chip(self, kind: str, label: str, detail: str | None = None) -> None:
         self.interpretation.append({"kind": kind, "label": label, "detail": detail})
@@ -195,6 +197,12 @@ def _fuzzy_person(token: str, vocab: Vocabulary, cutoff: float = 0.84) -> int | 
         if score > best_score:
             best, best_score = pid, score
     return best
+
+
+def _colour(word: str) -> str | None:
+    from ..engine.colors import normalise
+
+    return normalise(word)
 
 
 def parse(query: str, conn: sqlite3.Connection, me_person_id: int | None = None,
@@ -392,6 +400,14 @@ def parse(query: str, conn: sqlite3.Connection, me_person_id: int | None = None,
 
     # ---- remaining words become the visual query -----------------------------------------
     semantic_words = [t for t in leftovers if t not in STOPWORDS and not t.isdigit()]
+    # Only colours left ("blue photos", "red and white"): a dominant-colour filter. With
+    # other words ("red car") the visual search reads the whole phrase instead.
+    colour_names = [_colour(t) for t in semantic_words if t not in ("colour", "color", "colours", "colors",
+                                                                   "coloured", "colored")]
+    if semantic_words and colour_names and all(colour_names):
+        q.colors = list(dict.fromkeys(colour_names))
+        q.chip("filter", " & ".join(q.colors), "mostly these colours")
+        semantic_words = []
     if semantic_words:
         q.semantic_text = " ".join(semantic_words)
         q.unmatched = semantic_words

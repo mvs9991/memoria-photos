@@ -97,7 +97,13 @@ def create_app(ctx: AppContext) -> FastAPI:
         set_current_user(user)
         set_locked_open(role == "owner" and auth.valid_locked_token(
             ctx.paths.data, request.cookies.get(auth.LOCKED_COOKIE)))
-        return await call_next(request)
+        response = await call_next(request)
+        if request.url.scheme == "https":
+            # Over HTTPS (directly or behind a local proxy), cookies must never travel in the clear.
+            response.raw_headers[:] = [
+                (k, v + b"; Secure") if k.lower() == b"set-cookie" and b"secure" not in v.lower() else (k, v)
+                for k, v in response.raw_headers]
+        return response
 
     @app.exception_handler(Exception)
     async def unhandled(request: Request, exc: Exception):  # pragma: no cover - safety net

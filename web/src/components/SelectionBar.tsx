@@ -1,7 +1,7 @@
 /** Actions for photos selected in a grid: add to album, tag, plus page-specific extras. */
 import { useCallback, useEffect, useState } from "react";
 import { useMutation, useQueryClient } from "@tanstack/react-query";
-import { Archive, BookImage, CalendarClock, Columns2, FolderOutput, Lock, MapPin, RotateCw, Tag, Trash2, X } from "lucide-react";
+import { Archive, Sparkles, BookImage, CalendarClock, Columns2, FolderOutput, Lock, MapPin, RotateCw, Tag, Trash2, X } from "lucide-react";
 import { useRole } from "../lib/hooks";
 import { api } from "../lib/api";
 import { AlbumPicker } from "./AlbumPicker";
@@ -9,6 +9,7 @@ import { CompareView } from "./CompareView";
 import { CorrectionDialog } from "./CorrectionDialog";
 import { StarRating } from "./StarRating";
 import { ExportDialog } from "./ExportDialog";
+import { CreateDialog } from "./CreateDialog";
 import { TrashDialog, useAllowDelete } from "./TrashDialog";
 
 export function SelectionBar({ selected, onClear, extra, allIds, onSelectAll }: {
@@ -24,6 +25,7 @@ export function SelectionBar({ selected, onClear, extra, allIds, onSelectAll }: 
   const [comparing, setComparing] = useState(false);
   const [fixing, setFixing] = useState<"date" | "place" | null>(null);
   const [exporting, setExporting] = useState(false);
+  const [creating, setCreating] = useState(false);
   const [trashing, setTrashing] = useState(false);
   const canDelete = useAllowDelete();
   const role = useRole();
@@ -98,6 +100,11 @@ export function SelectionBar({ selected, onClear, extra, allIds, onSelectAll }: 
       </button>
       <button className="btn btn-ghost btn-sm" onClick={() => setFixing("date")}><CalendarClock size={14} /> Fix date</button>
       <button className="btn btn-ghost btn-sm" onClick={() => setFixing("place")}><MapPin size={14} /> Set place</button>
+      {role !== "guest" && (
+        <button className="btn btn-ghost btn-sm" onClick={() => setCreating(true)} title="Collage, animation or memory movie">
+          <Sparkles size={14} /> Create
+        </button>
+      )}
       <button className="btn btn-ghost btn-sm" onClick={() => setExporting(true)} title="Copy the original files somewhere">
         <FolderOutput size={14} /> Export
       </button>
@@ -123,6 +130,7 @@ export function SelectionBar({ selected, onClear, extra, allIds, onSelectAll }: 
       <button className="btn btn-quiet btn-sm" onClick={() => { setNote(null); onClear(); }}>
         <X size={14} /> Clear
       </button>
+      {creating && <CreateDialog photoIds={ids} onClose={() => setCreating(false)} />}
       {exporting && <ExportDialog spec={{ photo_ids: ids }} onClose={() => setExporting(false)}
         title={`Export ${ids.length.toLocaleString()} selected`} />}
       {trashing && <TrashDialog photoIds={ids} onClose={() => setTrashing(false)}

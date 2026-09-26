@@ -27,7 +27,7 @@ log = logging.getLogger(__name__)
 # Order matters: live pairing decides which files are clustered and listed at all;
 # Takeout locations must exist before geocoding; OCR picks its candidates by tag.
 STAGES = ["live-photos", "uploads", "takeout", "icloud", "gpx", "geocode", "tags", "ocr", "quality", "people", "events", "locations",
-          "duplicates", "stacks", "search-index"]
+          "duplicates", "stacks", "colors", "search-index"]
 
 
 def run_post_stages(ctx, conn: sqlite3.Connection, stages: list[str] | None = None,
@@ -51,6 +51,10 @@ def run_post_stages(ctx, conn: sqlite3.Connection, stages: list[str] | None = No
             elif stage == "takeout":
                 if ctx.settings.takeout_import:
                     out[stage] = takeout_mod.import_takeout(ctx, conn)
+            elif stage == "colors":
+                from ..engine.colors import compute_colors
+
+                out[stage] = compute_colors(ctx, conn)
             elif stage == "uploads":
                 from ..engine.uploads import link_to_albums
 

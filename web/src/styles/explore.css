@@ -351,3 +351,5 @@ a.month-col:hover .month-bar { opacity: 1; }
   .editor-panel { border-left: 0; border-top: 1px solid var(--hairline); max-height: 42vh; }
   .crop-wrap img { max-height: calc(58vh - 60px); }
 }
+.export-layout.is-off { opacity: 0.45; }
+.export-layout span svg { vertical-align: -2px; }

@@ -56,8 +56,14 @@ def cmd_serve(ctx: AppContext, args) -> None:
         sys.exit(2)
 
     app = create_app(ctx)
-    print(f"Memoria running at http://{args.host}:{args.port}")
-    uvicorn.run(app, host=args.host, port=args.port, log_level="warning")
+    tls = {}
+    if args.ssl_cert or args.ssl_key:
+        if not (args.ssl_cert and args.ssl_key):
+            print("Give both --ssl-cert and --ssl-key", file=sys.stderr)
+            sys.exit(2)
+        tls = {"ssl_certfile": args.ssl_cert, "ssl_keyfile": args.ssl_key}
+    print(f"Memoria running at {'https' if tls else 'http'}://{args.host}:{args.port}")
+    uvicorn.run(app, host=args.host, port=args.port, log_level="warning", **tls)
 
 
 def cmd_geo_setup(ctx: AppContext, args) -> None:
@@ -286,6 +292,8 @@ def main(argv: list[str] | None = None) -> None:
     p.add_argument("--host", default="127.0.0.1")
     p.add_argument("--port", type=int, default=8765)
     p.add_argument("--insecure", action="store_true", help="allow a non-local host without a password")
+    p.add_argument("--ssl-cert", help="serve HTTPS with this certificate (e.g. from `tailscale cert`)")
+    p.add_argument("--ssl-key", help="the certificate's private key")
 
     sub.add_parser("set-password", help="require a password for the web app (empty input removes it)")
 

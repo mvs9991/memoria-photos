@@ -109,6 +109,9 @@ class SearchEngine:
         if q.min_rating:
             where.append("p.rating >= ?")
             args.append(q.min_rating)
+        for colour in q.colors:
+            where.append("(',' || COALESCE(p.colors, '') || ',') LIKE ?")
+            args.append(f"%,{colour},%")
         if q.only_favorites:
             where.append("p.favorite = 1")
         if q.only_screenshots:
@@ -171,7 +174,7 @@ class SearchEngine:
         structured = bool(q.persons_all or q.persons_any or q.place_ids or q.event_ids
                           or q.date.start or q.date.end or q.date.month_only or q.only_favorites
                           or q.only_screenshots or q.only_selfies or q.only_videos or q.only_live
-                          or q.album_ids or q.user_tags or q.text_phrases or q.min_rating)
+                          or q.album_ids or q.user_tags or q.text_phrases or q.min_rating or q.colors)
         # "someone playing tennis" matches the broad tag "playing" and leaves "tennis"
         # as a residue. Using the tag as a hard filter there throws away the word that
         # actually identifies the photo, so with nothing structured to anchor the query

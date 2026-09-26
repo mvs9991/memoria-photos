@@ -124,7 +124,7 @@ def scan_root(conn: sqlite3.Connection, root_id: int, root_path: Path, exclude: 
             inserts.clear()
         if changed:
             conn.executemany(
-                "UPDATE photos SET size=?, mtime=?, ctime=?, status='pending', error=NULL, meta_version=NULL, "
+                "UPDATE photos SET size=?, mtime=?, ctime=?, status='pending', error=NULL, meta_version=NULL, colors=NULL, "
                 "faces_model=NULL, semantic_model=NULL, last_seen_at=? WHERE id=?",
                 changed,
             )
