@@ -3,7 +3,7 @@ import { useCallback, useEffect, useRef, useState } from "react";
 import { Link } from "react-router-dom";
 import { useMutation, useQuery, useQueryClient } from "@tanstack/react-query";
 import {
-  Trash2, Aperture, BookImage, Calendar, Camera, Check, ChevronLeft, ChevronRight, Copy, Download, EyeOff, Heart, Info,
+  Trash2, RotateCw, Aperture, BookImage, Calendar, Camera, Check, ChevronLeft, ChevronRight, Copy, Download, EyeOff, Heart, Info,
   Layers, MapPin, Minus, Pencil, Plus, ScanText, Tag, Users, X, Sparkles, HardDrive,
 } from "lucide-react";
 import { TrashDialog, useAllowDelete } from "./TrashDialog";
@@ -24,7 +24,16 @@ interface Props {
 export function PhotoViewer({ ids, index, onIndex, onClose }: Props) {
   const id = ids[index];
   const qc = useQueryClient();
-  const [showInfo, setShowInfo] = useState(() => localStorage.getItem("viewer-info") !== "0");
+  // On a phone the details panel would cover the photo, so it starts closed there.
+  const [showInfo, setShowInfo] = useState(() => {
+    const saved = localStorage.getItem("viewer-info");
+    return saved === null ? window.innerWidth > 800 : saved !== "0";
+  });
+  const touchRef = useRef<{ x: number; y: number; t: number; ox: number; oy: number; dist: number; zoom: number;
+    pinch: boolean; moved: boolean } | null>(null);
+  const lastTapRef = useRef(0);
+  const lastTouchRef = useRef(0);
+  const [swipe, setSwipe] = useState({ x: 0, y: 0 });
   const [zoom, setZoom] = useState(1);
   const [offset, setOffset] = useState({ x: 0, y: 0 });
   const [hoverFaces, setHoverFaces] = useState(false);
@@ -63,6 +72,8 @@ export function PhotoViewer({ ids, index, onIndex, onClose }: Props) {
       else if (e.key === "ArrowLeft") go(-1);
       else if (e.key === "i") setShowInfo((v) => !v);
       else if (e.key === "f") favorite.mutate();
+      else if (e.key.toLowerCase() === "r" && !e.ctrlKey && !e.metaKey && photo?.media_type === "image")
+        rotate.mutate(e.shiftKey ? -90 : 90);
       else if (e.key === "l" && photo?.live) setPlayingLive(true);
       else if (/^[1-5]$/.test(e.key) && photo) {
         const n = Number(e.key);
@@ -102,6 +113,13 @@ export function PhotoViewer({ ids, index, onIndex, onClose }: Props) {
       qc.invalidateQueries({ queryKey: ["photos"] });
     },
   });
+  const rotate = useMutation({
+    mutationFn: (deg: number) => api.rotate([id], deg),
+    onSuccess: () => {
+      qc.invalidateQueries({ queryKey: ["photo", id] });
+      qc.invalidateQueries({ queryKey: ["photos"] });
+    },
+  });
   const hide = useMutation({
     mutationFn: () => api.setFlags(id, { hidden: true }),
     onSuccess: () => {
@@ -109,6 +127,53 @@ export function PhotoViewer({ ids, index, onIndex, onClose }: Props) {
       go(1);
     },
   });
+
+  // Touch: swipe to move between photos, swipe down to close, pinch or double-tap to zoom,
+  // drag to pan a zoomed photo.
+  const dist = (t: React.TouchList) => Math.hypot(t[0].clientX - t[1].clientX, t[0].clientY - t[1].clientY);
+  const onTouchStart = (e: React.TouchEvent) => {
+    const t = e.touches;
+    touchRef.current = {
+      x: t[0].clientX, y: t[0].clientY, t: Date.now(), ox: offset.x, oy: offset.y,
+      dist: t.length > 1 ? dist(t) : 0, zoom, pinch: t.length > 1, moved: false,
+    };
+  };
+  const onTouchMove = (e: React.TouchEvent) => {
+    const s0 = touchRef.current;
+    if (!s0) return;
+    const t = e.touches;
+    if (t.length > 1) {
+      if (!s0.pinch) { s0.pinch = true; s0.dist = dist(t); s0.zoom = zoom; }
+      setZoom(Math.min(6, Math.max(1, s0.zoom * (dist(t) / Math.max(s0.dist, 1)))));
+      s0.moved = true;
+      return;
+    }
+    const dx = t[0].clientX - s0.x, dy = t[0].clientY - s0.y;
+    if (Math.abs(dx) > 6 || Math.abs(dy) > 6) s0.moved = true;
+    if (s0.pinch) return;
+    if (zoom > 1) setOffset({ x: s0.ox + dx, y: s0.oy + dy });
+    else setSwipe({ x: dx, y: Math.max(0, dy) });
+  };
+  const onTouchEnd = (e: React.TouchEvent) => {
+    const s0 = touchRef.current;
+    touchRef.current = null;
+    const { x: dx, y: dy } = swipe;
+    setSwipe({ x: 0, y: 0 });
+    if (!s0) return;
+    if (zoom < 1.05 && !s0.pinch) {
+      if (Math.abs(dx) > 60 && Math.abs(dx) > Math.abs(dy)) { go(dx < 0 ? 1 : -1); return; }
+      if (dy > 110 && dy > Math.abs(dx)) { onClose(); return; }
+    }
+    if (zoom < 1.05) { setZoom(1); setOffset({ x: 0, y: 0 }); }
+    if (!s0.moved && Date.now() - s0.t < 250) {
+      if (Date.now() - lastTapRef.current < 300) {
+        lastTapRef.current = 0;
+        e.preventDefault();          // or the browser's own double-click toggles the zoom straight back
+        lastTouchRef.current = Date.now();
+        if (zoom > 1) { setZoom(1); setOffset({ x: 0, y: 0 }); } else setZoom(2.5);
+      } else lastTapRef.current = Date.now();
+    }
+  };
 
   const onWheel = (e: React.WheelEvent) => {
     if (!e.ctrlKey && !e.metaKey && zoom === 1) return;
@@ -137,6 +202,12 @@ export function PhotoViewer({ ids, index, onIndex, onClose }: Props) {
             aria-label="Download original">
             <Download size={18} />
           </a>
+          {photo?.media_type === "image" && (
+            <button className="btn btn-quiet btn-icon" onClick={() => rotate.mutate(90)}
+              title="Rotate (R) — only in Memoria; the file is not changed" aria-label="Rotate">
+              <RotateCw size={18} />
+            </button>
+          )}
           <button className="btn btn-quiet btn-icon" onClick={() => setPicker(true)} title="Add to album"
             aria-label="Add to album">
             <BookImage size={18} />
@@ -165,7 +236,14 @@ export function PhotoViewer({ ids, index, onIndex, onClose }: Props) {
           className={`viewer-stage${zoom > 1 ? " is-zoomed" : ""}`}
           ref={imgWrapRef}
           onWheel={onWheel}
-          onDoubleClick={() => (zoom > 1 ? (setZoom(1), setOffset({ x: 0, y: 0 })) : setZoom(2.5))}
+          onTouchStart={onTouchStart}
+          onTouchMove={onTouchMove}
+          onTouchEnd={onTouchEnd}
+          onTouchCancel={onTouchEnd}
+          onDoubleClick={() => {
+            if (Date.now() - lastTouchRef.current < 600) return;       // a double tap, already handled
+            zoom > 1 ? (setZoom(1), setOffset({ x: 0, y: 0 })) : setZoom(2.5);
+          }}
           onMouseDown={(e) => {
             if (zoom <= 1) return;
             dragRef.current = { x: e.clientX, y: e.clientY, ox: offset.x, oy: offset.y };
@@ -181,12 +259,15 @@ export function PhotoViewer({ ids, index, onIndex, onClose }: Props) {
             if (e.target === e.currentTarget && zoom === 1) onClose();
           }}
         >
-          <div className="viewer-img-wrap" style={{ transform: `translate(${offset.x}px, ${offset.y}px) scale(${zoom})` }}>
+          <div className={`viewer-img-wrap${swipe.x || swipe.y ? " is-swiping" : ""}`}
+            style={{ transform: `translate(${offset.x + swipe.x}px, ${offset.y + swipe.y}px) scale(${zoom * (1 - Math.min(swipe.y, 300) / 1500)})`,
+              opacity: swipe.y ? Math.max(0.4, 1 - swipe.y / 400) : undefined }}>
             {photo?.media_type === "video" ? (
               <video key={id} src={videoUrl(id)} poster={thumbUrl(id, "l")} controls autoPlay playsInline
                 className="viewer-img" onClick={(e) => e.stopPropagation()} />
             ) : (
-              <img key={id} src={zoom > 1.2 ? originalUrl(id) : thumbUrl(id, "l")} alt={photo?.filename ?? ""}
+              <img key={`${id}-${photo?.rotation ?? 0}`}
+                src={zoom > 1.2 ? originalUrl(id, photo?.rotation) : thumbUrl(id, "l", photo?.rotation)} alt={photo?.filename ?? ""}
                 className="viewer-img" draggable={false} />
             )}
             {playingLive && (

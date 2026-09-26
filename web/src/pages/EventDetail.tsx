@@ -2,7 +2,7 @@ import { useMemo, useState } from "react";
 import { Link, useParams } from "react-router-dom";
 import { useMutation, useQuery, useQueryClient } from "@tanstack/react-query";
 import { ArrowLeft, Check, FolderOutput, MapPin, MonitorPlay, Pencil, Sparkles, Users, X } from "lucide-react";
-import { api, faceUrl, FLAG, thumbUrl } from "../lib/api";
+import { api, faceUrl, FLAG, thumbUrl, gridItems } from "../lib/api";
 import { Slideshow } from "../components/Slideshow";
 import { ExportDialog } from "../components/ExportDialog";
 import { PhotoGrid } from "../components/PhotoGrid";
@@ -44,12 +44,7 @@ export default function EventDetail() {
     },
   });
 
-  const items = useMemo(() => {
-    if (!data?.photos) return [];
-    return data.photos.ids.map((pid: number, i: number) => ({
-      id: pid, ratio: data.photos.ratio[i], ts: data.photos.ts[i], flags: data.photos.flags?.[i] ?? 0,
-    }));
-  }, [data]);
+  const items = useMemo(() => gridItems(data?.photos), [data]);
 
   if (isError) return <ErrorState error={error} onRetry={() => refetch()} />;
   if (isLoading || !data) return <Spinner full label="Loading event" />;

@@ -9,7 +9,7 @@ from contextlib import contextmanager
 from pathlib import Path
 from typing import Any, Iterable, Iterator
 
-SCHEMA_VERSION = 5
+SCHEMA_VERSION = 6
 _SCHEMA_FILE = Path(__file__).with_name("schema.sql")
 
 # Columns added to `photos` after v1: (name, SQL type/default).
@@ -39,6 +39,18 @@ V3_COLUMNS = {
         ("query", "TEXT"),                              # smart: the saved search
     ],
 }
+# v6: rotation, archive, locked (private) photos, dominant colours, who uploaded a file.
+V6_COLUMNS = {
+    "photos": [
+        ("rotation", "INTEGER NOT NULL DEFAULT 0"),     # the user's turn, clockwise degrees; the file is untouched
+        ("archived", "INTEGER NOT NULL DEFAULT 0"),     # out of the timeline, still in search/albums/people
+        ("locked", "INTEGER NOT NULL DEFAULT 0"),       # only shown in the PIN-protected Locked folder
+        ("colors", "TEXT"),                             # dominant colour names, e.g. 'red,white'
+    ],
+    "share_links": [
+        ("allow_upload", "INTEGER NOT NULL DEFAULT 0"), # visitors may add photos to the album
+    ],
+}
 MIGRATION_INDEXES = [
     "CREATE INDEX IF NOT EXISTS ix_photos_media ON photos(media_type)",
     "CREATE INDEX IF NOT EXISTS ix_photos_live ON photos(live_component)",
@@ -56,7 +68,7 @@ def _add_columns(conn: sqlite3.Connection, table: str, columns: list[tuple[str, 
 def _ensure_columns(conn: sqlite3.Connection) -> None:
     """Add every post-v1 column that is missing. Idempotent; runs for new and old databases."""
     _add_columns(conn, "photos", V2_PHOTO_COLUMNS)
-    for table, cols in V3_COLUMNS.items():
+    for table, cols in (*V3_COLUMNS.items(), *V6_COLUMNS.items()):
         _add_columns(conn, table, cols)
     for sql in MIGRATION_INDEXES:
         conn.execute(sql)
@@ -98,7 +110,8 @@ def migrate(conn: sqlite3.Connection, from_version: int) -> None:
             f"Database schema v{from_version} is newer than this software (v{SCHEMA_VERSION})."
         )
     # v2: video, live/motion photos, descriptions, OCR. v3: ratings, stacks, birthdays,
-    # smart albums. v4: share links and GPX tracks. v5: trash (tables only). New tables are in schema.sql; columns are added here, unconditionally:
+    # smart albums. v4: share links and GPX tracks. v5: trash (tables only). v6: rotation,
+    # archive, locked, colours, uploads, users. New tables are in schema.sql; columns are added here, unconditionally:
     # it is idempotent, and a fresh database needs them too.
     _ensure_columns(conn)
     set_meta(conn, "schema_version", SCHEMA_VERSION)

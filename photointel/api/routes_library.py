@@ -17,6 +17,7 @@ from ..engine.events import date_range_label, event_title
 from ..engine.people import person_label
 from ..engine.places import place_label
 from ..metadata import ts_to_naive
+from ..rotation import rotate_box
 from .deps import get_state
 
 log = logging.getLogger(__name__)
@@ -179,7 +180,7 @@ def photos_index(person: list[int] = Query(default=[]), place: int | None = None
                  "added": "p.first_seen_at DESC, p.id DESC",
                  "size": "p.size DESC"}[order]
     rows = conn.execute(
-        f"SELECT p.id, p.width, p.height, p.taken_ts, p.face_count, p.favorite, p.media_type, p.duration, "
+        f"SELECT p.id, p.width, p.height, p.rotation, p.taken_ts, p.face_count, p.favorite, p.media_type, p.duration, "
         f"p.live_video_id, p.motion_offset, p.rating, p.stack_id, "
         f"(SELECT COUNT(*) FROM photos s WHERE s.stack_id = p.id) AS stack_size FROM photos p "
         f"WHERE {where} ORDER BY {order_sql} LIMIT ?", (*args, limit)).fetchall()
@@ -188,10 +189,14 @@ def photos_index(person: list[int] = Query(default=[]), place: int | None = None
 
 def columnar(rows) -> dict:
     """The compact grid payload shared by every photo list (library, albums, events)."""
-    ids, ratios, ts, flags, dur, stars, stack = [], [], [], [], [], [], []
+    ids, ratios, ts, flags, dur, stars, stack, rots = [], [], [], [], [], [], [], []
     for r in rows:
         ids.append(r["id"])
         w, h = r["width"] or 4, r["height"] or 3
+        rot = _get(r, "rotation", 0) or 0
+        if rot in (90, 270):
+            w, h = h, w
+        rots.append(rot)
         ratios.append(round(max(0.2, min(6.0, w / max(h, 1))), 3))
         ts.append(int(r["taken_ts"] or 0))
         flags.append(photo_flags(r))
@@ -199,7 +204,7 @@ def columnar(rows) -> dict:
         stars.append(_get(r, "rating", 0) or 0)
         stack.append(_get(r, "stack_size", 0) or 0)
     return {"ids": ids, "ratio": ratios, "ts": ts, "flags": flags, "dur": dur, "rating": stars,
-            "stack": stack, "total": len(ids)}
+            "stack": stack, "rot": rots, "total": len(ids)}
 
 
 @router.get("/photos/{photo_id}")
@@ -224,7 +229,7 @@ def photo_detail(photo_id: int):
                LEFT JOIN persons pe ON pe.id = f.person_id WHERE f.photo_id = ? ORDER BY f.size_px DESC""",
             (photo_id,)):
         faces.append({
-            "id": f["id"], "box": [f["x1"], f["y1"], f["x2"], f["y2"]], "person_id": f["pid"],
+            "id": f["id"], "box": rotate_box([f["x1"], f["y1"], f["x2"], f["y2"]], row["rotation"]), "person_id": f["pid"],
             "label": person_label(f) if f["pid"] else None, "confidence": f["assign_confidence"],
             "assign_source": f["assign_source"], "quality": f["quality"], "det_score": f["det_score"],
             "age": age_on(f["birth_date"], row["taken_ts"]) if f["pid"] else None,
@@ -256,7 +261,10 @@ def photo_detail(photo_id: int):
                  "confidence": row["location_confidence"], "source": row["location_source"]}
     return {
         "id": row["id"], "filename": row["filename"], "folder": row["folder"], "path": row["rel_path"],
-        "root": row["root"], "ext": row["ext"], "size": row["size"], "width": row["width"], "height": row["height"],
+        "root": row["root"], "ext": row["ext"], "size": row["size"],
+        "width": row["height"] if row["rotation"] in (90, 270) else row["width"],
+        "height": row["width"] if row["rotation"] in (90, 270) else row["height"],
+        "rotation": row["rotation"] or 0,
         "format": row["format"], "orientation": row["orientation"], "status": row["status"], "error": row["error"],
         "taken_ts": row["taken_ts"], "taken_local": row["taken_local"], "date_source": row["date_source"],
         "date_confidence": row["date_confidence"], "tz_offset_min": row["tz_offset_min"],
@@ -377,6 +385,27 @@ def hide_photos(body: HideBody):
     db.audit(conn, "photos_hidden" if body.hidden else "photos_unhidden", "photo", None, {"photos": body.photo_ids[:2000]})
     conn.commit()
     return {"changed": n}
+
+
+class RotateBody(BaseModel):
+    photo_ids: list[int]
+    degrees: int = 90          # clockwise; -90 turns left
+
+
+@router.post("/photos/rotate")
+def rotate_photos(body: RotateBody):
+    """Turn photos as Memoria shows them. The files are not changed."""
+    if body.degrees % 90:
+        raise HTTPException(400, "rotate by a multiple of 90 degrees")
+    if not body.photo_ids:
+        return {"rotated": 0}
+    conn = get_state().conn()
+    marks = ",".join("?" * len(body.photo_ids))
+    n = conn.execute(f"UPDATE photos SET rotation = ((rotation + ?) % 360 + 360) % 360 WHERE id IN ({marks})",
+                     (body.degrees, *body.photo_ids)).rowcount
+    db.audit(conn, "photos_rotated", "photo", None, {"photos": body.photo_ids[:2000], "degrees": body.degrees})
+    conn.commit()
+    return {"rotated": n}
 
 
 class RateBody(BaseModel):

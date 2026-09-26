@@ -75,13 +75,13 @@ def event_detail(event_id: int):
                 conn.execute("UPDATE events SET summary=? WHERE id=?", (fresh, event_id))
                 conn.commit()
     if e["kind"] == "trip":
-        photo_sql = ("SELECT p.id, p.width, p.height, p.taken_ts, p.face_count, p.favorite, p.media_type, p.duration, p.live_video_id, p.motion_offset FROM trip_photos tp JOIN photos p ON p.id=tp.photo_id "
+        photo_sql = ("SELECT p.id, p.width, p.height, p.rotation, p.taken_ts, p.face_count, p.favorite, p.media_type, p.duration, p.live_video_id, p.motion_offset FROM trip_photos tp JOIN photos p ON p.id=tp.photo_id "
                      "WHERE tp.trip_id=? AND p.status='ok' AND p.live_component=0 ORDER BY p.taken_ts")
         children = [_event_dict(conn, c) for c in conn.execute(
             "SELECT * FROM events WHERE parent_id=? ORDER BY start_ts", (event_id,))]
         data["children"] = children
     else:
-        photo_sql = ("SELECT p.id, p.width, p.height, p.taken_ts, p.face_count, p.favorite, p.media_type, p.duration, p.live_video_id, p.motion_offset FROM photos p "
+        photo_sql = ("SELECT p.id, p.width, p.height, p.rotation, p.taken_ts, p.face_count, p.favorite, p.media_type, p.duration, p.live_video_id, p.motion_offset FROM photos p "
                      "WHERE p.event_id=? AND p.status='ok' AND p.live_component=0 ORDER BY p.taken_ts")
         data["children"] = []
     rows = conn.execute(photo_sql, (event_id,)).fetchall()

@@ -4,7 +4,7 @@ import { useMutation, useQuery, useQueryClient } from "@tanstack/react-query";
 import {
   ArrowLeft, Cake, Check, EyeOff, FolderOutput, MapPin, Pencil, Scissors, Star, UserCheck, UserX, Users, X,
 } from "lucide-react";
-import { api, faceUrl, thumbUrl } from "../lib/api";
+import { api, faceUrl, thumbUrl, gridItems } from "../lib/api";
 import { ExportDialog } from "../components/ExportDialog";
 import { PhotoGrid } from "../components/PhotoGrid";
 import { EmptyState, ErrorState, SectionHeader, Spinner } from "../components/States";
@@ -74,11 +74,7 @@ export default function PersonDetail() {
     },
   });
 
-  const items = useMemo(() => {
-    if (!photos.data) return [];
-    const { ids, ratio, ts, flags: fl } = photos.data;
-    return ids.map((pid, i) => ({ id: pid, ratio: ratio[i], ts: ts[i], flags: fl[i] }));
-  }, [photos.data]);
+  const items = useMemo(() => gridItems(photos.data), [photos.data]);
 
   if (person.isError) return <ErrorState error={person.error} onRetry={() => person.refetch()} />;
   if (person.isLoading || !person.data) return <Spinner full label="Loading person" />;

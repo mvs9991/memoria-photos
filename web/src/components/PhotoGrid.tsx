@@ -21,13 +21,15 @@ export interface GridItem {
   rating?: number;
   /** stack size on a stack cover */
   stack?: number;
+  rot?: number;
   score?: number | null;
 }
 
 interface Row {
   top: number;
   height: number;
-  items: { id: number; w: number; h: number; index: number; flags: number; dur: number; rating: number; stack: number }[];
+  items: { id: number; w: number; h: number; index: number; flags: number; dur: number; rating: number; stack: number;
+    rot: number }[];
 }
 
 interface Section {
@@ -182,7 +184,7 @@ export function PhotoGrid({
             ? Math.max(1, width - x)
             : Math.round(it.ratio * h);
           const cell = { id: it.id, w, h, index: index++, flags: it.flags ?? 0, dur: it.dur ?? 0,
-            rating: it.rating ?? 0, stack: it.stack ?? 0 };
+            rating: it.rating ?? 0, stack: it.stack ?? 0, rot: it.rot ?? 0 };
           x += w + gap;
           return cell;
         });
@@ -251,6 +253,7 @@ export function PhotoGrid({
                       dur={cell.dur}
                       rating={cell.rating}
                       stack={cell.stack}
+                      rot={cell.rot}
                       index={cell.index}
                       selected={selection?.has(cell.id) ?? false}
                       selectable={selectable}
@@ -273,8 +276,8 @@ export function PhotoGrid({
   );
 }
 
-function Tile({ id, w, h, flags, dur, rating, stack, index, selected, selectable, selectMode, onOpen, onSelect, thumbFor }: {
-  id: number; w: number; h: number; flags: number; dur: number; rating: number; stack: number; index: number;
+function Tile({ id, w, h, flags, dur, rating, stack, rot, index, selected, selectable, selectMode, onOpen, onSelect, thumbFor }: {
+  id: number; w: number; h: number; flags: number; dur: number; rating: number; stack: number; rot: number; index: number;
   selected: boolean; selectable: boolean;
   selectMode: boolean;
   onOpen?: (id: number, index: number) => void; onSelect: (id: number, index: number, shift: boolean) => void;
@@ -302,7 +305,7 @@ function Tile({ id, w, h, flags, dur, rating, stack, index, selected, selectable
       aria-label={(flags & FLAG.video) ? `Video ${id}` : `Photo ${id}`}
     >
       <img
-        src={thumbFor ? thumbFor(id, size) : thumbUrl(id, size)}
+        src={thumbFor ? thumbFor(id, size) + (rot ? `&r=${rot}` : "") : thumbUrl(id, size, rot)}
         loading="lazy"
         decoding="async"
         alt=""

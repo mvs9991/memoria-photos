@@ -40,3 +40,25 @@ def get_state() -> ApiState:
 
 def get_conn() -> sqlite3.Connection:
     return get_state().conn()
+
+
+# The signed-in account for the current request (set by the login middleware), or None
+# when the library has no accounts. Used to attribute uploads and to check roles.
+from contextvars import ContextVar  # noqa: E402
+
+_current_user: ContextVar[dict | None] = ContextVar("memoria_user", default=None)
+
+
+def current_user() -> str | None:
+    u = _current_user.get()
+    return u["username"] if u else None
+
+
+def current_role() -> str:
+    """'owner' when nobody is signed in: a library without accounts belongs to whoever runs it."""
+    u = _current_user.get()
+    return u["role"] if u else "owner"
+
+
+def set_current_user(user: dict | None):
+    return _current_user.set(user)

@@ -2,7 +2,7 @@ import { useMemo, useState } from "react";
 import { Link, useNavigate, useParams } from "react-router-dom";
 import { useMutation, useQuery, useQueryClient } from "@tanstack/react-query";
 import { ArrowLeft, Check, CheckSquare, FolderOutput, ImageMinus, Link2, MonitorPlay, Pencil, Search, Star, Trash2, X } from "lucide-react";
-import { api, FLAG } from "../lib/api";
+import { api, FLAG, gridItems } from "../lib/api";
 import { PhotoGrid } from "../components/PhotoGrid";
 import { EmptyState, ErrorState, Spinner } from "../components/States";
 import { SelectionBar, useSelectAllShortcut, useSelection } from "../components/SelectionBar";
@@ -50,12 +50,7 @@ export default function AlbumDetail() {
     onSuccess: () => { qc.invalidateQueries({ queryKey: ["albums"] }); navigate("/albums"); },
   });
 
-  const items = useMemo(() => {
-    if (!data?.photos) return [];
-    const { ids, ratio, ts, flags, dur, rating } = data.photos;
-    return ids.map((pid, i) => ({ id: pid, ratio: ratio[i], ts: ts[i], flags: flags[i], dur: dur?.[i] ?? 0,
-      rating: rating?.[i] ?? 0 }));
-  }, [data]);
+  const items = useMemo(() => gridItems(data?.photos), [data]);
 
   const allIds = useMemo(() => items.map((i) => i.id), [items]);
   useSelectAllShortcut(selecting, allIds, selection.setAll);

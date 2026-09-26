@@ -10,7 +10,7 @@ from .routes_library import columnar
 
 router = APIRouter()
 
-_GRID_COLS = ("id, width, height, taken_ts, face_count, favorite, media_type, duration, "
+_GRID_COLS = ("id, width, height, rotation, taken_ts, face_count, favorite, media_type, duration, "
               "live_video_id, motion_offset, rating")
 
 

@@ -218,3 +218,8 @@
 .vi-similar-item.is-current { outline: 2px solid var(--accent); outline-offset: -2px; }
 .vi-stack-actions { display: flex; flex-wrap: wrap; gap: 6px; margin-top: 8px; }
 .viewer-top-right .stars { margin-right: 6px; }
+
+/* Touch: the stage handles every gesture itself (no page scroll or browser zoom),
+   and follows the finger without easing while a swipe is in progress. */
+.viewer-stage { touch-action: none; }
+.viewer-img-wrap.is-swiping { transition: none; }

@@ -399,3 +399,12 @@ CREATE TABLE IF NOT EXISTS trash (
 );
 CREATE INDEX IF NOT EXISTS ix_trash_state ON trash(state, expires_at);
 CREATE INDEX IF NOT EXISTS ix_trash_photo ON trash(photo_id);
+
+-- Files added through the app (phone uploads, shared-album contributions): who, and
+-- the hash, so the same photo uploaded twice before indexing is stored once.
+CREATE TABLE IF NOT EXISTS uploads (
+    sha256   TEXT PRIMARY KEY,
+    path     TEXT NOT NULL,
+    who      TEXT,
+    added_at REAL NOT NULL
+);

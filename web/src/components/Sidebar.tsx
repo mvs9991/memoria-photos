@@ -2,7 +2,7 @@ import { NavLink } from "react-router-dom";
 import { useQuery } from "@tanstack/react-query";
 import {
   BookImage, CalendarRange, Copy, Images, MapPin, PanelLeftClose, PanelLeft, Settings as SettingsIcon,
-  Sparkles, Users, Clock, Map as MapIcon, LayoutGrid, FolderTree, ChartColumn, Trash2,
+  Sparkles, Users, Clock, Map as MapIcon, LayoutGrid, FolderTree, ChartColumn, Trash2, Upload,
 } from "lucide-react";
 import { api } from "../lib/api";
 
@@ -19,6 +19,7 @@ const NAV = [
   { to: "/folders", label: "Folders", icon: FolderTree },
   { to: "/insights", label: "Insights", icon: ChartColumn },
   { to: "/duplicates", label: "Duplicates", icon: Copy },
+  { to: "/upload", label: "Upload", icon: Upload },
 ];
 
 export function Sidebar({ collapsed, onToggle }: { collapsed: boolean; onToggle: () => void }) {

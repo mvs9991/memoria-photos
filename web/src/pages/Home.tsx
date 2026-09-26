@@ -6,6 +6,7 @@ import { useViewer } from "../components/ViewerContext";
 import { ErrorState, NoLibrary, Spinner } from "../components/States";
 import { formatBytes, formatDate } from "../lib/format";
 import { useCountUp, useTitle } from "../lib/hooks";
+import { BackupReminder } from "../components/LibraryCards";
 
 export default function Home() {
   useTitle();
@@ -24,6 +25,7 @@ export default function Home() {
 
   return (
     <div className="page home">
+      <BackupReminder />
       <section className="hero rise">
         <div className="hero-copy">
           <h1 className="display hero-title">Your library, understood.</h1>

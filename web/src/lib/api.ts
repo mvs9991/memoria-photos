@@ -11,7 +11,18 @@ export interface PhotoIndex {
   rating?: number[];
   /** on a stack cover: how many files the stack holds (0 otherwise) */
   stack?: number[];
+  /** the user's rotation, clockwise degrees */
+  rot?: number[];
   total: number;
+}
+
+/** The grid's items from the compact PhotoIndex payload (one place, so no page drops a field). */
+export function gridItems(p: PhotoIndex | undefined | null) {
+  if (!p) return [];
+  return p.ids.map((id, i) => ({
+    id, ratio: p.ratio[i], ts: p.ts[i], flags: p.flags?.[i] ?? 0, dur: p.dur?.[i] ?? 0,
+    rating: p.rating?.[i] ?? 0, stack: p.stack?.[i] ?? 0, rot: p.rot?.[i] ?? 0,
+  }));
 }
 
 /** Bit flags in PhotoIndex.flags. */
@@ -105,6 +116,7 @@ export interface PhotoDetail {
   rating: number;
   stack: { id: number; members: number[] } | null;
   corrected: { date: boolean; location: boolean };
+  rotation: number;
 }
 
 export interface Person {
@@ -152,7 +164,7 @@ export interface SearchResponse {
   result_type: string;
   total: number;
   took_ms: number;
-  photos: { id: number; ratio: number; ts: number; score: number | null }[];
+  photos: { id: number; ratio: number; ts: number; score: number | null; rot?: number }[];
   events: any[];
   people: any[];
   places: any[];
@@ -326,6 +338,8 @@ export const api = {
     request(`/photos/tags`, { method: "POST", body: JSON.stringify({ photo_ids, name }) }),
   removeTag: (photo_ids: number[], name: string) =>
     request(`/photos/tags/remove`, { method: "POST", body: JSON.stringify({ photo_ids, name }) }),
+  rotate: (photo_ids: number[], degrees: number) =>
+    request<{ rotated: number }>(`/photos/rotate`, { method: "POST", body: JSON.stringify({ photo_ids, degrees }) }),
   rate: (photo_ids: number[], rating: number) =>
     request(`/photos/rate`, { method: "POST", body: JSON.stringify({ photo_ids, rating }) }),
   correctDate: (photo_ids: number[], body: { taken_local?: string; shift_seconds?: number }) =>
@@ -469,6 +483,11 @@ export const api = {
   startExport: (spec: ExportSpec) =>
     request<{ job_id: number }>(`/export`, { method: "POST", body: JSON.stringify(spec) }),
 
+  finishUpload: () => request<{ job_id: number }>(`/upload/finish`, { method: "POST" }),
+  startBackup: (folder?: string) =>
+    request<{ job_id: number }>(`/backup`, { method: "POST", body: JSON.stringify({ folder }) }),
+  backupStatus: () => request<{ last: any | null; folder: string; every_days: number }>("/backup"),
+
   trash: () => request<{ items: TrashItem[]; bytes: number; days: number; allow_delete: boolean }>("/trash"),
   moveToTrash: (photo_ids: number[], confirm: number) =>
     request<{ trashed: number; bytes: number; skipped: { photo_id: number; reason: string }[]; expires_at: number }>(
@@ -485,8 +504,10 @@ export const api = {
   clearCache: (kind: string) => request<any>(`/cache/clear${qs({ kind })}`, { method: "POST" }),
 };
 
-export const thumbUrl = (id: number, size: "sm" | "m" | "l" = "m") => `${BASE}/thumb/${id}?s=${size}`;
-export const originalUrl = (id: number) => `${BASE}/photos/${id}/original`;
+/** `rot` is part of the URL because thumbnails are cached for good: a turned photo needs a new address. */
+export const thumbUrl = (id: number, size: "sm" | "m" | "l" = "m", rot = 0) =>
+  `${BASE}/thumb/${id}?s=${size}${rot ? `&r=${rot}` : ""}`;
+export const originalUrl = (id: number, rot = 0) => `${BASE}/photos/${id}/original${rot ? `?r=${rot}` : ""}`;
 export const downloadUrl = (id: number) => `${BASE}/photos/${id}/download`;
 export const videoUrl = (id: number) => `${BASE}/photos/${id}/video`;
 export const motionUrl = (id: number) => `${BASE}/photos/${id}/motion`;

@@ -195,6 +195,7 @@ ALLOWED_REMOVALS = {
     "imaging.py": 1,                    # a thumbnail temp file
     "pipeline/jobs.py": 1,              # the index lock file
     "video.py": 2,                      # transcode temp files
+    "engine/uploads.py": 1,             # an upload's own temp file in <upload folder>/.incoming
 }
 REMOVAL = re.compile(r"\.unlink\(|os\.remove\(|os\.unlink\(|rmtree\(|\.rmdir\(|os\.rename\(|\.rename\(|send2trash")
 

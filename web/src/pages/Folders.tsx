@@ -3,7 +3,7 @@ import { useMemo } from "react";
 import { Link, useSearchParams } from "react-router-dom";
 import { useQuery } from "@tanstack/react-query";
 import { ChevronRight, Folder, FolderOpen, HardDrive } from "lucide-react";
-import { api, thumbUrl } from "../lib/api";
+import { api, thumbUrl, gridItems } from "../lib/api";
 import { PhotoGrid } from "../components/PhotoGrid";
 import { EmptyState, ErrorState, SectionHeader, Spinner } from "../components/States";
 import { useViewer } from "../components/ViewerContext";
@@ -28,11 +28,7 @@ export default function Folders() {
   const here = path ? path.split("/").pop()! : baseName(rootName);
   useTitle(here || "Folders");
 
-  const items = useMemo(() => {
-    if (!direct.data) return [];
-    const { ids, ratio, ts, flags, dur, rating } = direct.data;
-    return ids.map((id, i) => ({ id, ratio: ratio[i], ts: ts[i], flags: flags[i], dur: dur?.[i] ?? 0, rating: rating?.[i] ?? 0 }));
-  }, [direct.data]);
+  const items = useMemo(() => gridItems(direct.data), [direct.data]);
 
   if (tree.isError) return <ErrorState error={tree.error} onRetry={() => tree.refetch()} />;
   if (tree.isLoading || !tree.data) return <Spinner full label="Loading folders" />;

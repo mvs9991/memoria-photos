@@ -36,7 +36,7 @@ export default function SearchPage() {
   });
 
   const items = useMemo(
-    () => (data?.photos ?? []).map((p) => ({ id: p.id, ratio: p.ratio, ts: p.ts, score: p.score })),
+    () => (data?.photos ?? []).map((p) => ({ id: p.id, ratio: p.ratio, ts: p.ts, score: p.score, rot: p.rot ?? 0 })),
     [data],
   );
 

@@ -22,12 +22,13 @@ def search(q: str = Query(..., min_length=1), limit: int = Query(500, le=2000), 
         marks = ",".join("?" * min(len(res.photo_ids), 2000))
         ids = res.photo_ids[:2000]
         rows = {r["id"]: r for r in conn.execute(
-            f"SELECT id, width, height, taken_ts FROM photos WHERE id IN ({marks})", ids)}
+            f"SELECT id, width, height, rotation, taken_ts FROM photos WHERE id IN ({marks})", ids)}
         for pid in ids:
             r = rows.get(pid)
             if not r:
                 continue
-            photos.append({"id": pid, "ratio": round(max(0.2, min(6.0, (r["width"] or 4) / max(r["height"] or 3, 1))), 3),
+            w, h = (r["height"], r["width"]) if r["rotation"] in (90, 270) else (r["width"], r["height"])
+            photos.append({"id": pid, "ratio": round(max(0.2, min(6.0, (w or 4) / max(h or 3, 1))), 3), "rot": r["rotation"],
                            "ts": int(r["taken_ts"] or 0), "score": res.scores.get(pid)})
     return {
         "query": q, "interpretation": res.interpretation, "explanation": res.explanation,

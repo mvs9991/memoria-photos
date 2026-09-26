@@ -1,7 +1,7 @@
 /** Actions for photos selected in a grid: add to album, tag, plus page-specific extras. */
 import { useCallback, useEffect, useState } from "react";
 import { useMutation, useQueryClient } from "@tanstack/react-query";
-import { BookImage, CalendarClock, Columns2, FolderOutput, MapPin, Tag, Trash2, X } from "lucide-react";
+import { BookImage, CalendarClock, Columns2, FolderOutput, MapPin, RotateCw, Tag, Trash2, X } from "lucide-react";
 import { api } from "../lib/api";
 import { AlbumPicker } from "./AlbumPicker";
 import { CompareView } from "./CompareView";
@@ -39,6 +39,15 @@ export function SelectionBar({ selected, onClear, extra, allIds, onSelectAll }: 
     },
   });
 
+  const rotate = useMutation({
+    mutationFn: () => api.rotate(ids, 90),
+    onSuccess: () => {
+      setNote(`Rotated ${ids.length.toLocaleString()} — only in Memoria, the files are unchanged`);
+      qc.invalidateQueries({ queryKey: ["photos"] });
+      ids.forEach((p) => qc.invalidateQueries({ queryKey: ["photo", p] }));
+    },
+  });
+
   const rate = useMutation({
     mutationFn: (r: number) => api.rate(ids, r).then(() => r),
     onSuccess: (r) => {
@@ -72,6 +81,9 @@ export function SelectionBar({ selected, onClear, extra, allIds, onSelectAll }: 
           <Columns2 size={14} /> Compare
         </button>
       )}
+      <button className="btn btn-ghost btn-sm" onClick={() => rotate.mutate()} title="Turn 90° clockwise (the files are not changed)">
+        <RotateCw size={14} /> Rotate
+      </button>
       <button className="btn btn-ghost btn-sm" onClick={() => setFixing("date")}><CalendarClock size={14} /> Fix date</button>
       <button className="btn btn-ghost btn-sm" onClick={() => setFixing("place")}><MapPin size={14} /> Set place</button>
       <button className="btn btn-ghost btn-sm" onClick={() => setExporting(true)} title="Copy the original files somewhere">

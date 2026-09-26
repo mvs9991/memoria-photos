@@ -183,6 +183,25 @@ def cmd_trash(ctx: AppContext, args) -> None:
         conn.close()
 
 
+def cmd_backup(ctx: AppContext, args) -> None:
+    from .engine.backup import run_backup
+    from .engine.xmp import ExportError
+
+    target = args.folder or ctx.settings.backup_folder
+    if not target:
+        print("Give a folder, or set one in Settings → Backup", file=sys.stderr)
+        sys.exit(1)
+    conn = ctx.connect()
+    try:
+        print(json.dumps(run_backup(ctx, conn, target, progress=lambda d, t: print(f"checked {d:,}/{t:,}", end=chr(13))),
+                         indent=2, default=str))
+    except ExportError as exc:
+        print(f"Backup refused: {exc}", file=sys.stderr)
+        sys.exit(1)
+    finally:
+        conn.close()
+
+
 def cmd_status(ctx: AppContext, args) -> None:
     conn = ctx.connect()
     q = lambda sql: conn.execute(sql).fetchone()[0]  # noqa: E731
@@ -273,6 +292,9 @@ def main(argv: list[str] | None = None) -> None:
     p.add_argument("action", choices=["list", "restore", "purge-expired"])
     p.add_argument("ids", nargs="*", help="photo ids to restore")
 
+    p = sub.add_parser("backup", help="copy every photo folder and Memoria's data to another drive (copy-only)")
+    p.add_argument("folder", nargs="?", help="backup folder (default: the one set in Settings)")
+
     sub.add_parser("status", help="library summary")
 
     args = parser.parse_args(argv)
@@ -282,7 +304,7 @@ def main(argv: list[str] | None = None) -> None:
                 "geo-setup": cmd_geo_setup, "models": cmd_models, "caption": cmd_caption, "ocr": cmd_ocr,
                 "export-xmp": cmd_export_xmp,
                 "set-password": cmd_set_password, "import-gpx": cmd_import_gpx, "export": cmd_export,
-                "trash": cmd_trash}
+                "trash": cmd_trash, "backup": cmd_backup}
     t0 = time.time()
     handlers[args.cmd](ctx, args)
     log.debug("%s finished in %.1fs", args.cmd, time.time() - t0)

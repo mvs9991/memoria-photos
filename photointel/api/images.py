@@ -17,6 +17,7 @@ from PIL import Image
 
 from .. import imaging
 from ..config import RAW_EXTENSIONS
+from ..rotation import rotate_image
 from .deps import get_state
 
 log = logging.getLogger(__name__)
@@ -59,9 +60,28 @@ def _send_image(img: Image.Image, fmt: str = "JPEG", quality: int = 85) -> Respo
 
 @router.get("/thumb/{photo_id}")
 def thumb(photo_id: int, s: str = Query("m", pattern="^(sm|m|l)$")):
-    """s=sm (256) | m (cached 512) | l (2048 viewer preview)."""
-    state = get_state()
+    """s=sm (256) | m (cached 512) | l (2048 viewer preview), turned by the user's rotation."""
     row = _photo_row(photo_id)
+    rot = row["rotation"] or 0
+    if not rot:
+        return _thumb_plain(photo_id, s, row)
+    # A turned copy, cached per photo and angle (duplicates share the unturned one by hash).
+    ext = "jpg" if s == "l" else "webp"
+    cache = get_state().ctx.paths.thumbs / "rotated" / f"{row['sha256'] or 'x'}_{photo_id}_{s}_{rot}.{ext}"
+    if not cache.exists():
+        plain = _thumb_plain(photo_id, s, row)
+        data = Path(plain.path).read_bytes() if isinstance(plain, FileResponse) else plain.body
+        img = rotate_image(Image.open(io.BytesIO(data)).convert("RGB"), rot)
+        cache.parent.mkdir(parents=True, exist_ok=True)
+        tmp = cache.with_name(cache.name + ".tmp")
+        img.save(tmp, "JPEG" if s == "l" else "WEBP", quality=86 if s == "l" else 78)
+        os.replace(tmp, cache)
+    return FileResponse(cache, media_type="image/jpeg" if s == "l" else "image/webp",
+                        headers={"Cache-Control": IMMUTABLE})
+
+
+def _thumb_plain(photo_id: int, s: str, row) -> Response:
+    state = get_state()
     paths = state.ctx.paths
     sha = row["sha256"]
 
@@ -112,6 +132,8 @@ def thumb(photo_id: int, s: str = Query("m", pattern="^(sm|m|l)$")):
 def original(photo_id: int):
     """Serve the original bytes when the browser can display them, else a large preview."""
     row = _photo_row(photo_id)
+    if row["rotation"]:
+        return thumb(photo_id, s="l")          # the file itself is not turned; its preview is
     path = abs_path(row)
     if not path.exists():
         raise HTTPException(410, "original file is missing")

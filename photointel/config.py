@@ -54,6 +54,10 @@ class Settings:
     stacks_enabled: bool = True           # fold RAW+JPEG pairs and bursts into one timeline item
     allow_delete: bool = True             # the Trash: deleting moves files there (see engine/trash.py)
     trash_days: int = 30                  # days a deleted file can be restored before it is erased
+    auto_index_minutes: int = 60          # a running server looks for new photos this often; 0 = only by hand
+    upload_folder: str = ""               # where phone uploads are stored; "" = <data>/uploads
+    backup_folder: str = ""               # another drive to copy everything to; "" = no backup
+    backup_every_days: int = 7            # with a backup folder: how often a running server backs up
     # Privacy: all external services are opt-in.
     allow_online_map_tiles: bool = False
     llm_enabled: bool = False

@@ -54,6 +54,10 @@ class SettingsBody(BaseModel):
     stacks_enabled: bool | None = None
     allow_delete: bool | None = None
     trash_days: int | None = Field(None, ge=1, le=365)
+    auto_index_minutes: int | None = Field(None, ge=0, le=10080)
+    upload_folder: str | None = None
+    backup_folder: str | None = None
+    backup_every_days: int | None = Field(None, ge=0, le=365)
 
 
 @router.post("/settings")

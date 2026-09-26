@@ -83,9 +83,11 @@ def ensure_root(conn: sqlite3.Connection, path: str | Path) -> int:
     row = conn.execute("SELECT id FROM roots WHERE path = ?", (p,)).fetchone()
     if row:
         return int(row[0])
-    cur = conn.execute("INSERT INTO roots(path, added_at) VALUES (?, ?)", (p, time.time()))
+    # Two requests can get here together (two phone uploads at once): let the second one's
+    # insert be a no-op and read back the id the first one wrote.
+    conn.execute("INSERT OR IGNORE INTO roots(path, added_at) VALUES (?, ?)", (p, time.time()))
     conn.commit()
-    return int(cur.lastrowid)
+    return int(conn.execute("SELECT id FROM roots WHERE path = ?", (p,)).fetchone()[0])
 
 
 def scan_root(conn: sqlite3.Connection, root_id: int, root_path: Path, exclude: list[Path],

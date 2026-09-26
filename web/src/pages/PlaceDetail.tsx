@@ -2,7 +2,7 @@ import { useMemo } from "react";
 import { Link, useParams } from "react-router-dom";
 import { useQuery } from "@tanstack/react-query";
 import { ArrowLeft, MapPin, Users } from "lucide-react";
-import { api, faceUrl } from "../lib/api";
+import { api, faceUrl, gridItems } from "../lib/api";
 import { PhotoGrid } from "../components/PhotoGrid";
 import { ErrorState, SectionHeader, Spinner } from "../components/States";
 import { MiniMap } from "../components/MiniMap";
@@ -21,11 +21,7 @@ export default function PlaceDetail() {
   });
   useTitle(place.data?.name);
 
-  const items = useMemo(() => {
-    if (!photos.data) return [];
-    const { ids, ratio, ts, flags } = photos.data;
-    return ids.map((pid, i) => ({ id: pid, ratio: ratio[i], ts: ts[i], flags: flags[i] }));
-  }, [photos.data]);
+  const items = useMemo(() => gridItems(photos.data), [photos.data]);
 
   if (place.isError) return <ErrorState error={place.error} onRetry={() => place.refetch()} />;
   if (place.isLoading || !place.data) return <Spinner full label="Loading place" />;

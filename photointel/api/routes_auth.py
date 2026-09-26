@@ -118,7 +118,7 @@ def shared_album(token: str):
     for i in range(0, len(ids), 900):
         chunk = ids[i:i + 900]
         rows += conn.execute(
-            f"SELECT id, width, height, taken_ts, face_count, favorite, media_type, duration, live_video_id, "
+            f"SELECT id, width, height, rotation, taken_ts, face_count, favorite, media_type, duration, live_video_id, "
             f"motion_offset FROM photos WHERE id IN ({','.join('?' * len(chunk))})", chunk).fetchall()
     order = {pid: n for n, pid in enumerate(ids)}
     rows.sort(key=lambda r: order[r["id"]])

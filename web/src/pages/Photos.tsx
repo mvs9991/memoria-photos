@@ -2,7 +2,7 @@ import { useMemo, useState } from "react";
 import { useSearchParams } from "react-router-dom";
 import { useQuery } from "@tanstack/react-query";
 import { CalendarDays, CheckSquare, FolderOutput, Heart, Images, LayoutGrid, MonitorPlay, Rows3, SlidersHorizontal, Star, X } from "lucide-react";
-import { api, FLAG } from "../lib/api";
+import { api, FLAG, gridItems } from "../lib/api";
 import { monthName } from "../lib/format";
 import { PhotoGrid } from "../components/PhotoGrid";
 import { EmptyState, ErrorState, NoLibrary, SkeletonGrid } from "../components/States";
@@ -43,12 +43,7 @@ export default function Photos() {
   });
   const { data: stats } = useQuery({ queryKey: ["stats"], queryFn: api.stats });
 
-  const items = useMemo(() => {
-    if (!query.data) return [];
-    const { ids, ratio, ts, flags, dur, rating, stack } = query.data;
-    return ids.map((id, i) => ({ id, ratio: ratio[i], ts: ts[i], flags: flags[i], dur: dur?.[i] ?? 0,
-      rating: rating?.[i] ?? 0, stack: stack?.[i] ?? 0 }));
-  }, [query.data]);
+  const items = useMemo(() => gridItems(query.data), [query.data]);
 
   const allIds = useMemo(() => items.map((i) => i.id), [items]);
   useSelectAllShortcut(selecting, allIds, selection.setAll);

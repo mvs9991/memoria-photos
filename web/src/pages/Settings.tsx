@@ -1,4 +1,4 @@
-import { useState } from "react";
+import { useEffect, useState } from "react";
 import { useMutation, useQuery, useQueryClient } from "@tanstack/react-query";
 import {
   AlertTriangle, Check, ChevronRight, Cpu, Database, FolderPlus, HardDrive, Loader2, Play, RefreshCw,
@@ -9,6 +9,7 @@ import { ErrorState, SectionHeader, Spinner } from "../components/States";
 import { formatBytes, formatDuration, relativeTime } from "../lib/format";
 import { useTitle } from "../lib/hooks";
 import { FrameCard, GpxCard, SecurityCard, TrashCard } from "../components/SettingsExtras";
+import { BackupCard, ScheduleCard } from "../components/LibraryCards";
 
 export default function Settings() {
   useTitle("Settings");
@@ -45,6 +46,12 @@ export default function Settings() {
     mutationFn: (kind: string) => api.clearCache(kind),
     onSuccess: () => qc.invalidateQueries({ queryKey: ["health"] }),
   });
+
+  // /settings#backup (from the home-screen reminder) lands on that card once it has rendered.
+  useEffect(() => {
+    if (!settings.data || !window.location.hash) return;
+    document.getElementById(window.location.hash.slice(1))?.scrollIntoView({ block: "start" });
+  }, [settings.data]);
 
   if (settings.isError) return <ErrorState error={settings.error} onRetry={() => settings.refetch()} />;
   if (settings.isLoading || !settings.data) return <Spinner full label="Loading settings" />;
@@ -242,6 +249,8 @@ export default function Settings() {
       </section>
 
       <SecurityCard />
+      <BackupCard />
+      <ScheduleCard />
       <TrashCard />
       <GpxCard />
       <XmpExport />

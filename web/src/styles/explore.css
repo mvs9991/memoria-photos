@@ -281,3 +281,33 @@ a.month-col:hover .month-bar { opacity: 1; }
   .review-bar.selection-bar > * { flex: none; }
   .review-bar.selection-bar .input-inline { width: 150px; }
 }
+
+/* ---------------- upload ---------------- */
+.upload-drop {
+  display: flex; flex-direction: column; align-items: center; gap: 12px; padding: 36px 20px;
+  border: 2px dashed var(--hairline-strong); border-radius: var(--r-xl); background: var(--surface);
+  color: var(--text-3); text-align: center; transition: border-color var(--t-fast), background var(--t-fast);
+}
+.upload-drop.is-over { border-color: var(--accent); background: var(--accent-soft); }
+.upload-drop .btn { font-size: 15px; height: 44px; padding: 0 20px; }
+.upload-summary { display: flex; flex-wrap: wrap; align-items: center; gap: 8px 18px; margin: 20px 0 10px; font-size: 13.5px; }
+.upload-summary span { display: inline-flex; align-items: center; gap: 5px; }
+.ok-text { color: var(--ok); }
+.upload-list { list-style: none; margin: 0 0 14px; padding: 0; display: grid; gap: 4px; max-height: 50vh; overflow: auto; }
+.upload-item {
+  display: grid; grid-template-columns: minmax(0, 1fr) auto 120px; gap: 12px; align-items: center;
+  padding: 7px 12px; border-radius: var(--r-sm); background: var(--surface); font-size: 13px;
+}
+.upload-item.is-added .upload-status { color: var(--ok); }
+.upload-item.is-failed .upload-status { color: var(--danger); }
+.upload-item.is-duplicate .upload-status, .upload-item.is-rejected .upload-status, .upload-item.is-waiting .upload-status { color: var(--text-3); }
+.upload-status { text-align: right; font-size: 12px; overflow: hidden; text-overflow: ellipsis; white-space: nowrap; }
+.upload-bar { height: 6px; border-radius: 3px; background: var(--surface-3); overflow: hidden; }
+.upload-bar span { display: block; height: 100%; background: var(--accent); transition: width 200ms; }
+.upload-note { margin-top: 16px; font-size: 12.5px; overflow-wrap: anywhere; }
+@media (max-width: 620px) {
+  .upload-item { grid-template-columns: minmax(0, 1fr) 90px; }
+  .upload-item > .dim { display: none; }
+}
+.backup-reminder { margin-bottom: 18px; flex-wrap: wrap; }
+.backup-reminder span { flex: 1; min-width: 200px; }

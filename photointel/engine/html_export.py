@@ -17,6 +17,7 @@ from pathlib import Path
 from .. import imaging
 from ..metadata import ts_to_naive
 from ..video import playable_in_browser
+from ..rotation import rotate_image
 from .places import place_label
 
 THUMB = 480
@@ -53,6 +54,8 @@ def export_album(conn: sqlite3.Connection, photo_ids: list[int], title: str, out
         except (imaging.DecodeError, OSError):
             skipped += 1
             continue
+        if r["rotation"]:
+            dec.image = rotate_image(dec.image, r["rotation"])
         stem = f"{n:05d}"
         imaging.save_thumbnail(dec.image, out / "thumbs" / f"{stem}.jpg", THUMB, quality=80)
         imaging.save_thumbnail(dec.image, out / "photos" / f"{stem}.jpg", PHOTO, quality=86)

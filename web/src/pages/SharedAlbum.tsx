@@ -6,7 +6,7 @@ import { useCallback, useEffect, useMemo, useState } from "react";
 import { useParams } from "react-router-dom";
 import { useQuery } from "@tanstack/react-query";
 import { ChevronLeft, ChevronRight, Download, X } from "lucide-react";
-import { api, FLAG, sharedDownloadUrl, sharedThumbUrl, sharedVideoUrl } from "../lib/api";
+import { api, FLAG, sharedDownloadUrl, sharedThumbUrl, sharedVideoUrl, gridItems } from "../lib/api";
 import { PhotoGrid } from "../components/PhotoGrid";
 import { Spinner } from "../components/States";
 import { useTitle } from "../lib/hooks";
@@ -17,11 +17,7 @@ export default function SharedAlbum() {
   const [open, setOpen] = useState<number | null>(null);
   useTitle(data?.name ?? "Shared album");
 
-  const items = useMemo(() => {
-    if (!data) return [];
-    const { ids, ratio, ts, flags, dur } = data.photos;
-    return ids.map((id, i) => ({ id, ratio: ratio[i], ts: ts[i], flags: flags[i], dur: dur?.[i] ?? 0 }));
-  }, [data]);
+  const items = useMemo(() => gridItems(data?.photos), [data]);
   const thumbFor = useCallback((id: number, size: "sm" | "m") => sharedThumbUrl(token, id, size), [token]);
 
   if (isLoading) return <div className="share-page"><Spinner full label="Opening album" /></div>;

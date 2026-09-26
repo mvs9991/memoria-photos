@@ -29,6 +29,7 @@ const CollectionDetail = lazy(() => import("./pages/Collections").then((m) => ({
 const Folders = lazy(() => import("./pages/Folders"));
 const Insights = lazy(() => import("./pages/Insights"));
 const Trash = lazy(() => import("./pages/Trash"));
+const Upload = lazy(() => import("./pages/Upload"));
 const Frame = lazy(() => import("./pages/Frame"));
 const SharedAlbum = lazy(() => import("./pages/SharedAlbum"));
 
@@ -86,6 +87,7 @@ function Shell() {
                 <Route path="/folders" element={<Folders />} />
                 <Route path="/insights" element={<Insights />} />
                 <Route path="/trash" element={<Trash />} />
+                <Route path="/upload" element={<Upload />} />
                 <Route path="/events" element={<Events />} />
                 <Route path="/events/:id" element={<EventDetail />} />
                 <Route path="/places" element={<Places />} />

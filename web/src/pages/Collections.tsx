@@ -12,7 +12,7 @@ import {
   ArrowLeft, CalendarX, Camera, CheckSquare, Clock, Copy, Eye, EyeOff, FileText, Film, Focus, GalleryHorizontal,
   HardDrive, Layers, MapPinOff, MessageSquareText, Monitor, ScanFace, Sparkle,
 } from "lucide-react";
-import { api, thumbUrl, type Collection } from "../lib/api";
+import { api, thumbUrl, type Collection, gridItems } from "../lib/api";
 import { PhotoGrid } from "../components/PhotoGrid";
 import { EmptyState, ErrorState, Spinner } from "../components/States";
 import { SelectionBar, useSelectAllShortcut, useSelection } from "../components/SelectionBar";
@@ -117,12 +117,7 @@ export function CollectionDetail() {
 
   const params = recent ? { order: "added", limit: 2000 } : { collection: key, order: key === "large" ? "size" : undefined };
   const query = useQuery({ queryKey: ["photos", params], queryFn: () => api.photos(params) });
-  const items = useMemo(() => {
-    if (!query.data) return [];
-    const { ids, ratio, ts, flags, dur, rating, stack } = query.data;
-    return ids.map((id, i) => ({ id, ratio: ratio[i], ts: ts[i], flags: flags[i], dur: dur?.[i] ?? 0,
-      rating: rating?.[i] ?? 0, stack: stack?.[i] ?? 0 }));
-  }, [query.data]);
+  const items = useMemo(() => gridItems(query.data), [query.data]);
   const allIds = useMemo(() => items.map((i) => i.id), [items]);
   useSelectAllShortcut(selecting, allIds, selection.setAll);
 
