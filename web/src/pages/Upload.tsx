@@ -11,32 +11,10 @@ import { CheckCircle2, CircleSlash, Copy, ImagePlus, Loader2, Upload as UploadIc
 import { api } from "../lib/api";
 import { formatBytes } from "../lib/format";
 import { useTitle } from "../lib/hooks";
+import { uploadAll, type UploadStatus } from "../lib/upload";
 
-type Status = "waiting" | "uploading" | "added" | "duplicate" | "rejected" | "failed";
+type Status = UploadStatus;
 interface Item { key: string; file: File; status: Status; progress: number; reason?: string }
-
-const PARALLEL = 2;
-
-function send(file: File, onProgress: (p: number) => void): Promise<{ status: Status; reason?: string }> {
-  return new Promise((resolve) => {
-    const xhr = new XMLHttpRequest();
-    const form = new FormData();
-    form.append("files", file, file.name);
-    xhr.open("POST", "/api/upload");
-    xhr.upload.onprogress = (e) => e.lengthComputable && onProgress(e.loaded / e.total);
-    xhr.onload = () => {
-      if (xhr.status === 200) {
-        const r = JSON.parse(xhr.responseText).results[0];
-        resolve({ status: r.status, reason: r.reason ?? undefined });
-      } else if (xhr.status === 401) {
-        window.dispatchEvent(new Event("memoria:login-required"));
-        resolve({ status: "failed", reason: "log in again" });
-      } else resolve({ status: "failed", reason: `server said ${xhr.status}` });
-    };
-    xhr.onerror = () => resolve({ status: "failed", reason: "connection lost" });
-    xhr.send(form);
-  });
-}
 
 export default function Upload() {
   useTitle("Upload");
@@ -56,16 +34,7 @@ export default function Upload() {
     const fresh: Item[] = files.map((f, i) => ({ key: `${Date.now()}-${i}-${f.name}`, file: f, status: "waiting", progress: 0 }));
     setItems((cur) => [...fresh, ...cur]);
     setRunning(true);
-    let next = 0;
-    const worker = async () => {
-      while (next < fresh.length) {
-        const it = fresh[next++];
-        update(it.key, { status: "uploading" });
-        const r = await send(it.file, (p) => update(it.key, { progress: p }));
-        update(it.key, { status: r.status, reason: r.reason, progress: 1 });
-      }
-    };
-    await Promise.all(Array.from({ length: PARALLEL }, worker));
+    await uploadAll("/api/upload", fresh.map((f) => f.file), (i, patch) => update(fresh[i].key, patch));
     setRunning(false);
     try {
       const job = await api.finishUpload();

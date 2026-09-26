@@ -81,14 +81,15 @@ def mark_password_changed(data_dir: Path) -> None:
 # ---------------------------------------------------------------- share links
 
 def create_share(conn: sqlite3.Connection, album_id: int, allow_download: bool = False,
-                 expires_days: float | None = None) -> dict:
+                 expires_days: float | None = None, allow_upload: bool = False) -> dict:
     token = secrets.token_urlsafe(16)
     now = time.time()
     expires = now + expires_days * 86400 if expires_days else None
-    conn.execute("INSERT INTO share_links(token, album_id, allow_download, expires_at, created_at) VALUES (?,?,?,?,?)",
-                 (token, album_id, int(allow_download), expires, now))
+    conn.execute("INSERT INTO share_links(token, album_id, allow_download, allow_upload, expires_at, created_at) "
+                 "VALUES (?,?,?,?,?,?)", (token, album_id, int(allow_download), int(allow_upload), expires, now))
     conn.commit()
-    return {"token": token, "album_id": album_id, "allow_download": allow_download, "expires_at": expires}
+    return {"token": token, "album_id": album_id, "allow_download": allow_download, "allow_upload": allow_upload,
+            "expires_at": expires}
 
 
 def resolve_share(conn: sqlite3.Connection, token: str):

@@ -17,11 +17,12 @@ const EXPIRY: [string, number | null][] = [["never", null], ["1 day", 1], ["1 we
 export function ShareDialog({ albumId, albumName, onClose }: { albumId: number; albumName: string; onClose: () => void }) {
   const qc = useQueryClient();
   const [download, setDownload] = useState(false);
+  const [contribute, setContribute] = useState(false);
   const [expiry, setExpiry] = useState<number | null>(7);
   const [copied, setCopied] = useState<string | null>(null);
   const shares = useQuery({ queryKey: ["shares", albumId], queryFn: () => api.shares(albumId) });
   const create = useMutation({
-    mutationFn: () => api.shareAlbum(albumId, download, expiry),
+    mutationFn: () => api.shareAlbum(albumId, download, expiry, contribute),
     onSuccess: (s) => {
       qc.invalidateQueries({ queryKey: ["shares", albumId] });
       copy(s.token);
@@ -57,6 +58,10 @@ export function ShareDialog({ albumId, albumName, onClose }: { albumId: number; 
                 <input type="checkbox" checked={download} onChange={(e) => setDownload(e.target.checked)} />
                 allow downloading originals
               </label>
+              <label className="xmp-auto" title="Visitors can add their photos to this album (smart albums excluded)">
+                <input type="checkbox" checked={contribute} onChange={(e) => setContribute(e.target.checked)} />
+                let people add photos
+              </label>
               <label className="dim">expires
                 <select className="field field-sm" value={expiry ?? ""} aria-label="Link expiry"
                   onChange={(e) => setExpiry(e.target.value ? Number(e.target.value) : null)}>
@@ -76,6 +81,7 @@ export function ShareDialog({ albumId, albumName, onClose }: { albumId: number; 
                       <code className="ellipsis" title={urlFor(s.token)}>{urlFor(s.token)}</code>
                       <span className="dim share-meta">
                         {s.allow_download ? <><Download size={11} /> downloads · </> : ""}
+                        {s.allow_upload ? "adds photos · " : ""}
                         {expired ? "expired" : s.expires_at ? `until ${new Date(s.expires_at * 1000).toLocaleDateString()}` : "no expiry"}
                         {s.last_used_at ? ` · opened ${relativeTime(s.last_used_at)}` : " · not opened yet"}
                       </span>

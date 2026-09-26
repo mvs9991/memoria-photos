@@ -50,6 +50,10 @@ V6_COLUMNS = {
     "share_links": [
         ("allow_upload", "INTEGER NOT NULL DEFAULT 0"), # visitors may add photos to the album
     ],
+    "uploads": [
+        ("album_id", "INTEGER"),                        # sent through a shared album: goes into it
+        ("linked", "INTEGER NOT NULL DEFAULT 0"),       # 1 once indexed and added to that album
+    ],
 }
 MIGRATION_INDEXES = [
     "CREATE INDEX IF NOT EXISTS ix_photos_media ON photos(media_type)",

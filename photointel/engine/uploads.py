@@ -92,8 +92,9 @@ def _claim(dest_dir: Path, name: str) -> Path:
 
 
 def save_upload(ctx, conn: sqlite3.Connection, stream: BinaryIO, filename: str, who: str = "Phone",
-                subfolder: str | None = None) -> Saved:
-    """Store one uploaded file. `who` names the top folder (a user, or a shared album)."""
+                subfolder: str | None = None, album_id: int | None = None) -> Saved:
+    """Store one uploaded file. `who` names the top folder (a user, or "Shared" for a
+    shared album's visitors); with `album_id` the photo also goes into that album."""
     name = _safe(Path(filename or "upload").name)
     ext = Path(name).suffix.lower()
     if ext not in SUPPORTED_EXTENSIONS:
@@ -125,10 +126,16 @@ def save_upload(ctx, conn: sqlite3.Connection, stream: BinaryIO, filename: str, 
                            "ORDER BY status = 'ok' DESC LIMIT 1", (digest,)).fetchone()
         if dup is not None:
             where = "in the Trash" if dup["status"] == "trashed" else "already in your library"
+            if album_id is not None and dup["status"] == "ok":        # no second copy, but it joins the album
+                from .albums import add_photos
+                add_photos(conn, album_id, [int(dup["id"])])
             return Saved("duplicate", name, reason=where, photo_id=int(dup["id"]))
         # uploaded a moment ago and not indexed yet
         earlier = conn.execute("SELECT path FROM uploads WHERE sha256 = ?", (digest,)).fetchone()
         if earlier is not None and Path(earlier[0]).exists():
+            if album_id is not None:
+                conn.execute("UPDATE uploads SET album_id = COALESCE(album_id, ?) WHERE sha256 = ?", (album_id, digest))
+                conn.commit()
             return Saved("duplicate", name, reason="already uploaded", path=earlier[0])
         when = _capture_date(tmp, name)
         parts = [_safe(who), *(([_safe(subfolder)]) if subfolder else []),
@@ -137,8 +144,8 @@ def save_upload(ctx, conn: sqlite3.Connection, stream: BinaryIO, filename: str, 
         dest_dir.mkdir(parents=True, exist_ok=True)
         dest = _claim(dest_dir, name)
         os.replace(tmp, dest)                  # over our own empty claim, never someone else's file
-        conn.execute("INSERT OR REPLACE INTO uploads(sha256, path, who, added_at) VALUES (?,?,?,?)",
-                     (digest, str(dest), who, time.time()))
+        conn.execute("INSERT OR REPLACE INTO uploads(sha256, path, who, added_at, album_id, linked) VALUES (?,?,?,?,?,0)",
+                     (digest, str(dest), who, time.time(), album_id))
         conn.commit()
         if when:
             ts = when.timestamp()
@@ -151,3 +158,21 @@ def save_upload(ctx, conn: sqlite3.Connection, stream: BinaryIO, filename: str, 
         return Saved("rejected", name, reason=str(exc))
     finally:
         tmp.unlink(missing_ok=True)
+
+
+def link_to_albums(conn: sqlite3.Connection) -> dict:
+    """After indexing: put photos sent through a shared album into that album."""
+    from .albums import add_photos
+
+    rows = conn.execute(
+        """SELECT u.sha256, u.album_id, p.id FROM uploads u JOIN photos p ON p.sha256 = u.sha256 AND p.status = 'ok'
+           JOIN albums a ON a.id = u.album_id AND a.hidden = 0 AND a.kind = 'manual'
+           WHERE u.album_id IS NOT NULL AND u.linked = 0""").fetchall()
+    by_album: dict[int, list[int]] = {}
+    for r in rows:
+        by_album.setdefault(int(r["album_id"]), []).append(int(r["id"]))
+    for aid, ids in by_album.items():
+        add_photos(conn, aid, ids, commit=False)
+    conn.executemany("UPDATE uploads SET linked = 1 WHERE sha256 = ?", [(r["sha256"],) for r in rows])
+    conn.commit()
+    return {"linked": len(rows)}

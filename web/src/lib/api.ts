@@ -260,6 +260,7 @@ export interface AuthStatus {
 export interface ShareLink {
   token: string;
   allow_download: number | boolean;
+  allow_upload?: number | boolean;
   expires_at: number | null;
   created_at: number;
   last_used_at: number | null;
@@ -514,12 +515,14 @@ export const api = {
   logout: () => request(`/auth/logout`, { method: "POST" }),
   setPassword: (current: string, next: string) =>
     request<{ protected: boolean }>(`/auth/password`, { method: "POST", body: JSON.stringify({ current, new: next }) }),
-  shareAlbum: (id: number, allow_download: boolean, expires_days: number | null) =>
-    request<ShareLink>(`/albums/${id}/share`, { method: "POST", body: JSON.stringify({ allow_download, expires_days }) }),
+  shareAlbum: (id: number, allow_download: boolean, expires_days: number | null, allow_upload = false) =>
+    request<ShareLink>(`/albums/${id}/share`, {
+      method: "POST", body: JSON.stringify({ allow_download, expires_days, allow_upload }),
+    }),
   shares: (id: number) => request<{ shares: ShareLink[] }>(`/albums/${id}/shares`),
   revokeShare: (token: string) => request(`/shares/${token}`, { method: "DELETE" }),
   shared: (token: string) =>
-    request<{ name: string; allow_download: boolean; photos: PhotoIndex }>(`/share/${token}`),
+    request<{ name: string; allow_download: boolean; allow_upload: boolean; photos: PhotoIndex }>(`/share/${token}`),
 
   exportPreview: (spec: ExportSpec) =>
     request<{ items: number; bytes: number; groups: { label: string; count: number; bytes: number }[] }>(

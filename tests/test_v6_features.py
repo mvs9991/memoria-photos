@@ -364,3 +364,43 @@ def test_reindexing_after_an_upgrade_leaves_trashed_photos_alone(ctx, library, c
     assert conn.execute("SELECT status FROM photos WHERE id = ?", (pid,)).fetchone()[0] == "trashed"
     assert conn.execute("SELECT COUNT(*) FROM processing_errors WHERE photo_id = ?", (pid,)).fetchone()[0] == 0
     conn.close()
+
+
+# ----------------------------------------------------------------- shared albums people can add to
+
+def test_visitors_add_photos_through_a_shared_album(ctx, library, client):
+    from photointel.pipeline.post import run_post_stages
+
+    index(ctx, library)
+    album = client.post("/api/albums", json={"name": "Wedding", "photo_ids": []}).json()["id"]
+    closed = client.post(f"/api/albums/{album}/share", json={}).json()["token"]
+    open_ = client.post(f"/api/albums/{album}/share", json={"allow_upload": True}).json()["token"]
+    new_photo, lib_photo = _jpeg((222, 11, 99)), (library / "Trips/Goa/IMG_x0.jpg").read_bytes()
+
+    client.cookies.clear()
+    assert client.post(f"/api/share/{closed}/upload", files=[("files", ("a.jpg", new_photo, "image/jpeg"))]).status_code == 403
+    r = client.post(f"/api/share/{open_}/upload", files=[("files", ("guest1.jpg", new_photo, "image/jpeg")),
+                                                          ("files", ("same.jpg", lib_photo, "image/jpeg"))]).json()
+    assert [x["status"] for x in r["results"]] == ["added", "duplicate"]
+    assert all("path" not in x for x in r["results"])                     # no server paths for visitors
+    assert (ctx.paths.data / "uploads" / "Shared" / "Wedding" / "2023" / "08" / "guest1.jpg").exists()
+
+    Indexer(ctx, workers=2).run(roots=[str(ctx.paths.data / "uploads")])
+    conn = ctx.connect()
+    run_post_stages(ctx, conn, stages=["uploads"])
+    members = {r[0] for r in conn.execute(
+        "SELECT p.filename FROM album_photos ap JOIN photos p ON p.id = ap.photo_id WHERE ap.album_id = ?", (album,))}
+    assert members == {"guest1.jpg", "IMG_x0.jpg"}
+    shown = client.get(f"/api/share/{open_}").json()
+    assert shown["allow_upload"] is True and len(shown["photos"]["ids"]) == 2
+    conn.close()
+
+
+def test_smart_albums_and_revoked_links_take_no_uploads(ctx, library, client):
+    index(ctx, library)
+    smart = client.post("/api/albums", json={"name": "Beach", "query": "beach"}).json()["id"]
+    assert client.post(f"/api/albums/{smart}/share", json={"allow_upload": True}).status_code == 400
+    album = client.post("/api/albums", json={"name": "Party", "photo_ids": []}).json()["id"]
+    token = client.post(f"/api/albums/{album}/share", json={"allow_upload": True}).json()["token"]
+    client.delete(f"/api/shares/{token}")
+    assert client.post(f"/api/share/{token}/upload", files=[("files", ("a.jpg", _jpeg(), "image/jpeg"))]).status_code == 404

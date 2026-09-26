@@ -3,7 +3,7 @@ from __future__ import annotations
 
 import time
 
-from fastapi import APIRouter, HTTPException, Query, Request, Response
+from fastapi import APIRouter, HTTPException, Query, Request, Response, UploadFile
 from pydantic import BaseModel
 
 from .. import accounts, auth
@@ -92,20 +92,24 @@ def set_password(body: PasswordBody, request: Request, response: Response):
 class ShareBody(BaseModel):
     allow_download: bool = False
     expires_days: float | None = None
+    allow_upload: bool = False
 
 
 @router.post("/albums/{album_id}/share")
 def share_album(album_id: int, body: ShareBody):
     conn = get_state().conn()
-    if conn.execute("SELECT 1 FROM albums WHERE id = ? AND hidden = 0", (album_id,)).fetchone() is None:
+    album = conn.execute("SELECT kind FROM albums WHERE id = ? AND hidden = 0", (album_id,)).fetchone()
+    if album is None:
         raise HTTPException(404, "album not found")
-    return auth.create_share(conn, album_id, body.allow_download, body.expires_days)
+    if body.allow_upload and album["kind"] != "manual":
+        raise HTTPException(400, "a smart album is a saved search; people cannot add photos to it")
+    return auth.create_share(conn, album_id, body.allow_download, body.expires_days, body.allow_upload)
 
 
 @router.get("/albums/{album_id}/shares")
 def list_shares(album_id: int):
     rows = get_state().conn().execute(
-        "SELECT token, allow_download, expires_at, created_at, last_used_at FROM share_links WHERE album_id = ? "
+        "SELECT token, allow_download, allow_upload, expires_at, created_at, last_used_at FROM share_links WHERE album_id = ? "
         "ORDER BY created_at DESC", (album_id,)).fetchall()
     return {"shares": [dict(r) for r in rows]}
 
@@ -146,7 +150,38 @@ def shared_album(token: str):
     rows.sort(key=lambda r: order[r["id"]])
     payload = columnar(rows)
     payload["flags"] = [f & ~1 for f in payload["flags"]]   # the owner's favourites are not shared
-    return {"name": share["name"], "allow_download": bool(share["allow_download"]), "photos": payload}
+    return {"name": share["name"], "allow_download": bool(share["allow_download"]),
+            "allow_upload": bool(share["allow_upload"]), "photos": payload}
+
+
+@router.post("/share/{token}/upload")
+def shared_upload(token: str, files: list[UploadFile]):
+    """A visitor adds photos to a shared album whose link allows it. They are stored in the
+    upload folder under Shared/<album>, and join the album once indexed."""
+    from ..engine.uploads import save_upload
+
+    conn, share = _require(token)
+    if not share["allow_upload"]:
+        raise HTTPException(403, "this link does not allow adding photos")
+    ctx = get_state().ctx
+    out = [save_upload(ctx, conn, f.file, f.filename or "upload", who="Shared", subfolder=share["name"],
+                       album_id=int(share["album_id"])).__dict__ for f in files[:200]]
+    for r in out:
+        r.pop("path", None)                  # the visitor learns nothing about the server's folders
+    return {"results": out}
+
+
+@router.post("/share/{token}/upload/finish")
+def shared_upload_finish(token: str):
+    from ..engine.uploads import ensure_upload_root
+    from ..pipeline import jobs
+
+    conn, share = _require(token)
+    if not share["allow_upload"]:
+        raise HTTPException(403, "this link does not allow adding photos")
+    _, root = ensure_upload_root(get_state().ctx, conn)
+    jobs.spawn_index_job(get_state().ctx, {"kind": "index", "roots": [str(root)]})
+    return {"ok": True}
 
 
 @router.get("/share/{token}/thumb/{photo_id}")

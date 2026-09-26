@@ -2,18 +2,19 @@
  * What someone opening a share link sees: one album, read-only, outside the app shell.
  * Every request carries the token and is checked against the album on the server.
  */
-import { useCallback, useEffect, useMemo, useState } from "react";
+import { useCallback, useEffect, useMemo, useRef, useState } from "react";
 import { useParams } from "react-router-dom";
 import { useQuery } from "@tanstack/react-query";
-import { ChevronLeft, ChevronRight, Download, X } from "lucide-react";
+import { ChevronLeft, ChevronRight, Download, ImagePlus, X } from "lucide-react";
 import { api, FLAG, sharedDownloadUrl, sharedThumbUrl, sharedVideoUrl, gridItems } from "../lib/api";
 import { PhotoGrid } from "../components/PhotoGrid";
 import { Spinner } from "../components/States";
 import { useTitle } from "../lib/hooks";
+import { uploadAll } from "../lib/upload";
 
 export default function SharedAlbum() {
   const { token = "" } = useParams();
-  const { data, isLoading, isError } = useQuery({ queryKey: ["shared", token], queryFn: () => api.shared(token), retry: false });
+  const { data, isLoading, isError, refetch } = useQuery({ queryKey: ["shared", token], queryFn: () => api.shared(token), retry: false });
   const [open, setOpen] = useState<number | null>(null);
   useTitle(data?.name ?? "Shared album");
 
@@ -35,6 +36,7 @@ export default function SharedAlbum() {
       <header className="share-head">
         <h1 className="display">{data.name}</h1>
         <p className="dim">{items.length.toLocaleString()} {items.length === 1 ? "item" : "items"} · shared with you</p>
+        {data.allow_upload && <AddPhotos token={token} onDone={() => refetch()} />}
       </header>
       <div className="share-grid">
         <PhotoGrid items={items} grouping="day" targetHeight={220} thumbFor={thumbFor} scrubber={false}
@@ -84,6 +86,41 @@ function Lightbox({ token, items, index, onIndex, onClose, download }: {
         )}
         <button className="ss-btn" onClick={onClose} aria-label="Close"><X size={19} /></button>
       </div>
+    </div>
+  );
+}
+
+function AddPhotos({ token, onDone }: { token: string; onDone: () => void }) {
+  const input = useRef<HTMLInputElement>(null);
+  const [state, setState] = useState<{ total: number; done: number; added: number; dup: number } | null>(null);
+  const start = async (files: File[]) => {
+    if (!files.length) return;
+    const tally = { total: files.length, done: 0, added: 0, dup: 0 };
+    setState({ ...tally });
+    await uploadAll(`/api/share/${token}/upload`, files, (_, patch) => {
+      if (patch.status === "uploading") return;
+      tally.done += 1;
+      if (patch.status === "added") tally.added += 1;
+      if (patch.status === "duplicate") tally.dup += 1;
+      setState({ ...tally });
+    });
+    await fetch(`/api/share/${token}/upload/finish`, { method: "POST" }).catch(() => undefined);
+    setTimeout(onDone, 4000);
+  };
+  return (
+    <div className="share-add">
+      <input ref={input} type="file" multiple hidden accept="image/*,video/*,.heic,.heif"
+        onChange={(e) => { start([...(e.target.files ?? [])]); e.target.value = ""; }} />
+      <button className="btn btn-primary" onClick={() => input.current?.click()}
+        disabled={!!state && state.done < state.total}>
+        <ImagePlus size={15} /> Add your photos
+      </button>
+      {state && (
+        <span className="dim">
+          {state.done < state.total ? `Sending ${state.done + 1} of ${state.total}…`
+            : `Thank you — ${state.added} added${state.dup ? `, ${state.dup} were already here` : ""}. They appear in a minute.`}
+        </span>
+      )}
     </div>
   );
 }

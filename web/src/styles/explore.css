@@ -321,3 +321,4 @@ a.month-col:hover .month-bar { opacity: 1; }
 .account-seen { font-size: 12px; margin-right: auto; }
 .locked-gate { display: grid; place-items: center; min-height: 60vh; }
 .nav-user .nav-label { overflow: hidden; text-overflow: ellipsis; }
+.share-add { display: flex; flex-wrap: wrap; align-items: center; gap: 10px 14px; margin-top: 14px; }
