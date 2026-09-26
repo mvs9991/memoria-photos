@@ -132,7 +132,7 @@ def scan_root(conn: sqlite3.Connection, root_id: int, root_path: Path, exclude: 
         if restored:
             conn.executemany(
                 "UPDATE photos SET status = CASE WHEN meta_version IS NULL THEN 'pending' "
-                "WHEN error IS NOT NULL THEN 'error' ELSE 'ok' END, last_seen_at=? WHERE id=?",
+                "WHEN error IS NOT NULL THEN 'error' WHEN locked = 1 THEN 'locked' ELSE 'ok' END, last_seen_at=? WHERE id=?",
                 restored,
             )
             restored.clear()
@@ -177,6 +177,7 @@ def scan_root(conn: sqlite3.Connection, root_id: int, root_path: Path, exclude: 
     # Trashed and erased photos are gone on purpose; the trash keeps their state.
     missing = [(pid,) for rel, (pid, _, _, status) in existing.items()
                if pid not in seen_set and status not in ("missing", "trashed", "deleted")]
+    # (a locked photo whose file vanished becomes 'missing' like any other; unlocking restores it)
     if existing and stats.seen == 0:
         # An empty root that used to contain photos is almost always an unmounted drive/share.
         log.warning("Root %s appears empty but has %d indexed photos; not marking them missing", root_path, len(existing))

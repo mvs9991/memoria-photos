@@ -18,7 +18,7 @@ from ..engine.people import person_label
 from ..engine.places import place_label
 from ..metadata import ts_to_naive
 from ..rotation import rotate_box
-from .deps import get_state
+from .deps import get_state, guard_locked
 
 log = logging.getLogger(__name__)
 router = APIRouter()
@@ -30,11 +30,17 @@ def photo_filter_sql(conn, person: list[int] | None = None, place: int | None = 
                      folder: str | None = None, has_faces: bool | None = None,
                      include_screenshots: bool = True, media: str | None = None, min_rating: int = 0,
                      collapse_stacks: bool = False, collection: str | None = None, root_id: int | None = None,
-                     folder_exact: bool = False) -> tuple[str, list]:
+                     folder_exact: bool = False, archived: str = "include") -> tuple[str, list]:
     where = ["p.status = 'ok'", "p.hidden = 0", "p.live_component = 0"]
     args: list = []
+    if archived == "exclude":            # the timeline: archived photos stay out of it
+        where.append("p.archived = 0")
+    elif archived == "only":
+        where.append("p.archived = 1")
     if collection == "hidden":           # the one view that shows what "hide" took away
         where[1] = "p.hidden = 1"
+    elif collection == "archive":
+        where.append("p.archived = 1")
     elif collection:
         spec = COLLECTIONS.get(collection)
         if spec is None:
@@ -161,6 +167,7 @@ def photos_index(person: list[int] = Query(default=[]), place: int | None = None
                  min_rating: int = Query(0, ge=0, le=5), collapse_stacks: bool = False,
                  order: str = Query("date_desc", pattern="^(date_desc|date_asc|quality|added|size)$"),
                  collection: str | None = None, root_id: int | None = None, folder_exact: bool = False,
+                 archived: str = Query("include", pattern="^(include|exclude|only)$"),
                  limit: int = Query(200000, le=500000)):
     """Columnar photo list for the virtualised grid: ids, aspect ratios, timestamps.
 
@@ -173,7 +180,8 @@ def photos_index(person: list[int] = Query(default=[]), place: int | None = None
         conn, person=person, place=place, event=event, year=year, month=month, tag=tag, source=source,
         favorite=favorite, camera=camera, folder=folder, has_faces=has_faces,
         include_screenshots=include_screenshots, media=media, min_rating=min_rating,
-        collapse_stacks=collapse_stacks, collection=collection, root_id=root_id, folder_exact=folder_exact)
+        collapse_stacks=collapse_stacks, collection=collection, root_id=root_id, folder_exact=folder_exact,
+        archived=archived)
     order_sql = {"date_desc": "p.taken_ts DESC, p.id DESC", "date_asc": "p.taken_ts ASC, p.id ASC",
                  # The user's stars outrank any computed score.
                  "quality": "p.rating DESC, COALESCE(p.quality_score,0) DESC",
@@ -221,6 +229,7 @@ def photo_detail(photo_id: int):
            LEFT JOIN events e ON e.id = p.event_id WHERE p.id = ?""", (photo_id,)).fetchone()
     if row is None:
         raise HTTPException(404, "photo not found")
+    guard_locked(row)
     faces = []
     from ..engine.people import age_on
 
@@ -306,6 +315,7 @@ def photo_video(photo_id: int):
         (photo_id,)).fetchone()
     if row is None or row["media_type"] != "video":
         raise HTTPException(404, "not a video")
+    guard_locked(row)
     path = abs_path(row)
     if not path.exists():
         raise HTTPException(410, "original file is missing")
@@ -334,6 +344,7 @@ def photo_motion(photo_id: int):
         (photo_id,)).fetchone()
     if row is None:
         raise HTTPException(404, "photo not found")
+    guard_locked(row)
     if row["live_video_id"]:
         return photo_video(int(row["live_video_id"]))
     if (row["motion_offset"] or 0) > 0:
@@ -699,7 +710,7 @@ def memories(limit: int = 12):
     # On this day (any year)
     rows = conn.execute(
         """SELECT p.id, p.taken_ts FROM photos p
-           WHERE p.status='ok' AND p.hidden=0 AND p.live_component=0 AND p.taken_ts IS NOT NULL
+           WHERE p.status='ok' AND p.hidden=0 AND p.archived=0 AND p.live_component=0 AND p.taken_ts IS NOT NULL
              AND strftime('%m-%d', p.taken_ts, 'unixepoch') = ?
              AND COALESCE(p.source_kind,'') != 'screenshot'
            ORDER BY COALESCE(p.quality_score,0) DESC LIMIT 60""", (now.strftime("%m-%d"),)).fetchall()
@@ -728,7 +739,7 @@ def memories(limit: int = 12):
         by_year: dict[int, list[int]] = {}
         for r in conn.execute(
                 """SELECT DISTINCT ph.id, ph.taken_ts FROM photos ph JOIN faces f ON f.photo_id = ph.id
-                   WHERE f.person_id = ? AND ph.status = 'ok' AND ph.hidden = 0 AND ph.live_component = 0
+                   WHERE f.person_id = ? AND ph.status = 'ok' AND ph.hidden = 0 AND ph.archived = 0 AND ph.live_component = 0
                      AND ph.taken_ts IS NOT NULL
                      AND ABS(julianday(strftime('%Y', ph.taken_ts, 'unixepoch') || '-' || ?) -
                              julianday(date(ph.taken_ts, 'unixepoch'))) <= 2
@@ -786,7 +797,7 @@ def memories(limit: int = 12):
     for delta in (1, 2, 3, 5):
         y = now.year - delta
         row = conn.execute(
-            """SELECT id FROM photos WHERE status='ok' AND hidden=0 AND live_component=0 AND taken_ts IS NOT NULL
+            """SELECT id FROM photos WHERE status='ok' AND hidden=0 AND archived=0 AND live_component=0 AND taken_ts IS NOT NULL
                AND strftime('%Y', taken_ts, 'unixepoch') = ? AND COALESCE(source_kind,'') != 'screenshot'
                ORDER BY rating DESC, COALESCE(quality_score,0) DESC LIMIT 8""", (str(y),)).fetchall()
         if row:

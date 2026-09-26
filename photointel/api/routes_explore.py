@@ -21,6 +21,9 @@ def collections():
     hidden = conn.execute("SELECT COUNT(*), MAX(id) FROM photos WHERE status = 'ok' AND hidden = 1 "
                           "AND live_component = 0").fetchone()
     out = [{"key": "hidden", "title": "Hidden", "group": "cleanup", "count": hidden[0], "cover_photo_id": None}]
+    arch = conn.execute("SELECT COUNT(*), MAX(id) FROM photos WHERE status = 'ok' AND hidden = 0 AND archived = 1 "
+                        "AND live_component = 0").fetchone()
+    out.append({"key": "archive", "title": "Archive", "group": "media", "count": arch[0], "cover_photo_id": arch[1]})
     for key, spec in COLLECTIONS.items():
         where, args = photo_filter_sql(conn, collection=key)
         row = conn.execute(
@@ -88,7 +91,8 @@ def random_photos(count: int = Query(1, ge=1, le=500), album: int | None = None,
         pool = albums_mod.album_photo_ids(conn, album)
     else:
         where, args = photo_filter_sql(conn, person=[person] if person else None, min_rating=min_rating,
-                                       collection=collection, include_screenshots=False, collapse_stacks=True)
+                                       collection=collection, include_screenshots=False, collapse_stacks=True,
+                                       archived="exclude")
         if images_only:
             where += " AND p.media_type = 'image'"
         pool = [int(r[0]) for r in conn.execute(f"SELECT p.id FROM photos p WHERE {where}", args)]

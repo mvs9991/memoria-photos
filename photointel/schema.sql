@@ -408,3 +408,25 @@ CREATE TABLE IF NOT EXISTS uploads (
     who      TEXT,
     added_at REAL NOT NULL
 );
+
+-- What an iCloud Photos export said about a photo (flags are applied once; see engine/icloud.py).
+CREATE TABLE IF NOT EXISTS icloud_items (
+    photo_id    INTEGER PRIMARY KEY REFERENCES photos(id) ON DELETE CASCADE,
+    created_ts  REAL,
+    favorite    INTEGER NOT NULL DEFAULT 0,
+    hidden      INTEGER NOT NULL DEFAULT 0,
+    deleted     INTEGER NOT NULL DEFAULT 0,
+    imported_at REAL NOT NULL
+);
+
+-- Accounts (optional): with none, the library is one person's, guarded by one password.
+CREATE TABLE IF NOT EXISTS users (
+    id            INTEGER PRIMARY KEY,
+    username      TEXT NOT NULL UNIQUE COLLATE NOCASE,
+    password_hash TEXT NOT NULL,
+    role          TEXT NOT NULL DEFAULT 'family',      -- owner | family | guest
+    disabled      INTEGER NOT NULL DEFAULT 0,
+    created_at    REAL NOT NULL,
+    last_login_at REAL,
+    pw_changed_at REAL NOT NULL DEFAULT 0           -- sessions issued before this are refused
+);

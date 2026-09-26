@@ -66,6 +66,7 @@ class Settings:
     anthropic_api_key: str = ""
     me_person_id: int | None = None       # "photos of me"
     access_password_hash: str = ""        # set = every API route needs a login (see auth.py)
+    locked_pin_hash: str = ""             # the Locked folder's PIN (see engine/locked.py)
 
     @classmethod
     def load(cls, data_dir: Path) -> "Settings":
@@ -100,6 +101,7 @@ class Settings:
         d = asdict(self)
         d["anthropic_api_key"] = bool(self.anthropic_api_key)  # never echo secrets
         d["access_password_hash"] = bool(self.access_password_hash)
+        d["locked_pin_hash"] = bool(self.locked_pin_hash)
         return d
 
 

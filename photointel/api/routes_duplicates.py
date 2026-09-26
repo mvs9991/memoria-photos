@@ -39,6 +39,7 @@ def list_groups(kind: str | None = Query(None, pattern="^(exact|near|likely|simi
                 """SELECT m.photo_id, m.relation, m.similarity, m.hamming, p.width, p.height, p.size,
                           p.taken_ts, p.filename, p.folder, p.source_kind, p.quality_score
                    FROM dup_members m JOIN photos p ON p.id = m.photo_id WHERE m.group_id = ?
+                     AND p.status NOT IN ('locked', 'trashed', 'deleted')
                    ORDER BY (m.photo_id = ?) DESC, p.size DESC""", (g["id"], g["keep_photo_id"])):
             members.append({
                 "photo_id": m["photo_id"], "relation": m["relation"],

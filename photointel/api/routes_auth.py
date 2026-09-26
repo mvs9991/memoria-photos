@@ -1,10 +1,12 @@
 """Login (when a password is set) and read-only share links."""
 from __future__ import annotations
 
+import time
+
 from fastapi import APIRouter, HTTPException, Query, Request, Response
 from pydantic import BaseModel
 
-from .. import auth
+from .. import accounts, auth
 from ..engine import albums as albums_mod
 from .deps import get_state
 from .routes_library import columnar
@@ -14,22 +16,39 @@ router = APIRouter()
 
 @router.get("/auth/status")
 def status(request: Request):
-    ctx = get_state().ctx
+    state = get_state()
+    ctx, conn = state.ctx, state.conn()
+    token = request.cookies.get(auth.SESSION_COOKIE)
+    if accounts.enabled(conn):
+        user = accounts.from_session(ctx, conn, token)
+        return {"protected": True, "accounts": True, "logged_in": user is not None, "user": user}
     protected = bool(ctx.settings.access_password_hash)
-    return {"protected": protected,
-            "logged_in": (not protected) or auth.valid_session(ctx.paths.data, request.cookies.get(auth.SESSION_COOKIE))}
+    logged_in = (not protected) or auth.valid_session(ctx.paths.data, token)
+    return {"protected": protected, "accounts": False, "logged_in": logged_in,
+            "user": {"id": None, "username": None, "role": "owner"} if logged_in else None}
 
 
 class LoginBody(BaseModel):
+    username: str | None = None
     password: str
 
 
 @router.post("/auth/login")
 def login(body: LoginBody, response: Response):
-    ctx = get_state().ctx
+    state = get_state()
+    ctx, conn = state.ctx, state.conn()
+    if accounts.enabled(conn):
+        user = accounts.check_login(conn, body.username or "", body.password)
+        if user is None:
+            time.sleep(0.4)                  # a little friction for guessing
+            raise HTTPException(401, "wrong name or password")
+        response.set_cookie(auth.SESSION_COOKIE, auth.make_user_session(ctx.paths.data, user["id"]), httponly=True,
+                            samesite="lax", max_age=auth.SESSION_DAYS * 86400)
+        return {"ok": True, "user": {"id": user["id"], "username": user["username"], "role": user["role"]}}
     if not ctx.settings.access_password_hash:
         return {"ok": True}
     if not auth.verify_password(body.password, ctx.settings.access_password_hash):
+        time.sleep(0.4)
         raise HTTPException(401, "wrong password")
     response.set_cookie(auth.SESSION_COOKIE, auth.make_session(ctx.paths.data), httponly=True, samesite="lax",
                         max_age=auth.SESSION_DAYS * 86400)
@@ -39,6 +58,7 @@ def login(body: LoginBody, response: Response):
 @router.post("/auth/logout")
 def logout(response: Response):
     response.delete_cookie(auth.SESSION_COOKIE)
+    response.delete_cookie(auth.LOCKED_COOKIE)
     return {"ok": True}
 
 
@@ -51,6 +71,8 @@ class PasswordBody(BaseModel):
 def set_password(body: PasswordBody, request: Request, response: Response):
     """Set, change or (with an empty new password) remove the app password."""
     ctx = get_state().ctx
+    if accounts.enabled(get_state().conn()):
+        raise HTTPException(400, "accounts are on: change passwords in Settings → Accounts")
     stored = ctx.settings.access_password_hash
     if stored and not auth.verify_password(body.current or "", stored):
         raise HTTPException(401, "current password is wrong")

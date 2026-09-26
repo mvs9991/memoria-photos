@@ -62,3 +62,26 @@ def current_role() -> str:
 
 def set_current_user(user: dict | None):
     return _current_user.set(user)
+
+
+_locked_open: ContextVar[bool] = ContextVar("memoria_locked_open", default=False)
+
+
+def locked_open() -> bool:
+    """Whether this request comes from a browser that has opened the Locked folder."""
+    return _locked_open.get()
+
+
+def set_locked_open(value: bool):
+    return _locked_open.set(value)
+
+
+def guard_locked(row) -> None:
+    """A locked photo is invisible (404, not 403: its existence is not confirmed) unless the
+    Locked folder is open in this browser and the account may use it."""
+    from fastapi import HTTPException
+
+    keys = row.keys()
+    locked = ("locked" in keys and row["locked"]) or ("status" in keys and row["status"] == "locked")
+    if locked and not (locked_open() and current_role() == "owner"):
+        raise HTTPException(404, "photo not found")

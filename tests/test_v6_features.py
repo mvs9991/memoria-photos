@@ -280,3 +280,87 @@ def test_parallel_uploads_with_the_same_name_all_survive(ctx):
     assert len(set(paths)) == len(datas)                      # six photos, six files
     for data, r in out:
         assert Path(r.path).read_bytes() == data
+
+
+# ----------------------------------------------------------------- iCloud export
+
+def test_icloud_date_formats():
+    from datetime import datetime, timezone
+
+    from photointel.engine.icloud import parse_date
+
+    assert parse_date("Saturday June 26,2021 10:25 AM GMT") == datetime(2021, 6, 26, 10, 25, tzinfo=timezone.utc).timestamp()
+    assert parse_date("Monday August 17,2020 1:05 PM GMT") == datetime(2020, 8, 17, 13, 5, tzinfo=timezone.utc).timestamp()
+    assert parse_date("Tuesday March 1,2022 12:10 AM GMT") == datetime(2022, 3, 1, 0, 10, tzinfo=timezone.utc).timestamp()
+    assert parse_date("2019-05-04T08:09:10Z") == datetime(2019, 5, 4, 8, 9, 10, tzinfo=timezone.utc).timestamp()
+    assert parse_date("") is None and parse_date("not a date") is None
+
+
+def _icloud_export(base: Path) -> None:
+    """Two parts, a details CSV in each, an album spanning both, and one ambiguous name."""
+    from datetime import datetime
+
+    from tests.conftest import make_image
+
+    p1, p2 = base / "iCloud Photos Part 1 of 2", base / "iCloud Photos Part 2 of 2"
+    for p, names in ((p1, ["IMG_0001.JPG", "IMG_0002.JPG", "IMG_0009.JPG"]), (p2, ["IMG_0003.JPG", "IMG_0009.JPG"])):
+        for i, n in enumerate(names):
+            make_image(p / "Photos" / n, colour=(20 + 60 * i, 90, 140), camera=None)       # no EXIF date
+    (p1 / "Photos" / "Photo Details.csv").write_text(
+        "imgName,fileChecksum,favorite,hidden,deleted,originalCreationDate,viewCount,importDate\n"
+        'IMG_0001.JPG,x,yes,no,no,"Saturday June 26,2021 10:25 AM GMT",1,\n'
+        "IMG_0002.JPG,x,no,yes,no,Sunday June 27,2021 9:00 AM GMT,0,\n",      # unquoted: tolerated
+        encoding="utf-8")
+    (p2 / "Photos" / "Photo Details.csv").write_text(
+        "imgName,fileChecksum,favorite,hidden,deleted,originalCreationDate,viewCount,importDate\n"
+        'IMG_0003.JPG,x,no,no,yes,"Monday June 28,2021 7:30 PM GMT",0,\n', encoding="utf-8")
+    (p2 / "Albums").mkdir(parents=True)
+    (p2 / "Albums" / "Goa 2021.csv").write_text("Images\nIMG_0001.JPG\nIMG_0003.JPG\nIMG_0009.JPG\nnot-there.jpg\n",
+                                                encoding="utf-8")
+
+
+def test_icloud_export_flags_dates_and_albums(ctx, tmp_path):
+    from datetime import datetime
+
+    from photointel.engine.icloud import import_icloud
+
+    lib = tmp_path / "lib"
+    _icloud_export(lib / "Apple")
+    index(ctx, lib)
+    conn = ctx.connect()
+    out = import_icloud(ctx, conn)
+    row = lambda name, folder_part: conn.execute(  # noqa: E731
+        "SELECT * FROM photos WHERE filename = ? AND folder LIKE ?", (name, f"%{folder_part}%")).fetchone()
+    one, two, three = row("IMG_0001.JPG", "Part 1"), row("IMG_0002.JPG", "Part 1"), row("IMG_0003.JPG", "Part 2")
+    assert one["favorite"] == 1 and two["locked"] == 1 and three["hidden"] == 1
+    assert one["date_source"] == "icloud"
+    from datetime import timezone
+    utc = datetime(2021, 6, 26, 10, 25, tzinfo=timezone.utc).timestamp()      # the CSV's GMT, shown in local time
+    assert one["taken_local"] == datetime.fromtimestamp(utc).strftime("%Y-%m-%d %H:%M:%S")
+    assert two["date_source"] == "icloud"                                       # the unquoted date was read too
+    album = conn.execute("SELECT * FROM albums WHERE source = 'icloud'").fetchone()
+    assert album["name"] == "Goa 2021"
+    members = {r[0] for r in conn.execute("SELECT photo_id FROM album_photos WHERE album_id = ?", (album["id"],))}
+    # IMG_0009 is in both parts and the album CSV sits in part 2: the part-2 copy, not a guess
+    assert members == {one["id"], three["id"], row("IMG_0009.JPG", "Part 2")["id"]}
+
+    # a change made here survives a re-import
+    conn.execute("UPDATE photos SET favorite = 0 WHERE id = ?", (one["id"],))
+    conn.commit()
+    import_icloud(ctx, conn)
+    assert conn.execute("SELECT favorite FROM photos WHERE id = ?", (one["id"],)).fetchone()[0] == 0
+    assert conn.execute("SELECT COUNT(*) FROM albums WHERE source = 'icloud'").fetchone()[0] == 1
+    conn.close()
+
+
+def test_reindexing_after_an_upgrade_leaves_trashed_photos_alone(ctx, library, client):
+    index(ctx, library)
+    pid = pid_of(ctx, "IMG_x0.jpg")
+    client.post("/api/trash", json={"photo_ids": [pid], "confirm": 1})
+    conn = ctx.connect()
+    conn.execute("UPDATE photos SET meta_version = 0 WHERE id = ?", (pid,))    # as after a metadata upgrade
+    conn.commit()
+    index(ctx, library)
+    assert conn.execute("SELECT status FROM photos WHERE id = ?", (pid,)).fetchone()[0] == "trashed"
+    assert conn.execute("SELECT COUNT(*) FROM processing_errors WHERE photo_id = ?", (pid,)).fetchone()[0] == 0
+    conn.close()

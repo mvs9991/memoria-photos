@@ -12,10 +12,10 @@ from fastapi.middleware.cors import CORSMiddleware
 from fastapi.responses import FileResponse, JSONResponse
 from fastapi.staticfiles import StaticFiles
 
-from .. import auth
+from .. import accounts, auth
 from ..context import AppContext
-from . import images, routes_albums, routes_auth, routes_duplicates, routes_explore, routes_export, routes_trash, routes_upload, routes_events, routes_library, routes_people, routes_search, routes_system
-from .deps import ApiState, set_state
+from . import images, routes_accounts, routes_albums, routes_auth, routes_duplicates, routes_explore, routes_export, routes_trash, routes_upload, routes_events, routes_library, routes_people, routes_search, routes_system
+from .deps import ApiState, get_state, set_current_user, set_locked_open, set_state
 
 log = logging.getLogger(__name__)
 WEB_DIST = Path(__file__).resolve().parent.parent.parent / "web" / "dist"
@@ -68,19 +68,35 @@ def create_app(ctx: AppContext) -> FastAPI:
                            allow_methods=["*"], allow_headers=["*"])
         log.warning("PHOTOINTEL_DEV=1: allowing cross-origin requests from the Vite dev server")
 
-    for router in (routes_auth.router, routes_explore.router, routes_export.router, routes_trash.router, routes_upload.router, routes_library.router, routes_albums.router, routes_people.router, routes_events.router, routes_search.router,
+    for router in (routes_auth.router, routes_accounts.router, routes_explore.router, routes_export.router, routes_trash.router, routes_upload.router, routes_library.router, routes_albums.router, routes_people.router, routes_events.router, routes_search.router,
                    routes_duplicates.router, routes_system.router, images.router):
         app.include_router(router, prefix="/api")
 
     @app.middleware("http")
-    async def require_login(request: Request, call_next):
-        # With a password set, every API route needs a session except logging in and share
-        # links (which check their own token and only ever serve their album).
+    async def access(request: Request, call_next):
+        """Who is asking and whether they may. With accounts, every API route needs a signed-in
+        account and its role must allow the request; with just a password, a session; with
+        neither (only reachable from this machine by default), everyone is the owner. Logging
+        in and share links (which check their own token) are open."""
         path = request.url.path
-        if (path.startswith("/api/") and ctx.settings.access_password_hash
-                and not path.startswith(("/api/auth/", "/api/share/"))
-                and not auth.valid_session(ctx.paths.data, request.cookies.get(auth.SESSION_COOKIE))):
+        if not path.startswith("/api/"):
+            return await call_next(request)
+        public = path.startswith(("/api/auth/", "/api/share/"))
+        token = request.cookies.get(auth.SESSION_COOKIE)
+        conn = get_state().conn()
+        user = None
+        if accounts.enabled(conn):
+            user = accounts.from_session(ctx, conn, token)
+            if user is None and not public:
+                return JSONResponse({"detail": "login required"}, status_code=401)
+        elif ctx.settings.access_password_hash and not public and not auth.valid_session(ctx.paths.data, token):
             return JSONResponse({"detail": "login required"}, status_code=401)
+        role = user["role"] if user else "owner"
+        if not public and not accounts.allowed(role, request.method, path):
+            return JSONResponse({"detail": "your account cannot do this"}, status_code=403)
+        set_current_user(user)
+        set_locked_open(role == "owner" and auth.valid_locked_token(
+            ctx.paths.data, request.cookies.get(auth.LOCKED_COOKIE)))
         return await call_next(request)
 
     @app.exception_handler(Exception)

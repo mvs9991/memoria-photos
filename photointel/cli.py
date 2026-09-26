@@ -44,7 +44,12 @@ def cmd_serve(ctx: AppContext, args) -> None:
     from .api.app import create_app
     from .auth import is_loopback
 
-    if not is_loopback(args.host) and not ctx.settings.access_password_hash and not args.insecure:
+    from .accounts import enabled as accounts_enabled
+
+    c = ctx.connect()
+    protected = bool(ctx.settings.access_password_hash) or accounts_enabled(c)
+    c.close()
+    if not is_loopback(args.host) and not protected and not args.insecure:
         print("Refusing to serve beyond this machine without a password: anyone on the network could "
               "browse every photo.\nSet one first:  python -m photointel set-password\n"
               "(or pass --insecure if you really mean it)", file=sys.stderr)
@@ -202,6 +207,42 @@ def cmd_backup(ctx: AppContext, args) -> None:
         conn.close()
 
 
+def cmd_accounts(ctx: AppContext, args) -> None:
+    """At the computer itself: list accounts, or reset a forgotten password or Locked-folder PIN."""
+    import getpass
+
+    from . import accounts, auth
+
+    conn = ctx.connect()
+    try:
+        if args.action == "list":
+            for a in accounts.list_all(conn):
+                print(f"{a['id']:>3}  {a['username']:<24} {a['role']:<7} {'(off)' if a['disabled'] else ''}")
+            if not accounts.enabled(conn):
+                print("Accounts are off: the library has one password (set-password).")
+        elif args.action == "reset-password":
+            row = conn.execute("SELECT id FROM users WHERE username = ?", (args.name or "",)).fetchone()
+            if row is None:
+                print(f"No account called {args.name!r}", file=sys.stderr)
+                sys.exit(1)
+            pw = getpass.getpass(f"New password for {args.name}: ")
+            if pw != getpass.getpass("Again: "):
+                print("Passwords differ; nothing changed.", file=sys.stderr)
+                sys.exit(1)
+            accounts.update(conn, int(row[0]), None, password=pw)
+            print("Password changed; that account's other sessions have ended.")
+        elif args.action == "reset-pin":
+            ctx.settings.locked_pin_hash = ""
+            ctx.settings.save(ctx.paths.data)
+            auth.mark_pin_changed(ctx.paths.data)
+            print("The Locked folder's PIN is cleared. Its photos stay locked; set a new PIN in the app to open it.")
+    except accounts.AccountError as exc:
+        print(str(exc), file=sys.stderr)
+        sys.exit(1)
+    finally:
+        conn.close()
+
+
 def cmd_status(ctx: AppContext, args) -> None:
     conn = ctx.connect()
     q = lambda sql: conn.execute(sql).fetchone()[0]  # noqa: E731
@@ -295,6 +336,10 @@ def main(argv: list[str] | None = None) -> None:
     p = sub.add_parser("backup", help="copy every photo folder and Memoria's data to another drive (copy-only)")
     p.add_argument("folder", nargs="?", help="backup folder (default: the one set in Settings)")
 
+    p = sub.add_parser("accounts", help="list accounts, or reset a password or the Locked-folder PIN (at this computer)")
+    p.add_argument("action", choices=["list", "reset-password", "reset-pin"])
+    p.add_argument("name", nargs="?", help="account name, for reset-password")
+
     sub.add_parser("status", help="library summary")
 
     args = parser.parse_args(argv)
@@ -304,7 +349,7 @@ def main(argv: list[str] | None = None) -> None:
                 "geo-setup": cmd_geo_setup, "models": cmd_models, "caption": cmd_caption, "ocr": cmd_ocr,
                 "export-xmp": cmd_export_xmp,
                 "set-password": cmd_set_password, "import-gpx": cmd_import_gpx, "export": cmd_export,
-                "trash": cmd_trash, "backup": cmd_backup}
+                "trash": cmd_trash, "backup": cmd_backup, "accounts": cmd_accounts}
     t0 = time.time()
     handlers[args.cmd](ctx, args)
     log.debug("%s finished in %.1fs", args.cmd, time.time() - t0)

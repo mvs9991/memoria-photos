@@ -135,7 +135,9 @@ class Indexer:
         rows = conn.execute(
             "SELECT p.id, r.path AS root, p.rel_path, p.folder, p.filename, p.ext, p.size, p.mtime, p.ctime, "
             "p.sha256, p.meta_version, p.faces_model, p.semantic_model, p.status "
-            "FROM photos p JOIN roots r ON r.id = p.root_id WHERE p.status != 'missing' ORDER BY p.id"
+            # Trashed files are not where the row says, and erased ones are gone: never analyse them.
+            "FROM photos p JOIN roots r ON r.id = p.root_id WHERE p.status NOT IN ('missing', 'trashed', 'deleted') "
+            "ORDER BY p.id"
         ).fetchall()
         tasks = []
         for r in rows:
@@ -542,7 +544,8 @@ class Indexer:
                     conn.execute("DELETE FROM photos WHERE id=?", (pid,))
                     conn.execute(
                         "UPDATE photos SET root_id=?, rel_path=?, folder=?, filename=?, ext=?, size=?, mtime=?, ctime=?, "
-                        "status = CASE WHEN error IS NULL THEN 'ok' ELSE 'error' END, last_seen_at=? WHERE id=?",
+                        "status = CASE WHEN error IS NOT NULL THEN 'error' WHEN locked = 1 THEN 'locked' ELSE 'ok' END, "
+                        "last_seen_at=? WHERE id=?",
                         (*tuple(row), now, old_id),
                     )
                     db.audit(conn, "photo_moved", "photo", old_id, {"to": row["rel_path"]}, actor="indexer")
@@ -564,6 +567,8 @@ class Indexer:
                 f"UPDATE photos SET {', '.join(c + '=?' for c in cols)}, meta_version=?, status=?, error=?{location_cols} WHERE id=?",
                 (*vals, META_VERSION, "error" if r.error else "ok", r.error, pid),
             )
+            # A photo in the Locked folder stays locked through re-analysis.
+            conn.execute("UPDATE photos SET status = 'locked' WHERE id = ? AND locked = 1 AND status = 'ok'", (pid,))
             corrections.apply_overrides(conn, [pid])   # the user's date/place fixes beat the file's
             self.stats["processed"] += 1
         if r.error:

@@ -18,7 +18,7 @@ from PIL import Image
 from .. import imaging
 from ..config import RAW_EXTENSIONS
 from ..rotation import rotate_image
-from .deps import get_state
+from .deps import get_state, guard_locked
 
 log = logging.getLogger(__name__)
 router = APIRouter()
@@ -34,6 +34,7 @@ def _photo_row(photo_id: int):
     ).fetchone()
     if row is None:
         raise HTTPException(404, "photo not found")
+    guard_locked(row)
     return row
 
 
@@ -160,10 +161,11 @@ def face_crop(face_id: int, size: int = Query(200, ge=64, le=512)):
     state = get_state()
     conn = state.conn()
     face = conn.execute(
-        "SELECT f.*, p.sha256 FROM faces f JOIN photos p ON p.id = f.photo_id WHERE f.id = ?", (face_id,)
-    ).fetchone()
+        "SELECT f.*, p.sha256, p.locked, p.status FROM faces f JOIN photos p ON p.id = f.photo_id WHERE f.id = ?",
+        (face_id,)).fetchone()
     if face is None:
         raise HTTPException(404, "face not found")
+    guard_locked(face)
     cache = state.ctx.paths.faces / f"{face_id % 100:02d}" / f"{face_id}_{size}.jpg"
     if cache.exists():
         return FileResponse(cache, media_type="image/jpeg", headers={"Cache-Control": IMMUTABLE})

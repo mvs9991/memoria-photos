@@ -150,7 +150,8 @@ def test_password_protects_every_api_route(ctx, library, client):
     client.cookies.clear()
     for path in ("/api/stats", "/api/photos/index", "/api/thumb/1", "/api/people", "/api/settings"):
         assert client.get(path).status_code == 401, path
-    assert client.get("/api/auth/status").json() == {"protected": True, "logged_in": False}
+    st = client.get("/api/auth/status").json()
+    assert (st["protected"], st["logged_in"]) == (True, False)
     assert client.post("/api/auth/login", json={"password": "wrong"}).status_code == 401
     assert client.post("/api/auth/login", json={"password": "correct horse"}).status_code == 200
     assert client.get("/api/stats").status_code == 200

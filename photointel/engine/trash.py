@@ -27,6 +27,7 @@ import time
 from pathlib import Path
 
 from .. import db
+from . import visibility
 
 log = logging.getLogger(__name__)
 
@@ -62,42 +63,11 @@ def _sidecars(src: Path) -> list[Path]:
 
 
 def _companions(conn: sqlite3.Connection, photo_ids: list[int]) -> list[int]:
-    """The video half of a Live photo goes with its still."""
-    out = list(dict.fromkeys(photo_ids))
-    for i in range(0, len(photo_ids), 900):
-        chunk = photo_ids[i:i + 900]
-        for (vid,) in conn.execute(
-                f"SELECT live_video_id FROM photos WHERE id IN ({','.join('?' * len(chunk))}) "
-                "AND live_video_id IS NOT NULL", chunk):
-            if vid not in out:
-                out.append(int(vid))
-    return out
-
-
-def _affected_people(conn: sqlite3.Connection, photo_ids: list[int]) -> list[int]:
-    out: set[int] = set()
-    for i in range(0, len(photo_ids), 900):
-        chunk = photo_ids[i:i + 900]
-        out |= {int(r[0]) for r in conn.execute(
-            f"SELECT DISTINCT person_id FROM faces WHERE person_id IS NOT NULL AND photo_id IN "
-            f"({','.join('?' * len(chunk))})", chunk)}
-    return sorted(out)
+    return visibility.companions(conn, photo_ids)
 
 
 def _after_change(conn: sqlite3.Connection, photo_ids: list[int]) -> None:
-    """Refresh what depends on which photos are visible. The files have already moved and
-    that is committed; a failure here only leaves counts stale until the next index."""
-    from .people import update_person_stats
-
-    try:
-        people = _affected_people(conn, photo_ids)
-        if people:
-            update_person_stats(conn, people)
-        db.bump_generation(conn, "embeddings")      # the search matrix holds only 'ok' photos
-        conn.commit()
-    except sqlite3.Error:
-        conn.rollback()
-        log.exception("Trash: refreshing counts failed; they will be rebuilt on the next index")
+    visibility.refresh(conn, photo_ids)
 
 
 def move_to_trash(ctx, conn: sqlite3.Connection, photo_ids: list[int], actor: str = "user") -> dict:

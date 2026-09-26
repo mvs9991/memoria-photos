@@ -26,7 +26,7 @@ log = logging.getLogger(__name__)
 
 # Order matters: live pairing decides which files are clustered and listed at all;
 # Takeout locations must exist before geocoding; OCR picks its candidates by tag.
-STAGES = ["live-photos", "takeout", "gpx", "geocode", "tags", "ocr", "quality", "people", "events", "locations",
+STAGES = ["live-photos", "takeout", "icloud", "gpx", "geocode", "tags", "ocr", "quality", "people", "events", "locations",
           "duplicates", "stacks", "search-index"]
 
 
@@ -51,6 +51,11 @@ def run_post_stages(ctx, conn: sqlite3.Connection, stages: list[str] | None = No
             elif stage == "takeout":
                 if ctx.settings.takeout_import:
                     out[stage] = takeout_mod.import_takeout(ctx, conn)
+            elif stage == "icloud":
+                if ctx.settings.takeout_import:        # one switch for reading other services' exports
+                    from ..engine.icloud import import_icloud
+
+                    out[stage] = import_icloud(ctx, conn)
             elif stage == "gpx":
                 out[stage] = gpx_mod.geotag_from_tracks(ctx, conn)
             elif stage == "ocr":
