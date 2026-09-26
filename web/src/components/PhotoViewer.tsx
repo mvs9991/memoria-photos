@@ -3,9 +3,10 @@ import { useCallback, useEffect, useRef, useState } from "react";
 import { Link } from "react-router-dom";
 import { useMutation, useQuery, useQueryClient } from "@tanstack/react-query";
 import {
-  Aperture, BookImage, Calendar, Camera, Check, ChevronLeft, ChevronRight, Copy, Download, EyeOff, Heart, Info,
+  Trash2, Aperture, BookImage, Calendar, Camera, Check, ChevronLeft, ChevronRight, Copy, Download, EyeOff, Heart, Info,
   Layers, MapPin, Minus, Pencil, Plus, ScanText, Tag, Users, X, Sparkles, HardDrive,
 } from "lucide-react";
+import { TrashDialog, useAllowDelete } from "./TrashDialog";
 import { api, downloadUrl, faceUrl, motionUrl, originalUrl, thumbUrl, videoUrl } from "../lib/api";
 import { clock, exposureLabel, formatBytes, formatDateTime, megapixels } from "../lib/format";
 import { AlbumPicker } from "./AlbumPicker";
@@ -28,6 +29,8 @@ export function PhotoViewer({ ids, index, onIndex, onClose }: Props) {
   const [offset, setOffset] = useState({ x: 0, y: 0 });
   const [hoverFaces, setHoverFaces] = useState(false);
   const [picker, setPicker] = useState(false);
+  const [trashing, setTrashing] = useState(false);
+  const canDelete = useAllowDelete();
   const [playingLive, setPlayingLive] = useState(false);
   useEffect(() => setPlayingLive(false), [id]);
   const dragRef = useRef<{ x: number; y: number; ox: number; oy: number } | null>(null);
@@ -53,7 +56,8 @@ export function PhotoViewer({ ids, index, onIndex, onClose }: Props) {
   useEffect(() => {
     const onKey = (e: KeyboardEvent) => {
       if (["INPUT", "TEXTAREA"].includes((e.target as HTMLElement)?.tagName)) return;   // typing a tag
-      if (picker) return;
+      if (picker || trashing) return;
+      if (e.key === "Delete" && canDelete && photo && photo.status !== "trashed") { setTrashing(true); return; }
       if (e.key === "Escape") { zoom > 1 ? (setZoom(1), setOffset({ x: 0, y: 0 })) : onClose(); }
       else if (e.key === "ArrowRight") go(1);
       else if (e.key === "ArrowLeft") go(-1);
@@ -141,6 +145,14 @@ export function PhotoViewer({ ids, index, onIndex, onClose }: Props) {
             aria-label="Hide photo">
             <EyeOff size={18} />
           </button>
+          {canDelete && photo && photo.status !== "trashed" && (
+            <button className="btn btn-quiet btn-icon" onClick={() => setTrashing(true)}
+              title="Move to Trash (Delete) — restorable for 30 days" aria-label="Move to Trash">
+              <Trash2 size={18} />
+            </button>
+          )}
+          {trashing && <TrashDialog photoIds={[id]} onClose={() => setTrashing(false)}
+            onDone={(r) => { if (r.trashed) onClose(); }} />}
           <button className={`btn btn-quiet btn-icon${showInfo ? " is-on" : ""}`}
             onClick={() => setShowInfo((v) => !v)} title="Details (I)" aria-label="Toggle details">
             <Info size={18} />

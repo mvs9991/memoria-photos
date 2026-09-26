@@ -236,7 +236,7 @@ def update_person_stats(conn: sqlite3.Connection, person_ids: list[int] | None =
     where = ""
     args: tuple = ()
     if person_ids:
-        where = f" WHERE p.id IN ({','.join('?' * len(person_ids))})"
+        where = f" AND persons.id IN ({','.join('?' * len(person_ids))})"
         args = tuple(person_ids)
     conn.execute(
         f"""UPDATE persons SET
@@ -250,7 +250,7 @@ def update_person_stats(conn: sqlite3.Connection, person_ids: list[int] | None =
                               WHERE f.person_id = persons.id AND ph.status='ok'),
               cluster_confidence = (SELECT AVG(f.assign_confidence) FROM faces f WHERE f.person_id = persons.id),
               updated_at = ?
-            WHERE merged_into IS NULL{where.replace('p.id', 'persons.id')}""",
+            WHERE merged_into IS NULL{where}""",
         (time.time(), *args),
     )
     # Cover face: the most recognisable large face (quality x size), preferring user-confirmed ones.
@@ -260,7 +260,7 @@ def update_person_stats(conn: sqlite3.Connection, person_ids: list[int] | None =
               WHERE f.person_id = persons.id AND ph.status = 'ok'
               ORDER BY (CASE WHEN f.assign_source='user' THEN 1 ELSE 0 END) DESC,
                        (f.quality * MIN(f.size_px, 400)) DESC LIMIT 1)
-            WHERE merged_into IS NULL{where.replace('p.id', 'persons.id')}""",
+            WHERE merged_into IS NULL{where}""",
         args,
     )
 

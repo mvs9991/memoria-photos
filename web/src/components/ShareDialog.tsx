@@ -113,7 +113,7 @@ export function HtmlExportDialog({ albumId, albumName, onClose }: { albumId: num
               A folder with an <code>index.html</code>, resized photos and playable videos. It opens offline in any
               browser, and can be copied to a USB stick or uploaded to any web host.
             </p>
-            <input className="field" autoFocus placeholder="Export folder, e.g. D:\\Exports\\Goa trip" value={folder}
+            <input className="field" autoFocus placeholder="Export folder, e.g. D:\Exports\Goa trip" value={folder}
               onChange={(e) => setFolder(e.target.value)} aria-label="Export folder" />
             <p className="dim fix-hint">Must be outside your photo folders. Your originals are only read.</p>
             {run.data && (

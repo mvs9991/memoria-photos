@@ -5,7 +5,8 @@ Point it at a folder of photos. It reads every image once, works out **who** is 
 and groups them into **events and trips** — then gives you a photo app to browse and search
 it all in plain language.
 
-Everything runs on your machine. Your photos are never uploaded, modified, moved or deleted.
+Everything runs on your machine. Your photos are never uploaded or modified, and nothing is moved
+or deleted unless you delete it yourself — and then it waits in a 30-day Trash.
 
 ![Home](docs/screenshots/home.webp)
 
@@ -50,7 +51,7 @@ photos ──► scan ──► decode / EXIF / hash / thumbnail ──► faces
 | **Events & trips** | Groups photos into events from time gaps, GPS jumps, folders, people and scenery; multi-day journeys away from home become trips. |
 | **Places** | Offline reverse geocoding (GeoNames) — country → region → city → neighbourhood, plus landmarks. Photos without GPS can inherit a location from their event, always labelled with confidence. |
 | **Search** | "Ghat and Priya together in Goa in 2024", "best photos from last summer", "beach", "screenshots". Shows you exactly how it read the query. |
-| **Duplicates** | Exact, resized, recompressed, edited, cropped and screenshot copies — plus burst shots kept separate. Nothing is ever deleted. |
+| **Duplicates** | Exact, resized, recompressed, edited, cropped and screenshot copies — plus burst shots kept separate. Hide the copies, or move them to the Trash; the one marked *keep* never goes. |
 | **Videos & Live photos** | Videos are indexed like photos (who and what is in them, when, where) and play in the viewer. iPhone Live photos and Google/Samsung motion photos show as one item that plays its moment. |
 | **Albums & tags** | Your own albums and tags. Albums in a Google Takeout export are imported; hiding a duplicate copy never empties an album. Removing an automatic tag is remembered. |
 | **Google Takeout** | Reads the `.json` sidecars for albums, descriptions, favourites, trash and missing locations. People names Google knew are *suggested* for the faces Memoria found — never applied without you. |
@@ -67,6 +68,9 @@ photos ──► scan ──► decode / EXIF / hash / thumbnail ──► faces
 | **Slideshow & photo frame** | Full-screen slideshow of any grid (crossfade, shuffle, speed, videos play). `/frame` turns a tablet or TV into a frame with a clock; `/api/random/image` feeds dashboards such as Home Assistant. |
 | **GPS tracks** | Drop a `.gpx` from a phone, watch or bike computer next to the photos (or upload it): photos from a camera without GPS are placed by time, and the route is drawn on the map and on the trip. |
 | **Sharing & password** | An optional password for the app. Read-only links to one album — nothing else is reachable through them — with optional downloads, expiry and revoke. |
+| **Export** | Copy the original files of a selection, an album, an event, a year or month, or **people** — a folder for each person, only photos where they are together, or any of them — to a folder or as a .zip download. Sorted by date, by the original folders, or all in one; Live-photo videos, RAW/burst frames and XMP sidecars optional. Copies only, byte-exact; re-running skips what is already there. |
+| **Trash** | Delete from a selection, the viewer (Delete key) or Duplicates. Files go to a 30-day Trash on the same drive and can be restored to where they were; only then are they erased. Nothing is ever deleted automatically, and deleting can be switched off. |
+| **On your phone** | Open it from any phone or laptop on your Wi-Fi and "Add to Home Screen" — it runs full-screen like an app, from your own computer. See [Use it from your phone](#use-it-from-your-phone). |
 | **Web gallery export** | Any album as a folder with an `index.html` that opens offline in any browser or on any web host. |
 | **Quality** | Sharpness, exposure, resolution and an aesthetic proxy, so "best photos of X" means something. |
 | **Timeline / Map / Memories** | Year → month → event browsing, a map of everywhere you've been, and an "on this day" home screen. |
@@ -130,6 +134,8 @@ Re-running `index` only processes what is new or changed.
 | `ocr [--all]` | Read text in photos. After each index only likely-text photos (screenshots, documents, receipts…) are read; `--all` reads everything |
 | `import-gpx <files…>` | Add GPS tracks (copied into the data directory); then `index --post-only --stages gpx,geocode,events,search-index` |
 | `set-password` | Require a password to open the web app (empty input removes it) |
+| `export <folder> --person NAME [--person NAME2] [--people-mode each\|together\|any]` | Copy originals of people (or `--album`, `--event`, `--year [--month]`) to a folder; `--layout date\|flat\|original`, `--xmp` |
+| `trash list` / `trash restore <ids>` / `trash purge-expired` | Look at or restore the Trash (deleting itself is only done in the app) |
 | `status` | Library summary |
 | `serve --port 8765` | Run the web app |
 | `serve --host 0.0.0.0` | Serve to your network — refused without a password unless you add `--insecure` |
@@ -229,6 +235,28 @@ the *same* structured filter, and names it invents that aren't in your library a
 
 ---
 
+## Use it from your phone
+
+Memoria is a website served by your own computer, so every phone, tablet and laptop in the house
+can use it — no cloud account, no subscription, and your photos never leave your network.
+
+1. On the computer with the photos: `python -m photointel set-password`, then
+   `python -m photointel serve --host 0.0.0.0`. Find the computer's local IP (`ipconfig` on
+   Windows, e.g. `192.168.1.20`).
+2. On the phone, on the same Wi-Fi: open `http://192.168.1.20:8765` and log in.
+3. **Add to Home Screen** (Safari: Share → Add to Home Screen; Chrome: ⋮ → Add to Home screen). It
+   gets the Memoria icon and opens full-screen like an app.
+4. Downloads (a photo, or an export as .zip) land on the phone; "Copy to a folder" writes on the
+   computer.
+
+Away from home, do not forward a port on your router: the app has a password but no HTTPS of its
+own. Use a private VPN such as [Tailscale](https://tailscale.com) or WireGuard (free for personal use),
+or put an HTTPS reverse proxy in front. The computer has to be on for the phone to reach it.
+
+Getting new phone photos *into* the library is not built in yet; a folder-sync tool such as
+[Syncthing](https://syncthing.net) (free, open source, phone → computer over your Wi-Fi) into a folder
+Memoria indexes does it today.
+
 ## Privacy
 
 - Face recognition, clustering, search, tagging and captioning all run locally with open models.
@@ -238,7 +266,10 @@ the *same* structured filter, and names it invents that aren't in your library a
 - The Claude layer is **off** by default. When on, it receives your query text and a vocabulary
   list — never photos, paths, EXIF or coordinates. Sending images is a separate switch, off by
   default, and applies only to photos you explicitly ask about.
-- Original files are never modified, moved or deleted. "Hide" only affects your library views.
+- Original files are never modified. A file only leaves its folder when *you* delete it: it moves to
+  the Trash on the same drive, stays restorable for 30 days (Settings → Trash), and only then is
+  erased. No automatic process — indexing, duplicates, clean-up lists, the Claude layer — can delete;
+  a test fails if any code path other than the Trash removes a file. "Hide" only affects your views.
 - The app listens on this machine only. Serving it to a network requires a password (PBKDF2, signed
   session cookie). Share links expose one album and nothing else, and can be revoked. There is no
   built-in HTTPS: anything beyond a home network should go through a reverse proxy that adds it.
@@ -449,7 +480,7 @@ photointel/
   api/        app.py routes_*.py images.py
 web/          React + TypeScript UI
 eval/         dataset builders, calibration, end-to-end evaluation
-tests/        187 tests, no GPU required
+tests/        204 tests, no GPU required
 ```
 
 The layering is deliberate: vision → features → database → relationship engines → search → UI.
@@ -462,7 +493,7 @@ face recogniser.
 python -m pytest tests/ -q
 ```
 
-They stub the neural nets, so all 187 tests run on CPU in about 70 seconds and still cover
+They stub the neural nets, so all 204 tests run on CPU in about 70 seconds and still cover
 scanning, incremental re-indexing, moves, decoding, metadata, clustering, corrections, events,
 duplicates, search parsing and the HTTP API. The fixtures seed their randomness from stable
 hashes, so a failure reproduces on the next run instead of disappearing.

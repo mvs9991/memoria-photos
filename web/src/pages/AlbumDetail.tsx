@@ -8,6 +8,7 @@ import { EmptyState, ErrorState, Spinner } from "../components/States";
 import { SelectionBar, useSelectAllShortcut, useSelection } from "../components/SelectionBar";
 import { Slideshow } from "../components/Slideshow";
 import { HtmlExportDialog, ShareDialog } from "../components/ShareDialog";
+import { ExportDialog } from "../components/ExportDialog";
 import { useViewer } from "../components/ViewerContext";
 import { useTitle } from "../lib/hooks";
 
@@ -21,7 +22,7 @@ export default function AlbumDetail() {
   const [name, setName] = useState("");
   const [selecting, setSelecting] = useState(false);
   const selection = useSelection();
-  const [dialog, setDialog] = useState<"share" | "export" | "slideshow" | null>(null);
+  const [dialog, setDialog] = useState<"share" | "export" | "web" | "slideshow" | null>(null);
 
   const { data, isLoading, isError, error, refetch } = useQuery({
     queryKey: ["album", albumId],
@@ -95,7 +96,7 @@ export default function AlbumDetail() {
           </button>
           <button className="btn btn-ghost btn-sm" onClick={() => setDialog("share")}><Link2 size={14} /> Share</button>
           <button className="btn btn-ghost btn-sm" onClick={() => setDialog("export")} disabled={!items.length}
-            title="Save as a web page that opens anywhere"><FolderOutput size={14} /> Export</button>
+            title="Copy the original files, or make a web gallery"><FolderOutput size={14} /> Export</button>
           <button className={`btn btn-ghost btn-sm${selecting ? " is-on" : ""}`}
             onClick={() => { setSelecting((v) => !v); selection.clear(); }}>
             <CheckSquare size={14} /> {selecting ? "Done" : "Select"}
@@ -108,7 +109,12 @@ export default function AlbumDetail() {
       </div>
 
       {dialog === "share" && <ShareDialog albumId={albumId} albumName={data.name} onClose={() => setDialog(null)} />}
-      {dialog === "export" && <HtmlExportDialog albumId={albumId} albumName={data.name} onClose={() => setDialog(null)} />}
+      {dialog === "export" && (
+        <ExportDialog spec={{ album_id: albumId }} title={`Export “${data.name}”`} onClose={() => setDialog(null)}
+          footer={<p className="dim">Or <button className="link-button" onClick={() => setDialog("web")}>make a web
+            gallery</button> — resized copies with an index.html that opens in any browser.</p>} />
+      )}
+      {dialog === "web" && <HtmlExportDialog albumId={albumId} albumName={data.name} onClose={() => setDialog(null)} />}
       {dialog === "slideshow" && <Slideshow items={items.map((i) => ({ id: i.id, video: (i.flags & FLAG.video) > 0 }))}
         onClose={() => setDialog(null)} />}
 

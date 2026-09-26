@@ -1,7 +1,8 @@
 import { useState } from "react";
 import { Link } from "react-router-dom";
 import { useMutation, useQuery, useQueryClient } from "@tanstack/react-query";
-import { Check, Eye, EyeOff, Merge, Search, UserPlus, Users, X } from "lucide-react";
+import { Check, Eye, EyeOff, FolderOutput, Merge, Search, UserPlus, Users, X } from "lucide-react";
+import { ExportDialog } from "../components/ExportDialog";
 import { api, faceUrl, thumbUrl } from "../lib/api";
 import { EmptyState, ErrorState, SectionHeader, Spinner } from "../components/States";
 import { useTitle } from "../lib/hooks";
@@ -13,6 +14,8 @@ export default function People() {
   const [filter, setFilter] = useState("");
   const [sort, setSort] = useState<"photos" | "name" | "recent">("photos");
   const [mergeMode, setMergeMode] = useState(false);
+  const [exportMode, setExportMode] = useState(false);
+  const [exporting, setExporting] = useState(false);
   const [picked, setPicked] = useState<number[]>([]);
 
   const { data, isLoading, isError, error, refetch } = useQuery({
@@ -88,8 +91,13 @@ export default function People() {
             <option value="name">Name</option>
             <option value="recent">Recently seen</option>
           </select>
+          <button className={`btn btn-ghost btn-sm${exportMode ? " is-on" : ""}`}
+            onClick={() => { setExportMode((v) => !v); setMergeMode(false); setPicked([]); }}
+            title="Pick people and copy all their photos somewhere">
+            <FolderOutput size={14} /> {exportMode ? "Cancel" : "Export"}
+          </button>
           <button className={`btn btn-ghost btn-sm${mergeMode ? " is-on" : ""}`}
-            onClick={() => { setMergeMode((v) => !v); setPicked([]); }}>
+            onClick={() => { setMergeMode((v) => !v); setExportMode(false); setPicked([]); }}>
             <Merge size={14} /> {mergeMode ? "Cancel" : "Merge"}
           </button>
           <button className="btn btn-quiet btn-icon btn-sm" onClick={() => setShowHidden((v) => !v)}
@@ -98,6 +106,28 @@ export default function People() {
           </button>
         </div>
       </div>
+
+      {exportMode && (
+        <div className="merge-bar">
+          <span>{picked.length === 0 ? "Pick the people whose photos you want to export" :
+            `${picked.length} ${picked.length === 1 ? "person" : "people"} picked`}</span>
+          <div className="merge-bar-actions">
+            {picked.length > 0 && (
+              <button className="btn btn-primary btn-sm" onClick={() => setExporting(true)}>
+                <FolderOutput size={14} /> Export their photos
+              </button>
+            )}
+            <button className="btn btn-quiet btn-sm" onClick={() => { setPicked([]); setExportMode(false); }}>
+              Cancel
+            </button>
+          </div>
+        </div>
+      )}
+      {exporting && (
+        <ExportDialog spec={{ person_ids: picked }} onClose={() => setExporting(false)}
+          title={picked.length === 1 ? `Export the photos of ${people.find((p) => p.id === picked[0])?.label}`
+            : `Export the photos of ${picked.length} people`} />
+      )}
 
       {mergeMode && (
         <div className="merge-bar">
@@ -117,7 +147,7 @@ export default function People() {
         </div>
       )}
 
-      {!mergeMode && (suggestions.data?.suggestions?.length ?? 0) > 0 && (
+      {!mergeMode && !exportMode && (suggestions.data?.suggestions?.length ?? 0) > 0 && (
         <section className="suggest-merges">
           <SectionHeader title="Possible same person" sub="Memoria thinks these two groups might be one person." />
           <div className="merge-cards">
@@ -144,7 +174,7 @@ export default function People() {
         </section>
       )}
 
-      {!mergeMode && (names.data?.suggestions?.length ?? 0) > 0 && (
+      {!mergeMode && !exportMode && (names.data?.suggestions?.length ?? 0) > 0 && (
         <section className="suggest-merges">
           <SectionHeader title="Names from Google Photos"
             sub="Your Takeout export named people in these photos. Memoria never applies a name on its own — check the face, then accept or dismiss." />
@@ -183,14 +213,14 @@ export default function People() {
           {named.length > 0 && (
             <section>
               <SectionHeader title="Named" count={named.length} />
-              <PeopleGrid people={named} mergeMode={mergeMode} picked={picked} onPick={toggle} />
+              <PeopleGrid people={named} mergeMode={mergeMode || exportMode} picked={picked} onPick={toggle} />
             </section>
           )}
           {unnamed.length > 0 && (
             <section>
               <SectionHeader title="Discovered" count={unnamed.length}
                 sub="Groups of the same face. Give them a name to search by person." />
-              <PeopleGrid people={unnamed} mergeMode={mergeMode} picked={picked} onPick={toggle} />
+              <PeopleGrid people={unnamed} mergeMode={mergeMode || exportMode} picked={picked} onPick={toggle} />
             </section>
           )}
         </>

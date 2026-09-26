@@ -2,7 +2,7 @@ import { NavLink } from "react-router-dom";
 import { useQuery } from "@tanstack/react-query";
 import {
   BookImage, CalendarRange, Copy, Images, MapPin, PanelLeftClose, PanelLeft, Settings as SettingsIcon,
-  Sparkles, Users, Clock, Map as MapIcon, LayoutGrid, FolderTree, ChartColumn,
+  Sparkles, Users, Clock, Map as MapIcon, LayoutGrid, FolderTree, ChartColumn, Trash2,
 } from "lucide-react";
 import { api } from "../lib/api";
 
@@ -66,6 +66,14 @@ export function Sidebar({ collapsed, onToggle }: { collapsed: boolean; onToggle:
       </nav>
 
       <div className="nav-foot">
+        {(stats?.trash ?? 0) > 0 && (
+          <NavLink to="/trash" className={({ isActive }) => `nav-link${isActive ? " is-active" : ""}`}
+            title={collapsed ? "Trash" : undefined}>
+            <Trash2 size={18} strokeWidth={1.9} />
+            <span className="nav-label">Trash</span>
+            <span className="nav-count tnum">{stats!.trash.toLocaleString()}</span>
+          </NavLink>
+        )}
         <NavLink to="/settings" className={({ isActive }) => `nav-link${isActive ? " is-active" : ""}`}
           title={collapsed ? "Settings" : undefined}>
           <SettingsIcon size={18} strokeWidth={1.9} />

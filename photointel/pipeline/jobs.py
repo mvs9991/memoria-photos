@@ -113,10 +113,13 @@ def reap_stale_jobs(conn) -> int:
     return n
 
 
-def active_job(conn) -> dict | None:
+def active_job(conn, exclude_kinds: tuple[str, ...] = ()) -> dict | None:
     reap_stale_jobs(conn)
+    marks = ",".join("?" * len(exclude_kinds))
     row = conn.execute(
-        "SELECT * FROM jobs WHERE status IN ('running','queued') ORDER BY id DESC LIMIT 1").fetchone()
+        "SELECT * FROM jobs WHERE status IN ('running','queued')"
+        + (f" AND kind NOT IN ({marks})" if exclude_kinds else "") + " ORDER BY id DESC LIMIT 1",
+        exclude_kinds).fetchone()
     return dict(row) if row else None
 
 
@@ -291,7 +294,8 @@ def run_ocr_job(ctx, job_id: int | None = None, everything: bool = False, limit:
 def spawn_index_job(ctx, params: dict) -> int:
     """Start indexing in a separate process so the web server stays responsive."""
     conn = ctx.connect()
-    existing = active_job(conn)
+    # An export runs alongside (it only reads the library); it must not swallow an index request.
+    existing = active_job(conn, exclude_kinds=("export",))
     if existing:
         conn.close()
         return int(existing["id"])

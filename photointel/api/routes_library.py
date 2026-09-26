@@ -650,6 +650,7 @@ def stats():
         "favorites": one("SELECT COUNT(*) FROM photos WHERE favorite=1"),
         "errors": one("SELECT COUNT(*) FROM photos WHERE status='error'"),
         "missing": one("SELECT COUNT(*) FROM photos WHERE status='missing'"),
+        "trash": one("SELECT COUNT(*) FROM photos WHERE status='trashed' AND live_component=0"),
         "pending": one("SELECT COUNT(*) FROM photos WHERE status='pending'"),
         "bytes": one("SELECT COALESCE(SUM(size),0) FROM photos WHERE status='ok'"),
         "date_range": {"from": date_row[0], "to": date_row[1]},

@@ -1,12 +1,14 @@
 /** Actions for photos selected in a grid: add to album, tag, plus page-specific extras. */
 import { useCallback, useEffect, useState } from "react";
 import { useMutation, useQueryClient } from "@tanstack/react-query";
-import { BookImage, CalendarClock, Columns2, MapPin, Tag, X } from "lucide-react";
+import { BookImage, CalendarClock, Columns2, FolderOutput, MapPin, Tag, Trash2, X } from "lucide-react";
 import { api } from "../lib/api";
 import { AlbumPicker } from "./AlbumPicker";
 import { CompareView } from "./CompareView";
 import { CorrectionDialog } from "./CorrectionDialog";
 import { StarRating } from "./StarRating";
+import { ExportDialog } from "./ExportDialog";
+import { TrashDialog, useAllowDelete } from "./TrashDialog";
 
 export function SelectionBar({ selected, onClear, extra, allIds, onSelectAll }: {
   selected: Set<number>;
@@ -20,6 +22,9 @@ export function SelectionBar({ selected, onClear, extra, allIds, onSelectAll }: 
   const [picker, setPicker] = useState(false);
   const [comparing, setComparing] = useState(false);
   const [fixing, setFixing] = useState<"date" | "place" | null>(null);
+  const [exporting, setExporting] = useState(false);
+  const [trashing, setTrashing] = useState(false);
+  const canDelete = useAllowDelete();
   const [stars, setStars] = useState(0);
   const [tag, setTag] = useState("");
   const [note, setNote] = useState<string | null>(null);
@@ -69,11 +74,24 @@ export function SelectionBar({ selected, onClear, extra, allIds, onSelectAll }: 
       )}
       <button className="btn btn-ghost btn-sm" onClick={() => setFixing("date")}><CalendarClock size={14} /> Fix date</button>
       <button className="btn btn-ghost btn-sm" onClick={() => setFixing("place")}><MapPin size={14} /> Set place</button>
+      <button className="btn btn-ghost btn-sm" onClick={() => setExporting(true)} title="Copy the original files somewhere">
+        <FolderOutput size={14} /> Export
+      </button>
       {extra}
+      {canDelete && (
+        <button className="btn btn-quiet btn-sm selection-trash" onClick={() => setTrashing(true)}
+          title="Move the files to the Trash (restorable for 30 days)">
+          <Trash2 size={14} /> Delete
+        </button>
+      )}
       {note && <span className="dim selection-note">{note}</span>}
       <button className="btn btn-quiet btn-sm" onClick={() => { setNote(null); onClear(); }}>
         <X size={14} /> Clear
       </button>
+      {exporting && <ExportDialog spec={{ photo_ids: ids }} onClose={() => setExporting(false)}
+        title={`Export ${ids.length.toLocaleString()} selected`} />}
+      {trashing && <TrashDialog photoIds={ids} onClose={() => setTrashing(false)}
+        onDone={(r) => { if (r.trashed && !r.skipped.length) onClear(); }} />}
       {comparing && <CompareView ids={ids} onClose={() => setComparing(false)} />}
       {fixing && <CorrectionDialog photoIds={ids} mode={fixing} onClose={() => setFixing(null)} />}
       {picker && <AlbumPicker photoIds={ids} onClose={() => setPicker(false)}

@@ -2,9 +2,10 @@ import { useMemo, useState } from "react";
 import { Link, useNavigate, useParams } from "react-router-dom";
 import { useMutation, useQuery, useQueryClient } from "@tanstack/react-query";
 import {
-  ArrowLeft, Cake, Check, EyeOff, MapPin, Pencil, Scissors, Star, UserCheck, UserX, Users, X,
+  ArrowLeft, Cake, Check, EyeOff, FolderOutput, MapPin, Pencil, Scissors, Star, UserCheck, UserX, Users, X,
 } from "lucide-react";
 import { api, faceUrl, thumbUrl } from "../lib/api";
+import { ExportDialog } from "../components/ExportDialog";
 import { PhotoGrid } from "../components/PhotoGrid";
 import { EmptyState, ErrorState, SectionHeader, Spinner } from "../components/States";
 import { useViewer } from "../components/ViewerContext";
@@ -19,6 +20,7 @@ export default function PersonDetail() {
   const viewer = useViewer();
   const [tab, setTab] = useState<"photos" | "review">("photos");
   const [renaming, setRenaming] = useState(false);
+  const [exporting, setExporting] = useState(false);
   const [name, setName] = useState("");
   const [selected, setSelected] = useState<Set<number>>(new Set());
 
@@ -125,6 +127,12 @@ export default function PersonDetail() {
             </p>
           )}
           <div className="person-actions">
+            <button className="btn btn-ghost btn-sm" onClick={() => setExporting(true)}
+              title="Copy every photo of this person somewhere">
+              <FolderOutput size={14} /> Export photos
+            </button>
+            {exporting && <ExportDialog spec={{ person_ids: [personId] }} onClose={() => setExporting(false)}
+              title={`Export the photos of ${p.label}`} />}
             <button className={`btn btn-ghost btn-sm${p.is_me ? " is-on" : ""}`}
               onClick={() => flags.mutate({ is_me: !p.is_me })} title="Mark as yourself">
               <UserCheck size={14} /> {p.is_me ? "This is you" : "This is me"}

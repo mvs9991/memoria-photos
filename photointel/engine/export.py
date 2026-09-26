@@ -212,7 +212,7 @@ def export_to_folder(conn: sqlite3.Connection, spec: ExportSpec, progress: Calla
     t0 = time.time()
     p = plan(conn, spec)
     if not p.items:
-        raise ExportError("nothing matches — no photos to export")
+        raise ExportError("nothing matches: no photos to export")
     out.mkdir(parents=True, exist_ok=True)
     xmps = sidecars_for(conn, [i.photo_id for i in p.items]) if spec.xmp else {}
     copied = already = failed = 0
@@ -310,7 +310,7 @@ class _Sink:
 def iter_zip(conn: sqlite3.Connection, spec: ExportSpec) -> Iterator[bytes]:
     p = plan(conn, spec)
     if not p.items:
-        raise ExportError("nothing matches — no photos to export")
+        raise ExportError("nothing matches: no photos to export")
     xmps = sidecars_for(conn, [i.photo_id for i in p.items]) if spec.xmp else {}
     return _zip_stream(p, xmps)
 

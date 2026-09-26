@@ -1,7 +1,7 @@
 import { useMemo, useState } from "react";
 import { useSearchParams } from "react-router-dom";
 import { useQuery } from "@tanstack/react-query";
-import { CalendarDays, CheckSquare, Heart, Images, LayoutGrid, MonitorPlay, Rows3, SlidersHorizontal, Star, X } from "lucide-react";
+import { CalendarDays, CheckSquare, FolderOutput, Heart, Images, LayoutGrid, MonitorPlay, Rows3, SlidersHorizontal, Star, X } from "lucide-react";
 import { api, FLAG } from "../lib/api";
 import { monthName } from "../lib/format";
 import { PhotoGrid } from "../components/PhotoGrid";
@@ -9,6 +9,7 @@ import { EmptyState, ErrorState, NoLibrary, SkeletonGrid } from "../components/S
 import { useViewer } from "../components/ViewerContext";
 import { SelectionBar, useSelectAllShortcut, useSelection } from "../components/SelectionBar";
 import { Slideshow } from "../components/Slideshow";
+import { ExportDialog } from "../components/ExportDialog";
 import { useTitle, useLocalState } from "../lib/hooks";
 
 export default function Photos() {
@@ -21,6 +22,7 @@ export default function Photos() {
   const [selecting, setSelecting] = useState(false);
   const selection = useSelection();
   const [slideshow, setSlideshow] = useState(false);
+  const [exporting, setExporting] = useState(false);
 
   const favorite = params.get("favorite") === "1";
   const source = params.get("source") ?? "";
@@ -103,6 +105,14 @@ export default function Photos() {
             <button className={density === "large" ? "on" : ""} onClick={() => setDensity("large")}
               title="Large"><Images size={15} /></button>
           </div>
+          {year && (
+            <button className="btn btn-ghost btn-sm" onClick={() => setExporting(true)} disabled={!items.length}
+              title={`Copy every photo from ${period} somewhere`}>
+              <FolderOutput size={14} /> Export {period}
+            </button>
+          )}
+          {exporting && year && <ExportDialog spec={{ year, month }} title={`Export ${period}`}
+            onClose={() => setExporting(false)} />}
           <button className="btn btn-ghost btn-sm" onClick={() => setSlideshow(true)} disabled={!items.length}
             title="Slideshow of these photos">
             <MonitorPlay size={14} /> Slideshow

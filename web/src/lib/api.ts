@@ -175,6 +175,8 @@ export interface Stats {
   favorites: number;
   errors: number;
   missing: number;
+  /** files in the Trash */
+  trash: number;
   pending: number;
   bytes: number;
   date_range: { from: number | null; to: number | null };
@@ -231,6 +233,35 @@ export interface ShareLink {
   expires_at: number | null;
   created_at: number;
   last_used_at: number | null;
+}
+
+/** What to export. Exactly the photos, or everything matching album/event/people/period. */
+export interface ExportSpec {
+  photo_ids?: number[];
+  album_id?: number;
+  event_id?: number;
+  person_ids?: number[];
+  person_mode?: "each" | "together" | "any";
+  year?: number;
+  month?: number;
+  layout?: "date" | "flat" | "original";
+  include_live?: boolean;
+  include_stack_frames?: boolean;
+  xmp?: boolean;
+  folder?: string;
+}
+
+export interface TrashItem {
+  photo_id: number;
+  filename: string;
+  size: number;
+  trashed_at: number;
+  expires_at: number;
+  original_path: string;
+  ratio: number;
+  ts: number;
+  video: boolean;
+  duration: number | null;
 }
 
 const BASE = "/api";
@@ -432,6 +463,25 @@ export const api = {
   shared: (token: string) =>
     request<{ name: string; allow_download: boolean; photos: PhotoIndex }>(`/share/${token}`),
 
+  exportPreview: (spec: ExportSpec) =>
+    request<{ items: number; bytes: number; groups: { label: string; count: number; bytes: number }[] }>(
+      `/export/preview`, { method: "POST", body: JSON.stringify(spec) }),
+  startExport: (spec: ExportSpec) =>
+    request<{ job_id: number }>(`/export`, { method: "POST", body: JSON.stringify(spec) }),
+
+  trash: () => request<{ items: TrashItem[]; bytes: number; days: number; allow_delete: boolean }>("/trash"),
+  moveToTrash: (photo_ids: number[], confirm: number) =>
+    request<{ trashed: number; bytes: number; skipped: { photo_id: number; reason: string }[]; expires_at: number }>(
+      `/trash`, { method: "POST", body: JSON.stringify({ photo_ids, confirm }) }),
+  restoreFromTrash: (photo_ids: number[]) =>
+    request<{ restored: number; failed: { photo_id: number; reason: string }[] }>(`/trash/restore`, {
+      method: "POST", body: JSON.stringify({ photo_ids }),
+    }),
+  eraseFromTrash: (photo_ids: number[], confirm: number) =>
+    request<{ erased: number; bytes: number }>(`/trash/erase`, { method: "POST", body: JSON.stringify({ photo_ids, confirm }) }),
+  emptyTrash: (confirm: number) =>
+    request<{ erased: number; bytes: number }>(`/trash/empty`, { method: "POST", body: JSON.stringify({ confirm }) }),
+
   clearCache: (kind: string) => request<any>(`/cache/clear${qs({ kind })}`, { method: "POST" }),
 };
 
@@ -445,4 +495,20 @@ export const sharedThumbUrl = (token: string, id: number, size: "sm" | "m" | "l"
 export const sharedVideoUrl = (token: string, id: number) => `${BASE}/share/${token}/video/${id}`;
 export const sharedDownloadUrl = (token: string, id: number) => `${BASE}/share/${token}/download/${id}`;
 export const randomImageUrl = (params: Record<string, any> = {}) => `${BASE}/random/image${qs(params)}`;
+/** Let the browser download the zip itself (a form post streams straight to disk). */
+export function downloadZip(spec: ExportSpec) {
+  const form = document.createElement("form");
+  form.method = "POST";
+  form.action = `${BASE}/export/zip`;
+  form.style.display = "none";
+  const field = document.createElement("input");
+  field.type = "hidden";
+  field.name = "spec";
+  field.value = JSON.stringify(spec);
+  form.appendChild(field);
+  document.body.appendChild(form);
+  form.submit();
+  form.remove();
+}
+
 export const faceUrl = (id: number, size = 200) => `${BASE}/faces/${id}/crop?size=${size}`;

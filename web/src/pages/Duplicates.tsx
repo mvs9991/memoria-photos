@@ -1,6 +1,7 @@
 import { useState } from "react";
 import { useMutation, useQuery, useQueryClient } from "@tanstack/react-query";
-import { Check, Copy, EyeOff, Info, ShieldCheck, Star } from "lucide-react";
+import { Check, Copy, EyeOff, Info, ShieldCheck, Star, Trash2 } from "lucide-react";
+import { TrashDialog, useAllowDelete } from "../components/TrashDialog";
 import { api, thumbUrl } from "../lib/api";
 import { EmptyState, ErrorState, Spinner } from "../components/States";
 import { useViewer } from "../components/ViewerContext";
@@ -20,6 +21,8 @@ export default function Duplicates() {
   const viewer = useViewer();
   const [kind, setKind] = useState<string>("");
   const [status, setStatus] = useState<"pending" | "reviewed" | "all">("pending");
+  const [trashing, setTrashing] = useState<number[] | null>(null);
+  const canDelete = useAllowDelete();
 
   const { data, isLoading, isError, error, refetch } = useQuery({
     queryKey: ["duplicates", kind, status],
@@ -75,9 +78,12 @@ export default function Duplicates() {
       </div>
 
       <p className="notice notice-quiet">
-        <ShieldCheck size={14} /> Memoria never deletes or edits your files. “Hide copies” only removes them from
-        your library views — the originals stay exactly where they are.
+        <ShieldCheck size={14} /> Nothing here is deleted automatically. “Hide copies” only removes them from your
+        views; “Move to Trash” moves the copies you choose to the Trash, where they can be restored for 30 days.
+        The copy marked <em>keep</em> is never included.
       </p>
+
+      {trashing && <TrashDialog photoIds={trashing} onClose={() => setTrashing(null)} />}
 
       {groups.length === 0 ? (
         <EmptyState icon={<Copy size={26} />} title="Nothing to review"
@@ -100,6 +106,13 @@ export default function Duplicates() {
                     })}>
                     <EyeOff size={13} /> Hide {g.member_count - 1} {g.member_count === 2 ? "copy" : "copies"}
                   </button>
+                  {canDelete && g.kind !== "similar" && (
+                    <button className="btn btn-quiet btn-sm"
+                      onClick={() => setTrashing(g.members.filter((m: any) => !m.is_keeper).map((m: any) => m.photo_id))}
+                      title="Move the copies (not the one marked keep) to the Trash">
+                      <Trash2 size={13} /> Move to Trash
+                    </button>
+                  )}
                   <button className="btn btn-quiet btn-sm"
                     onClick={() => review.mutate({ id: g.id, body: { status: "not_duplicate" } })}>
                     Not duplicates

@@ -21,6 +21,7 @@ const PAGES = [
   ["collections", "/collections"],
   ["folders", "/folders"],
   ["insights", "/insights"],
+  ["trash", "/trash"],
   ["search", "/search?q=beach+photos"],
   ["settings", "/settings"],
 ];

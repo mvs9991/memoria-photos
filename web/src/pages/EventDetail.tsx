@@ -1,9 +1,10 @@
 import { useMemo, useState } from "react";
 import { Link, useParams } from "react-router-dom";
 import { useMutation, useQuery, useQueryClient } from "@tanstack/react-query";
-import { ArrowLeft, Check, MapPin, MonitorPlay, Pencil, Sparkles, Users, X } from "lucide-react";
+import { ArrowLeft, Check, FolderOutput, MapPin, MonitorPlay, Pencil, Sparkles, Users, X } from "lucide-react";
 import { api, faceUrl, FLAG, thumbUrl } from "../lib/api";
 import { Slideshow } from "../components/Slideshow";
+import { ExportDialog } from "../components/ExportDialog";
 import { PhotoGrid } from "../components/PhotoGrid";
 import { ErrorState, SectionHeader, Spinner } from "../components/States";
 import { useViewer } from "../components/ViewerContext";
@@ -18,6 +19,7 @@ export default function EventDetail() {
   const [renaming, setRenaming] = useState(false);
   const [title, setTitle] = useState("");
   const [slideshow, setSlideshow] = useState(false);
+  const [exporting, setExporting] = useState(false);
 
   const { data, isLoading, isError, error, refetch } = useQuery({
     queryKey: ["event", eventId],
@@ -167,9 +169,16 @@ export default function EventDetail() {
 
       <section>
         <SectionHeader title="All photos" count={items.length} action={
-          <button className="btn btn-ghost btn-sm" onClick={() => setSlideshow(true)} disabled={!items.length}>
-            <MonitorPlay size={14} /> Slideshow
-          </button>} />
+          <div className="toolbar">
+            <button className="btn btn-ghost btn-sm" onClick={() => setExporting(true)} disabled={!items.length}>
+              <FolderOutput size={14} /> Export
+            </button>
+            <button className="btn btn-ghost btn-sm" onClick={() => setSlideshow(true)} disabled={!items.length}>
+              <MonitorPlay size={14} /> Slideshow
+            </button>
+          </div>} />
+        {exporting && <ExportDialog spec={{ event_id: eventId }} title={`Export “${data.title}”`}
+          onClose={() => setExporting(false)} />}
         {slideshow && <Slideshow items={items.map((i: any) => ({ id: i.id, video: (i.flags & FLAG.video) > 0 }))}
           onClose={() => setSlideshow(false)} />}
         <PhotoGrid items={items} grouping="day" targetHeight={220}

@@ -356,3 +356,32 @@ def test_export_skips_hidden_photos_unless_chosen(ctx, library, client, tmp_path
     assert pid not in {i.photo_id for i in plan(conn, ExportSpec(year=2024, month=7)).items}
     assert pid in {i.photo_id for i in plan(conn, ExportSpec(photo_ids=[pid])).items}
     conn.close()
+
+
+def test_a_running_export_does_not_block_indexing(ctx, monkeypatch):
+    from photointel.pipeline import jobs
+
+    conn = ctx.connect()
+    export_job = jobs.create_job(conn, "export", {})
+    conn.execute("UPDATE jobs SET status='running', heartbeat_at=? WHERE id=?", (time.time(), export_job))
+    conn.commit()
+    conn.close()
+    spawned = []
+    monkeypatch.setattr(jobs, "_spawn", lambda args: spawned.append(args))
+    new = jobs.spawn_index_job(ctx, {"kind": "index", "post_only": True})
+    assert new != export_job and spawned
+
+
+def test_person_counts_follow_the_trash(ctx, library, client):
+    index(ctx, library)
+    conn = ctx.connect()
+    run_post_stages(ctx, conn, stages=["people"])
+    pid = pid_of(ctx, "IMG_x0.jpg")
+    person = conn.execute("SELECT person_id FROM faces WHERE photo_id = ? AND person_id IS NOT NULL", (pid,)).fetchone()[0]
+    count = lambda: conn.execute("SELECT photo_count FROM persons WHERE id = ?", (person,)).fetchone()[0]  # noqa: E731
+    before = count()
+    assert client.post("/api/trash", json={"photo_ids": [pid], "confirm": 1}).status_code == 200
+    assert count() == before - 1
+    assert client.post("/api/trash/restore", json={"photo_ids": [pid]}).status_code == 200
+    assert count() == before
+    conn.close()

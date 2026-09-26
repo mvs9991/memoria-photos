@@ -18,8 +18,10 @@ natural-language search.
 
 Hard constraints from the original brief, all still binding:
 
-- **Originals are never modified, moved or deleted.** Everything written goes under one data
-  directory. Photos are opened read-only. The Duplicates screen only ever *hides*.
+- **Originals are never modified, and never moved or deleted except by the user through the Trash.**
+  Everything else written goes under one data directory; photos are opened read-only. (Changed on
+  2026-09-26 at the owner's request: they wanted real deletes, but "no accidental deletes by AI or
+  anything". See *The Trash is the only code that removes a file* in §4 for how that is enforced.)
 - **No LLM in the recognition path.** Face identity is SCRFD + ArcFace + graph clustering. The
   optional Claude layer only parses queries it cannot parse with rules, and only ever returns
   the same structured filter the rule parser would.
@@ -56,7 +58,7 @@ photointel/
   api/       app.py routes_*.py images.py
 web/         React + TypeScript UI (Vite)
 eval/        dataset builders, calibration, evaluation, library inspector
-tests/       187 tests, no GPU required
+tests/       204 tests, no GPU required
 ```
 
 **The indexing pipeline** is a feeder thread → N CPU worker threads (read, hash, decode, EXIF,
@@ -294,6 +296,32 @@ A test fails without the `gps_lat IS NULL` rule.
 (`collection=hidden` flips the visibility filter) is the way back. Nothing on the Collections page
 touches a file, and the thresholds (blur < 35, ≥ 20 MB) are heuristics, not measured.
 
+**The Trash is the only code that removes a file.** Deleting renames the file (plus its Live video and
+`<name>.*.json/.xmp` sidecars) into `<data>/trash/<id>/`, or `<root>/.memoria-trash/<id>/` when the photos
+are on another drive (a dot-directory, so the scanner skips it). Rename only — never copy-then-delete —
+so it needs no space and cannot half-lose a file; the plan is committed before any rename and
+`trash.reconcile()` undoes an interrupted one at start-up. Status goes to `trashed` (hidden everywhere,
+because every view filters `status = 'ok'`), then `deleted` once erased; the scanner leaves both alone.
+Restore never overwrites: a taken name gets ` (restored)`. Erasing happens only for entries older than
+`trash_days` (a sweep at start-up and every 6 h) or when the user empties the trash or deletes
+permanently. Guards: every destructive API call carries `confirm` = the count shown in the dialog
+(mismatch → 400); the UI asks for the number to be typed from 25 files up, and always for permanent
+deletes; `allow_delete = false` removes every Delete button and the server refuses. Two tests pin it:
+`test_only_the_trash_can_remove_a_file` lists every removal call in the package (a new one fails until
+reviewed) and `test_only_a_users_click_can_trash` allows `move_to_trash` only in `api/routes_trash.py`.
+All 14 guards were mutation-checked: each test fails without its guard.
+
+Building it exposed a latent bug: `update_person_stats(conn, person_ids)` had never been called with ids
+and produced `WHERE … WHERE`. Fixed; `test_person_counts_follow_the_trash` failed before the fix.
+
+**Export only copies.** `engine/export.py` resolves a spec (ids, album, event, year/month, people in
+`each`/`together`/`any` mode) to files, copies with `shutil.copy2` into a `.part` then renames, and skips
+a destination that already holds the same bytes (sha256), so a re-run resumes and identical copies of
+one photo are written once per folder. A destination inside a root is refused. The zip streams through an
+unseekable sink (data descriptors, ZIP_STORED, zip64 as needed) so nothing is buffered on disk. Folder
+exports run as `kind='export'` jobs in a server thread; `spawn_index_job` ignores export jobs when
+deduplicating, or a running export would swallow an index request (a test covers it).
+
 **`.nomedia` is deliberately not honoured.** WhatsApp puts it in `Sent`, which held 1,339 of the
 owner's own photos. Dot-directories are already excluded, which handles real app-cache junk.
 
@@ -425,6 +453,11 @@ the future, everything collapsing into one event, fuzzy duplicate thresholds too
 - **GPX placement** is tested on generated tracks only. Photo time → UTC uses the EXIF offset, else this
   machine's zone on that date; a camera set to another zone without an offset tag lands wrongly.
 - **Clean-up thresholds** (blur < 35, ≥ 20 MB, tagger's meme/document) are unmeasured heuristics.
+- **Trash across drives:** a photo on a different drive from the data directory is trashed into
+  `<root>/.memoria-trash`. Tested with the path forced, not on a real second drive; a read-only or
+  network root makes the rename fail, and the file is then reported as not moved (never forced).
+- **Zip downloads over 4 GB** use zip64 and are untested at that size; the UI suggests copying to a
+  folder instead.
 - **Auth has had no security review.** It is PBKDF2 (240k rounds) + an HMAC session cookie with no
   HTTPS of its own and no rate limit on login. Fine behind a home router; put a TLS reverse proxy in
   front of anything wider.
@@ -438,7 +471,7 @@ the future, everything collapsing into one event, fuzzy duplicate thresholds too
 
 ## 10. Working notes
 
-- Run the suite with `.venv/Scripts/python.exe -m pytest -q`. 187 tests, ~95 s, no GPU needed —
+- Run the suite with `.venv/Scripts/python.exe -m pytest -q`. 204 tests, ~95 s, no GPU needed —
   the neural nets are replaced by deterministic fakes.
 - Test fixtures seed randomness from `zlib.crc32` of the **file name**, not `hash()` (salted per
   process) and not the full path (contains pytest's per-run tmp counter). Both made failures

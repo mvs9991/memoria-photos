@@ -8,7 +8,7 @@ import { api } from "../lib/api";
 import { ErrorState, SectionHeader, Spinner } from "../components/States";
 import { formatBytes, formatDuration, relativeTime } from "../lib/format";
 import { useTitle } from "../lib/hooks";
-import { FrameCard, GpxCard, SecurityCard } from "../components/SettingsExtras";
+import { FrameCard, GpxCard, SecurityCard, TrashCard } from "../components/SettingsExtras";
 
 export default function Settings() {
   useTitle("Settings");
@@ -242,6 +242,7 @@ export default function Settings() {
       </section>
 
       <SecurityCard />
+      <TrashCard />
       <GpxCard />
       <XmpExport />
       <FrameCard />
@@ -373,7 +374,7 @@ function XmpExport() {
       <SectionHeader title="Export to other apps"
         sub="XMP sidecars with people, your tags, ratings, descriptions and corrected dates — readable by digiKam, darktable and Lightroom." />
       <form className="xmp-form" onSubmit={(e) => { e.preventDefault(); if (folder.trim()) run.mutate(); }}>
-        <input className="field" placeholder="Export folder, e.g. D:\\MemoriaExport" value={folder}
+        <input className="field" placeholder="Export folder, e.g. D:\MemoriaExport" value={folder}
           onChange={(e) => setFolder(e.target.value)} aria-label="Export folder" />
         <label className="xmp-auto dim">
           <input type="checkbox" checked={auto} onChange={(e) => setAuto(e.target.checked)} /> include automatic tags

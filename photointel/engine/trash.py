@@ -85,13 +85,19 @@ def _affected_people(conn: sqlite3.Connection, photo_ids: list[int]) -> list[int
 
 
 def _after_change(conn: sqlite3.Connection, photo_ids: list[int]) -> None:
+    """Refresh what depends on which photos are visible. The files have already moved and
+    that is committed; a failure here only leaves counts stale until the next index."""
     from .people import update_person_stats
 
-    people = _affected_people(conn, photo_ids)
-    if people:
-        update_person_stats(conn, people)
-    db.bump_generation(conn, "embeddings")      # the search matrix holds only 'ok' photos
-    conn.commit()
+    try:
+        people = _affected_people(conn, photo_ids)
+        if people:
+            update_person_stats(conn, people)
+        db.bump_generation(conn, "embeddings")      # the search matrix holds only 'ok' photos
+        conn.commit()
+    except sqlite3.Error:
+        conn.rollback()
+        log.exception("Trash: refreshing counts failed; they will be rebuilt on the next index")
 
 
 def move_to_trash(ctx, conn: sqlite3.Connection, photo_ids: list[int], actor: str = "user") -> dict:

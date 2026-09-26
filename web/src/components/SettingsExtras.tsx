@@ -1,7 +1,8 @@
 /** Settings cards: access password, GPS tracks, and the photo-frame / slideshow URLs. */
 import { useRef, useState } from "react";
 import { useMutation, useQuery, useQueryClient } from "@tanstack/react-query";
-import { Frame as FrameIcon, Lock, LogOut, Route, Upload } from "lucide-react";
+import { Link } from "react-router-dom";
+import { Frame as FrameIcon, Lock, LogOut, Route, Trash2, Upload } from "lucide-react";
 import { api, randomImageUrl } from "../lib/api";
 import { formatRange } from "../lib/format";
 import { SectionHeader } from "./States";
@@ -108,6 +109,44 @@ export function GpxCard() {
       {(upload.error || place.error) && <p className="danger-text">{((upload.error || place.error) as Error).message}</p>}
       <p className="dim">Photos with real GPS, a Google Takeout location or a place you set are never moved. A camera clock that
         is off shifts the match — fix the time first (“Fix date” → shift) if needed.</p>
+    </section>
+  );
+}
+
+export function TrashCard() {
+  const qc = useQueryClient();
+  const settings = useQuery({ queryKey: ["settings"], queryFn: api.settings });
+  const trash = useQuery({ queryKey: ["trash"], queryFn: api.trash });
+  const save = useMutation({
+    mutationFn: (body: Record<string, any>) => api.updateSettings(body),
+    onSuccess: () => { qc.invalidateQueries({ queryKey: ["settings"] }); qc.invalidateQueries({ queryKey: ["trash"] }); },
+  });
+  const s = settings.data?.settings;
+  const [days, setDays] = useState<string | null>(null);
+  if (!s) return null;
+  const n = trash.data?.items.length ?? 0;
+  return (
+    <section className="card setting-card">
+      <SectionHeader title="Trash" sub="Deleting moves files into the Trash — nothing is erased straight away, and nothing is ever deleted automatically except what you put in the Trash, once its days are up." />
+      <div className="trash-settings">
+        <label className="xmp-auto">
+          <input type="checkbox" checked={s.allow_delete} onChange={(e) => save.mutate({ allow_delete: e.target.checked })} />
+          allow deleting files
+        </label>
+        <label className="dim">keep deleted files for
+          <input className="field field-sm trash-days" type="number" min={1} max={365}
+            value={days ?? String(s.trash_days)} onChange={(e) => setDays(e.target.value)}
+            onBlur={() => {
+              const v = Math.round(Number(days));
+              if (days !== null && v >= 1 && v <= 365 && v !== s.trash_days) save.mutate({ trash_days: v });
+              setDays(null);
+            }} aria-label="Days to keep deleted files" /> days
+        </label>
+        <Link to="/trash" className="btn btn-ghost btn-sm"><Trash2 size={14} /> Open Trash{n ? ` (${n})` : ""}</Link>
+      </div>
+      <p className="dim">A deleted file is renamed into a trash folder on the same drive (so it needs no extra space),
+        and can be restored to where it was. Turning deleting off hides every Delete button and the server refuses it.</p>
+      {save.error && <p className="danger-text">{(save.error as Error).message}</p>}
     </section>
   );
 }

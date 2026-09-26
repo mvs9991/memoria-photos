@@ -12,8 +12,10 @@ tried and rejected, and what is still unverified. `README.md` documents the prod
 
 ## Non-negotiables
 
-- **Never modify, move or delete an original photo.** All output goes under one data directory;
-  originals are opened read-only. The Duplicates screen only ever *hides*.
+- **Never modify an original photo, and never move or delete one except through the Trash on the
+  user's explicit click** (`engine/trash.py`, `api/routes_trash.py` — see `HANDOFF.md` §4). No
+  automatic code path may remove a file; `test_only_the_trash_can_remove_a_file` enforces it. All other
+  output goes under one data directory; originals are opened read-only. Exports only ever copy.
 - **No LLM in the recognition path.** Face identity is SCRFD + ArcFace + graph clustering. The
   optional Claude layer only parses queries the rule parser cannot, and returns the same structured
   filter it would have.
@@ -24,13 +26,14 @@ tried and rejected, and what is still unverified. `README.md` documents the prod
 ## Commands
 
 ```bash
-.venv/Scripts/python.exe -m pytest -q          # 187 tests, ~95s, no GPU needed
+.venv/Scripts/python.exe -m pytest -q          # 204 tests, ~95s, no GPU needed
 python -m photointel add-root "D:/Photos"
 python -m photointel index                     # resumable; only processes what changed
 python -m photointel index --post-only --full-recluster   # after changing clustering settings
 python -m photointel ocr [--all]               # read text in photos (post-index reads likely-text ones)
 python -m photointel export-xmp <folder>       # XMP sidecars for other apps (refuses folders in a root)
 python -m photointel import-gpx <files>        # GPS tracks, then --post-only --stages gpx,geocode,events,search-index
+python -m photointel export <folder> --person A --person B   # copies only; --people-mode each|together|any
 python -m photointel set-password              # required before `serve --host 0.0.0.0` (or pass --insecure)
 python -m photointel serve                     # http://127.0.0.1:8765
 python eval/inspect_library.py --data ./data   # sanity report for a real library

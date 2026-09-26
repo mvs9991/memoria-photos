@@ -233,3 +233,51 @@ a.month-col:hover .month-bar { opacity: 1; }
   .ss-speeds { display: none; }
 }
 .face-blank { display: inline-block; }
+
+/* ---------------- export & trash ---------------- */
+.modal-backdrop.modal-top { z-index: 450; }
+.export-modal { width: min(640px, 100%); }
+.export-summary { font-size: 15px; }
+.export-mode { align-self: flex-start; flex-wrap: wrap; }
+.export-groups { list-style: none; margin: 0; padding: 0; display: grid; gap: 3px; font-size: 12.5px; max-height: 120px; overflow: auto; }
+.export-groups li { display: flex; justify-content: space-between; gap: 12px; min-width: 0; }
+.export-layouts { display: grid; grid-template-columns: repeat(auto-fit, minmax(160px, 1fr)); gap: 8px; }
+.export-layout {
+  display: grid; gap: 3px; padding: 9px 11px; border-radius: var(--r-md); border: 1px solid var(--hairline);
+  cursor: pointer; font-size: 13px; background: var(--surface);
+}
+.export-layout input { position: absolute; opacity: 0; pointer-events: none; }
+.export-layout.on { border-color: var(--accent); background: var(--accent-soft); }
+.export-layout code { font-family: var(--font-mono); font-size: 10.5px; color: var(--text-3); overflow-wrap: anywhere; }
+.export-options { display: flex; flex-wrap: wrap; gap: 6px 16px; font-size: 13px; }
+.export-options label { display: inline-flex; align-items: center; gap: 6px; }
+.export-targets { display: grid; grid-template-columns: 1.4fr 1fr; gap: 12px; }
+.export-target { display: grid; gap: 8px; align-content: start; padding: 12px; border-radius: var(--r-md); background: var(--surface-2); }
+.export-target-title { font-size: 12.5px; font-weight: 600; color: var(--text-2); }
+.export-row { display: flex; gap: 8px; }
+.export-row .field { flex: 1; min-width: 0; }
+.export-progress { display: grid; gap: 6px; font-size: 12.5px; }
+.export-progress .job-pill-bar { position: static; display: block; width: 100%; }
+.export-note { font-size: 12px; }
+.link-button { background: none; border: 0; padding: 0; color: var(--accent-text); cursor: pointer; font: inherit; text-decoration: underline; }
+.selection-trash:hover { color: var(--danger); }
+.trash-modal { width: min(500px, 100%); }
+.trash-settings { display: flex; flex-wrap: wrap; align-items: center; gap: 10px 20px; margin-bottom: 8px; }
+.trash-settings label { display: inline-flex; align-items: center; gap: 8px; font-size: 13px; }
+.trash-days { width: 72px; }
+@media (max-width: 620px) {
+  .export-targets { grid-template-columns: 1fr; }
+}
+
+/* On a phone the selection bar is one row you swipe sideways, not five rows over the photos. */
+@media (max-width: 620px) {
+  .review-bar.selection-bar {
+    flex-wrap: nowrap;
+    overflow-x: auto;
+    scrollbar-width: none;
+    -webkit-overflow-scrolling: touch;
+  }
+  .review-bar.selection-bar::-webkit-scrollbar { display: none; }
+  .review-bar.selection-bar > * { flex: none; }
+  .review-bar.selection-bar .input-inline { width: 150px; }
+}
