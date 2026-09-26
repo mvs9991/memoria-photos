@@ -150,6 +150,11 @@ def scan_root(conn: sqlite3.Connection, root_id: int, root_path: Path, exclude: 
             if psize != size or abs(pmtime - mtime) > 1.0:
                 changed.append((size, mtime, ctime, now, pid))
                 stats.changed += 1
+            elif pstatus == "deleted":
+                # Erased from the trash, yet a file is back at that path (a copy from a backup):
+                # treat it as a new photo rather than a ghost.
+                changed.append((size, mtime, ctime, now, pid))
+                stats.changed += 1
             elif pstatus == "missing":
                 restored.append((now, pid))
                 stats.restored += 1
@@ -167,7 +172,9 @@ def scan_root(conn: sqlite3.Connection, root_id: int, root_path: Path, exclude: 
 
     # Anything not seen in a *complete* scan is missing (kept in DB; analysis retained for moves).
     seen_set = set(seen_ids)
-    missing = [(pid,) for rel, (pid, _, _, status) in existing.items() if pid not in seen_set and status != "missing"]
+    # Trashed and erased photos are gone on purpose; the trash keeps their state.
+    missing = [(pid,) for rel, (pid, _, _, status) in existing.items()
+               if pid not in seen_set and status not in ("missing", "trashed", "deleted")]
     if existing and stats.seen == 0:
         # An empty root that used to contain photos is almost always an unmounted drive/share.
         log.warning("Root %s appears empty but has %d indexed photos; not marking them missing", root_path, len(existing))

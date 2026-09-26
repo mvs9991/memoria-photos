@@ -130,6 +130,59 @@ def cmd_import_gpx(ctx: AppContext, args) -> None:
     print("Run `index --post-only --stages gpx,geocode,events,search-index` to place photos by these tracks.")
 
 
+def cmd_export(ctx: AppContext, args) -> None:
+    from .engine.export import ExportSpec, export_to_folder
+    from .engine.xmp import ExportError
+
+    conn = ctx.connect()
+    try:
+        people = []
+        for p in args.person or []:
+            row = conn.execute("SELECT id FROM persons WHERE merged_into IS NULL AND (CAST(id AS TEXT) = ? "
+                               "OR lower(name) = lower(?))", (p, p)).fetchone()
+            if row is None:
+                print(f"No person called {p!r} (use a name or an id from the People page)", file=sys.stderr)
+                sys.exit(1)
+            people.append(int(row[0]))
+        album = None
+        if args.album:
+            row = conn.execute("SELECT id FROM albums WHERE hidden = 0 AND kind = 'manual' AND "
+                               "(CAST(id AS TEXT) = ? OR lower(name) = lower(?))", (args.album, args.album)).fetchone()
+            if row is None:
+                print(f"No album {args.album!r}", file=sys.stderr)
+                sys.exit(1)
+            album = int(row[0])
+        spec = ExportSpec.from_dict({
+            "person_ids": people or None, "person_mode": args.people_mode, "album_id": album, "event_id": args.event,
+            "year": args.year, "month": args.month, "layout": args.layout, "xmp": args.xmp,
+            "include_stack_frames": args.all_frames, "folder": args.out})
+        print(json.dumps(export_to_folder(conn, spec, progress=lambda d, t: print(f"copied {d:,}/{t:,}", end=chr(13))),
+                         indent=2, default=str))
+    except ExportError as exc:
+        print(f"Export refused: {exc}", file=sys.stderr)
+        sys.exit(1)
+    finally:
+        conn.close()
+
+
+def cmd_trash(ctx: AppContext, args) -> None:
+    """List or restore the trash, or erase what has expired. Deleting itself is only done in the app."""
+    from .engine import trash
+
+    conn = ctx.connect()
+    try:
+        if args.action == "list":
+            for t in trash.list_trash(conn):
+                days = max(0, int((t["expires_at"] - time.time()) // 86400))
+                print(f"#{t['photo_id']:>7}  {days:>3} days left  {t['original_path']}")
+        elif args.action == "restore":
+            print(json.dumps(trash.restore(ctx, conn, [int(x) for x in args.ids]), indent=2))
+        else:
+            print(json.dumps(trash.purge_expired(ctx, conn), indent=2))
+    finally:
+        conn.close()
+
+
 def cmd_status(ctx: AppContext, args) -> None:
     conn = ctx.connect()
     q = lambda sql: conn.execute(sql).fetchone()[0]  # noqa: E731
@@ -202,6 +255,24 @@ def main(argv: list[str] | None = None) -> None:
     p.add_argument("--auto-tags", action="store_true", help="also export high-confidence automatic tags")
     p.add_argument("--all", action="store_true", help="a sidecar for every photo, not only annotated ones")
 
+    p = sub.add_parser("export", help="copy originals (a person, people, album, event or year) to a folder")
+    p.add_argument("out", help="export folder (must be outside your photo folders)")
+    p.add_argument("--person", action="append", help="a person's name or id; repeat for several")
+    p.add_argument("--people-mode", choices=["each", "together", "any"], default="each",
+                   help="several people: a folder each (default), only photos with all of them, or any of them")
+    p.add_argument("--album", help="album name or id")
+    p.add_argument("--event", type=int, help="event or trip id")
+    p.add_argument("--year", type=int)
+    p.add_argument("--month", type=int)
+    p.add_argument("--layout", choices=["date", "flat", "original"], default="date",
+                   help="YYYY/MM folders (default), one folder, or the original folder structure")
+    p.add_argument("--xmp", action="store_true", help="write a .xmp beside each copy (people, tags, stars)")
+    p.add_argument("--all-frames", action="store_true", help="every file of RAW+JPEG pairs and bursts")
+
+    p = sub.add_parser("trash", help="list or restore deleted files, or erase the expired ones")
+    p.add_argument("action", choices=["list", "restore", "purge-expired"])
+    p.add_argument("ids", nargs="*", help="photo ids to restore")
+
     sub.add_parser("status", help="library summary")
 
     args = parser.parse_args(argv)
@@ -210,7 +281,8 @@ def main(argv: list[str] | None = None) -> None:
     handlers = {"add-root": cmd_add_root, "index": cmd_index, "serve": cmd_serve, "status": cmd_status,
                 "geo-setup": cmd_geo_setup, "models": cmd_models, "caption": cmd_caption, "ocr": cmd_ocr,
                 "export-xmp": cmd_export_xmp,
-                "set-password": cmd_set_password, "import-gpx": cmd_import_gpx}
+                "set-password": cmd_set_password, "import-gpx": cmd_import_gpx, "export": cmd_export,
+                "trash": cmd_trash}
     t0 = time.time()
     handlers[args.cmd](ctx, args)
     log.debug("%s finished in %.1fs", args.cmd, time.time() - t0)

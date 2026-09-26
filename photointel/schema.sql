@@ -53,7 +53,7 @@ CREATE TABLE IF NOT EXISTS photos (
     size            INTEGER NOT NULL,
     mtime           REAL NOT NULL,
     ctime           REAL,
-    status          TEXT NOT NULL DEFAULT 'pending',  -- pending | ok | error | missing
+    status          TEXT NOT NULL DEFAULT 'pending',  -- pending | ok | error | missing | trashed | deleted
     error           TEXT,
     first_seen_at   REAL NOT NULL,
     last_seen_at    REAL NOT NULL,
@@ -381,3 +381,21 @@ CREATE TABLE IF NOT EXISTS gpx_tracks (
     added_at  REAL NOT NULL
 );
 CREATE INDEX IF NOT EXISTS ix_gpx_time ON gpx_tracks(start_ts, end_ts);
+
+-- Trash: files the user explicitly deleted. Each is *renamed* (same drive, never copied)
+-- into <data>/trash, or <root>/.memoria-trash when the photos are on another drive, and
+-- kept for Settings.trash_days before being erased. Restoring renames it back. No FK to
+-- photos: an entry must outlive its photo row so the file is still purged.
+CREATE TABLE IF NOT EXISTS trash (
+    id          INTEGER PRIMARY KEY,
+    photo_id    INTEGER NOT NULL,
+    files       TEXT NOT NULL,                     -- JSON [[original_path, trash_path], ...]
+    size        INTEGER NOT NULL,
+    prev_status TEXT NOT NULL,
+    state       TEXT NOT NULL DEFAULT 'pending',   -- pending | trashed | restored | purged
+    trashed_at  REAL NOT NULL,
+    expires_at  REAL NOT NULL,
+    finished_at REAL
+);
+CREATE INDEX IF NOT EXISTS ix_trash_state ON trash(state, expires_at);
+CREATE INDEX IF NOT EXISTS ix_trash_photo ON trash(photo_id);

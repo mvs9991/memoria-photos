@@ -37,6 +37,12 @@ def _photo_row(photo_id: int):
 
 
 def abs_path(row) -> Path:
+    if row["status"] == "trashed":            # still viewable from the Trash page
+        from ..engine.trash import trashed_path
+
+        moved = trashed_path(get_state().conn(), int(row["id"]))
+        if moved is not None:
+            return moved
     return Path(row["root"]) / row["rel_path"]
 
 

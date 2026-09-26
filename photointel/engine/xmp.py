@@ -47,16 +47,19 @@ def _check_destination(conn: sqlite3.Connection, out: Path) -> Path:
     return out
 
 
-def export_xmp(conn: sqlite3.Connection, out_dir: str | Path, include_auto_tags: bool = False,
-               everything: bool = False) -> dict:
-    out = _check_destination(conn, Path(out_dir))
-    t0 = time.time()
-    roots = {int(r[0]): Path(r[1]).name or f"root{r[0]}" for r in conn.execute("SELECT id, path FROM roots")}
-    rows = conn.execute(
-        """SELECT p.id, p.root_id, p.rel_path, p.width, p.height, p.rating, p.favorite, p.description,
-                  p.taken_ts, p.date_source, p.gps_lat, p.gps_lon, p.location_source, p.caption,
-                  pl.name AS place, pl.city, pl.admin1, pl.country
-           FROM photos p LEFT JOIN places pl ON pl.id = p.place_id WHERE p.status = 'ok'""").fetchall()
+def _load(conn: sqlite3.Connection, include_auto_tags: bool, photo_ids: list[int] | None = None):
+    """Rows, tags and named faces for XMP: every analysed photo, or just `photo_ids`."""
+    sql = """SELECT p.id, p.root_id, p.rel_path, p.width, p.height, p.rating, p.favorite, p.description,
+                    p.taken_ts, p.date_source, p.gps_lat, p.gps_lon, p.location_source, p.caption,
+                    pl.name AS place, pl.city, pl.admin1, pl.country
+             FROM photos p LEFT JOIN places pl ON pl.id = p.place_id WHERE p.status = 'ok'"""
+    rows = []
+    if photo_ids is None:
+        rows = conn.execute(sql).fetchall()
+    else:
+        for i in range(0, len(photo_ids), 900):
+            chunk = photo_ids[i:i + 900]
+            rows += conn.execute(sql + f" AND p.id IN ({','.join('?' * len(chunk))})", chunk).fetchall()
     tags_of: dict[int, list[str]] = {}
     min_score = AUTO_TAG_MIN_SCORE if include_auto_tags else 5.0   # user tags score 10
     for pid, name in conn.execute(
@@ -68,21 +71,41 @@ def export_xmp(conn: sqlite3.Connection, out_dir: str | Path, include_auto_tags:
             """SELECT f.photo_id, f.x1, f.y1, f.x2, f.y2, pe.name FROM faces f JOIN persons pe ON pe.id = f.person_id
                WHERE pe.name IS NOT NULL AND pe.merged_into IS NULL"""):
         faces_of.setdefault(int(f["photo_id"]), []).append(f)
+    return rows, tags_of, faces_of
 
+
+def _sidecar(r, tags_of, faces_of) -> tuple[str, bool]:
+    """-> (xml, whether the photo carries anything the user added)."""
+    pid = int(r["id"])
+    faces = faces_of.get(pid, [])
+    tags = sorted(set(tags_of.get(pid, [])))
+    corrected_date = r["date_source"] == "user"
+    corrected_place = r["location_source"] == "user"
+    has_user_data = bool(faces or tags or r["rating"] or r["description"] or corrected_date or corrected_place)
+    return _render(r, faces, tags, corrected_date, corrected_place), has_user_data
+
+
+def sidecars_for(conn: sqlite3.Connection, photo_ids: list[int], include_auto_tags: bool = False) -> dict[int, str]:
+    """XMP text for each of `photo_ids` (used when exporting copies of the photos themselves)."""
+    rows, tags_of, faces_of = _load(conn, include_auto_tags, photo_ids)
+    return {int(r["id"]): _sidecar(r, tags_of, faces_of)[0] for r in rows}
+
+
+def export_xmp(conn: sqlite3.Connection, out_dir: str | Path, include_auto_tags: bool = False,
+               everything: bool = False) -> dict:
+    out = _check_destination(conn, Path(out_dir))
+    t0 = time.time()
+    roots = {int(r[0]): Path(r[1]).name or f"root{r[0]}" for r in conn.execute("SELECT id, path FROM roots")}
+    rows, tags_of, faces_of = _load(conn, include_auto_tags)
     written = 0
     for r in rows:
-        pid = int(r["id"])
-        faces = faces_of.get(pid, [])
-        tags = sorted(set(tags_of.get(pid, [])))
-        corrected_date = r["date_source"] == "user"
-        corrected_place = r["location_source"] == "user"
-        has_user_data = faces or tags or r["rating"] or r["description"] or corrected_date or corrected_place
+        xml, has_user_data = _sidecar(r, tags_of, faces_of)
         if not (has_user_data or everything):
             continue
         dest = out / roots.get(r["root_id"], "library") / (r["rel_path"] + ".xmp")
         dest.parent.mkdir(parents=True, exist_ok=True)
         tmp = dest.with_name(dest.name + ".tmp")
-        tmp.write_text(_render(r, faces, tags, corrected_date, corrected_place), encoding="utf-8")
+        tmp.write_text(xml, encoding="utf-8")
         os.replace(tmp, dest)
         written += 1
     (out / "memoria-export.json").write_text(json.dumps({

@@ -14,7 +14,7 @@ from fastapi.staticfiles import StaticFiles
 
 from .. import auth
 from ..context import AppContext
-from . import images, routes_albums, routes_auth, routes_duplicates, routes_explore, routes_events, routes_library, routes_people, routes_search, routes_system
+from . import images, routes_albums, routes_auth, routes_duplicates, routes_explore, routes_export, routes_trash, routes_events, routes_library, routes_people, routes_search, routes_system
 from .deps import ApiState, set_state
 
 log = logging.getLogger(__name__)
@@ -31,9 +31,30 @@ def _warm_models(ctx: AppContext) -> None:
         log.warning("Could not warm the semantic model: %s", exc)
 
 
+def _trash_sweeper(ctx: AppContext, stop: threading.Event) -> None:
+    """Finish or undo a delete interrupted by a crash, then erase what has been in the trash
+    longer than Settings.trash_days — at start-up and every six hours. This is the only
+    automatic erase, and it only touches files the user deleted themselves."""
+    from ..engine import trash
+
+    first = True
+    while first or not stop.wait(6 * 3600):
+        first = False
+        try:
+            conn = ctx.connect()
+            try:
+                trash.reconcile(conn)
+                trash.purge_expired(ctx, conn)
+            finally:
+                conn.close()
+        except Exception:
+            log.exception("Trash sweep failed")
+
+
 def create_app(ctx: AppContext) -> FastAPI:
     set_state(ApiState(ctx))
     threading.Thread(target=_warm_models, args=(ctx,), daemon=True, name="warm-models").start()
+    threading.Thread(target=_trash_sweeper, args=(ctx, threading.Event()), daemon=True, name="trash-sweeper").start()
     app = FastAPI(title="Memoria", version=__import__("photointel").__version__, docs_url="/api/docs",
                   openapi_url="/api/openapi.json")
     # In a normal run the UI is served from this same origin, so no cross-origin
@@ -44,7 +65,7 @@ def create_app(ctx: AppContext) -> FastAPI:
                            allow_methods=["*"], allow_headers=["*"])
         log.warning("PHOTOINTEL_DEV=1: allowing cross-origin requests from the Vite dev server")
 
-    for router in (routes_auth.router, routes_explore.router, routes_library.router, routes_albums.router, routes_people.router, routes_events.router, routes_search.router,
+    for router in (routes_auth.router, routes_explore.router, routes_export.router, routes_trash.router, routes_library.router, routes_albums.router, routes_people.router, routes_events.router, routes_search.router,
                    routes_duplicates.router, routes_system.router, images.router):
         app.include_router(router, prefix="/api")
 

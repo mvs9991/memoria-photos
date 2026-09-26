@@ -10,7 +10,7 @@ import time
 from pathlib import Path
 
 from fastapi import APIRouter, HTTPException, Query
-from pydantic import BaseModel
+from pydantic import BaseModel, Field
 
 from .. import db
 from ..config import SUPPORTED_EXTENSIONS
@@ -52,6 +52,8 @@ class SettingsBody(BaseModel):
     ocr_enabled: bool | None = None
     takeout_import: bool | None = None
     stacks_enabled: bool | None = None
+    allow_delete: bool | None = None
+    trash_days: int | None = Field(None, ge=1, le=365)
 
 
 @router.post("/settings")

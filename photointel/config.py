@@ -52,6 +52,8 @@ class Settings:
     ocr_enabled: bool = True              # read text in likely-text photos after indexing (local, CPU)
     takeout_import: bool = True           # read Google Takeout sidecars/albums when present
     stacks_enabled: bool = True           # fold RAW+JPEG pairs and bursts into one timeline item
+    allow_delete: bool = True             # the Trash: deleting moves files there (see engine/trash.py)
+    trash_days: int = 30                  # days a deleted file can be restored before it is erased
     # Privacy: all external services are opt-in.
     allow_online_map_tiles: bool = False
     llm_enabled: bool = False
