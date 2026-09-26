@@ -3,10 +3,12 @@ import { useCallback, useEffect, useRef, useState } from "react";
 import { Link } from "react-router-dom";
 import { useMutation, useQuery, useQueryClient } from "@tanstack/react-query";
 import {
-  Trash2, RotateCw, Aperture, BookImage, Calendar, Camera, Check, ChevronLeft, ChevronRight, Copy, Download, EyeOff, Heart, Info,
+  Trash2, RotateCw, Scissors, SlidersHorizontal, Aperture, BookImage, Calendar, Camera, Check, ChevronLeft, ChevronRight, Copy, Download, EyeOff, Heart, Info,
   Layers, MapPin, Minus, Pencil, Plus, ScanText, Tag, Users, X, Sparkles, HardDrive,
 } from "lucide-react";
 import { TrashDialog, useAllowDelete } from "./TrashDialog";
+import { Editor } from "./Editor";
+import { useRole } from "../lib/hooks";
 import { api, downloadUrl, faceUrl, motionUrl, originalUrl, thumbUrl, videoUrl } from "../lib/api";
 import { clock, exposureLabel, formatBytes, formatDateTime, megapixels } from "../lib/format";
 import { AlbumPicker } from "./AlbumPicker";
@@ -39,7 +41,9 @@ export function PhotoViewer({ ids, index, onIndex, onClose }: Props) {
   const [hoverFaces, setHoverFaces] = useState(false);
   const [picker, setPicker] = useState(false);
   const [trashing, setTrashing] = useState(false);
+  const [editing, setEditing] = useState(false);
   const canDelete = useAllowDelete();
+  const role = useRole();
   const [playingLive, setPlayingLive] = useState(false);
   useEffect(() => setPlayingLive(false), [id]);
   const dragRef = useRef<{ x: number; y: number; ox: number; oy: number } | null>(null);
@@ -65,7 +69,7 @@ export function PhotoViewer({ ids, index, onIndex, onClose }: Props) {
   useEffect(() => {
     const onKey = (e: KeyboardEvent) => {
       if (["INPUT", "TEXTAREA"].includes((e.target as HTMLElement)?.tagName)) return;   // typing a tag
-      if (picker || trashing) return;
+      if (picker || trashing || editing) return;
       if (e.key === "Delete" && canDelete && photo && photo.status !== "trashed") { setTrashing(true); return; }
       if (e.key === "Escape") { zoom > 1 ? (setZoom(1), setOffset({ x: 0, y: 0 })) : onClose(); }
       else if (e.key === "ArrowRight") go(1);
@@ -202,6 +206,15 @@ export function PhotoViewer({ ids, index, onIndex, onClose }: Props) {
             aria-label="Download original">
             <Download size={18} />
           </a>
+          {photo && role !== "guest" && (
+            <button className="btn btn-quiet btn-icon" onClick={() => setEditing(true)}
+              title={photo.media_type === "video" ? "Trim — saved as a copy" : "Edit — saved as a copy"}
+              aria-label={photo.media_type === "video" ? "Trim video" : "Edit photo"}>
+              {photo.media_type === "video" ? <Scissors size={18} /> : <SlidersHorizontal size={18} />}
+            </button>
+          )}
+          {editing && photo && <Editor photoId={id} video={photo.media_type === "video"} duration={photo.duration}
+            onClose={() => setEditing(false)} />}
           {photo?.media_type === "image" && (
             <button className="btn btn-quiet btn-icon" onClick={() => rotate.mutate(90)}
               title="Rotate (R) — only in Memoria; the file is not changed" aria-label="Rotate">

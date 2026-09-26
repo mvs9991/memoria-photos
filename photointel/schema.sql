@@ -430,3 +430,12 @@ CREATE TABLE IF NOT EXISTS users (
     last_login_at REAL,
     pw_changed_at REAL NOT NULL DEFAULT 0           -- sessions issued before this are refused
 );
+
+-- Edited copies and trimmed videos made in the app (the original is only ever read).
+CREATE TABLE IF NOT EXISTS edits (
+    id          INTEGER PRIMARY KEY,
+    original_id INTEGER NOT NULL,
+    path        TEXT NOT NULL,
+    kind        TEXT NOT NULL,                     -- photo | trim
+    created_at  REAL NOT NULL
+);

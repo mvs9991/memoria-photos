@@ -404,3 +404,54 @@ def test_smart_albums_and_revoked_links_take_no_uploads(ctx, library, client):
     token = client.post(f"/api/albums/{album}/share", json={"allow_upload": True}).json()["token"]
     client.delete(f"/api/shares/{token}")
     assert client.post(f"/api/share/{token}/upload", files=[("files", ("a.jpg", _jpeg(), "image/jpeg"))]).status_code == 404
+
+
+# ----------------------------------------------------------------- editing as copies
+
+def test_an_edit_is_saved_as_a_new_photo_and_the_original_is_untouched(ctx, library, client, monkeypatch):
+    from photointel.pipeline import jobs
+
+    monkeypatch.setattr(jobs, "_spawn", lambda args: None)
+    index(ctx, library)
+    src = library / "Trips/Goa/IMG_x0.jpg"                     # 800 x 600, with EXIF date and GPS
+    before = sha(src)
+    pid = pid_of(ctx, "IMG_x0.jpg")
+    spec = {"rotate": 90, "crop": [0.0, 0.25, 1.0, 0.75], "brightness": 20, "filter": "mono"}
+    prev = Image.open(io.BytesIO(client.post(f"/api/photos/{pid}/edit/preview", json=spec).content))
+    assert prev.mode == "RGB" and prev.width > prev.height                # turned, then a wide crop
+    out = client.post(f"/api/photos/{pid}/edit", json=spec).json()
+    edited = Path(out["path"])
+    assert edited.name == "IMG_x0 (edited).jpg" and "Edits" in edited.parts
+    img = Image.open(edited)
+    assert (img.width, img.height) == (600, 400)                           # 600x800 turned, middle half kept
+    r, g, b = img.convert("RGB").getpixel((5, 5))
+    assert r == g == b                                                      # mono
+    exif = img.getexif()
+    assert exif.get_ifd(0x8769).get(36867) and exif.get(0x0112, 1) == 1     # date kept, orientation reset
+    assert sha(src) == before                                               # the original is untouched
+    again = client.post(f"/api/photos/{pid}/edit", json=spec).json()
+    assert Path(again["path"]).name == "IMG_x0 (edited) (2).jpg"            # a second edit never overwrites
+    assert client.post(f"/api/photos/{pid}/edit", json={}).status_code == 400          # nothing changed
+    assert client.post(f"/api/photos/{pid}/edit", json={"crop": [0.5, 0.5, 0.4, 0.9]}).status_code == 400
+
+
+def test_a_trim_copies_part_of_a_video_without_touching_it(ctx, tmp_path, client, monkeypatch):
+    import av
+
+    from photointel.pipeline import jobs
+    from tests.test_media_and_organisation import make_video
+
+    monkeypatch.setattr(jobs, "_spawn", lambda args: None)
+    lib = tmp_path / "lib"
+    make_video(lib / "clip.mp4", seconds=6, fps=10)
+    index(ctx, lib)
+    before = sha(lib / "clip.mp4")
+    pid = pid_of(ctx, "clip.mp4")
+    out = client.post(f"/api/photos/{pid}/trim", json={"start": 2.0, "end": 4.0}).json()
+    trimmed = Path(out["path"])
+    assert trimmed.name == "clip (trim).mp4"
+    with av.open(str(trimmed)) as c:
+        seconds = float(c.duration / av.time_base)
+    assert 1.5 <= seconds <= 4.5                    # from the key frame at or before 2 s, to 4 s
+    assert sha(lib / "clip.mp4") == before
+    assert client.post(f"/api/photos/{pid}/trim", json={"start": 3, "end": 2}).status_code == 400

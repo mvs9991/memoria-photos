@@ -68,3 +68,82 @@ def backup_status():
     state = get_state()
     return {"last": backup_mod.last_backup(state.conn()), "folder": state.ctx.settings.backup_folder,
             "every_days": state.ctx.settings.backup_every_days}
+
+
+# ---------------------------------------------------------------- editing as copies
+
+class EditBody(BaseModel):
+    rotate: int = 0
+    flip: bool = False
+    crop: list[float] | None = None
+    brightness: int = 0
+    contrast: int = 0
+    saturation: int = 0
+    warmth: int = 0
+    filter: str = "none"
+    auto: bool = False
+
+
+def _edit_spec(body: EditBody):
+    from ..engine.editor import EditError, EditSpec
+
+    try:
+        return EditSpec.from_dict(body.model_dump())
+    except (EditError, TypeError, ValueError) as exc:
+        raise HTTPException(400, str(exc))
+
+
+@router.post("/photos/{photo_id}/edit/preview")
+def edit_preview(photo_id: int, body: EditBody):
+    from fastapi.responses import Response
+
+    from ..engine.editor import EditError, preview
+    from .deps import guard_locked
+
+    conn = get_state().conn()
+    row = conn.execute("SELECT locked, status FROM photos WHERE id = ?", (photo_id,)).fetchone()
+    if row is None:
+        raise HTTPException(404, "photo not found")
+    guard_locked(row)
+    try:
+        return Response(preview(conn, photo_id, _edit_spec(body)), media_type="image/jpeg",
+                        headers={"Cache-Control": "no-store"})
+    except EditError as exc:
+        raise HTTPException(400, str(exc))
+
+
+@router.post("/photos/{photo_id}/edit")
+def edit_save(photo_id: int, body: EditBody):
+    """Save the edit as a new photo; the original is not touched."""
+    from ..engine.editor import EditError, save_edit
+
+    state = get_state()
+    conn = state.conn()
+    try:
+        out = save_edit(state.ctx, conn, photo_id, _edit_spec(body))
+    except EditError as exc:
+        raise HTTPException(400, str(exc))
+    _, root = uploads_mod.ensure_upload_root(state.ctx, conn)
+    out["job_id"] = jobs.spawn_index_job(state.ctx, {"kind": "index", "roots": [str(root)]})
+    return out
+
+
+class TrimBody(BaseModel):
+    start: float
+    end: float
+
+
+@router.post("/photos/{photo_id}/trim")
+def trim(photo_id: int, body: TrimBody):
+    """Save the part of a video between two times as a new video; the original is not touched."""
+    from ..engine.editor import EditError, trim_video
+
+    state = get_state()
+    conn = state.conn()
+    try:
+        out = trim_video(state.ctx, conn, photo_id, body.start, body.end)
+    except EditError as exc:
+        raise HTTPException(400, str(exc))
+    _, root = uploads_mod.ensure_upload_root(state.ctx, conn)
+    out["job_id"] = jobs.spawn_index_job(state.ctx, {"kind": "index", "roots": [str(root)]})
+    return out
