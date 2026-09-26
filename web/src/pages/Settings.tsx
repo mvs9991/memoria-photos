@@ -92,7 +92,7 @@ function OwnerSettings() {
       </div>
 
       <section className="card setting-card">
-        <SectionHeader title="Photo folders" sub="Memoria reads these folders and never writes to them." />
+        <SectionHeader title="Photo folders" sub="Memoria never changes a photo in these folders. It adds new files only to the upload folder (uploads, edits, creations), and moves a file only when you delete it — into the Trash." />
         <div className="root-list">
           {settings.data.roots.map((r: any) => (
             <div key={r.id} className="root-row">

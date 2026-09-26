@@ -26,7 +26,7 @@ tried and rejected, and what is still unverified. `README.md` documents the prod
 ## Commands
 
 ```bash
-.venv/Scripts/python.exe -m pytest -q          # 204 tests, ~95s, no GPU needed
+.venv/Scripts/python.exe -m pytest -q          # 236 tests, ~95s, no GPU needed
 python -m photointel add-root "D:/Photos"
 python -m photointel index                     # resumable; only processes what changed
 python -m photointel index --post-only --full-recluster   # after changing clustering settings
@@ -34,7 +34,9 @@ python -m photointel ocr [--all]               # read text in photos (post-index
 python -m photointel export-xmp <folder>       # XMP sidecars for other apps (refuses folders in a root)
 python -m photointel import-gpx <files>        # GPS tracks, then --post-only --stages gpx,geocode,events,search-index
 python -m photointel export <folder> --person A --person B   # copies only; --people-mode each|together|any
-python -m photointel set-password              # required before `serve --host 0.0.0.0` (or pass --insecure)
+python -m photointel set-password              # required before `serve --host 0.0.0.0` (or accounts, or --insecure)
+python -m photointel backup [<folder>]         # copy-only mirror of every root + the database to another drive
+python -m photointel accounts list|reset-password <name>|reset-pin   # recovery at the computer
 python -m photointel serve                     # http://127.0.0.1:8765
 python eval/inspect_library.py --data ./data   # sanity report for a real library
 ```

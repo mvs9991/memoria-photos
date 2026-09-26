@@ -71,6 +71,17 @@ photos ──► scan ──► decode / EXIF / hash / thumbnail ──► faces
 | **Export** | Copy the original files of a selection, an album, an event, a year or month, or **people** — a folder for each person, only photos where they are together, or any of them — to a folder or as a .zip download. Sorted by date, by the original folders, or all in one; Live-photo videos, RAW/burst frames and XMP sidecars optional. Copies only, byte-exact; re-running skips what is already there. |
 | **Trash** | Delete from a selection, the viewer (Delete key) or Duplicates. Files go to a 30-day Trash on the same drive and can be restored to where they were; only then are they erased. Nothing is ever deleted automatically, and deleting can be switched off. |
 | **On your phone** | Open it from any phone or laptop on your Wi-Fi and "Add to Home Screen" — it runs full-screen like an app, from your own computer. See [Use it from your phone](#use-it-from-your-phone). |
+| **Upload from your phone** | An Upload page (and "Add to Home Screen") for picking photos and videos from a phone's camera roll. Filed by the date each was taken; a photo whose bytes are already in the library is skipped, so uploading a whole camera roll twice is safe. |
+| **Automatic** | While it runs, Memoria looks for new photos every hour (configurable) and backs up to another drive weekly once a backup folder is set. |
+| **Backup** | Copies every photo folder and Memoria's own database to another drive, checking each copy against its fingerprint. Copy-only: nothing in the backup is ever deleted, so a photo you delete is still there. |
+| **Family accounts** | Optional logins over one shared library: *owner* (everything), *family* (browse, upload, albums, downloads — no deleting or settings), *guest* (look and download). |
+| **Locked folder** | Move private photos behind a PIN: they vanish from every list, search, person, map and share, and their images are refused until an owner opens the folder on that device for 15 minutes. |
+| **Archive** | Out of the timeline, memories and the photo frame; still in search, albums and people. |
+| **Edit & trim, as copies** | Crop (free or 1:1, 4:3, 3:2, 16:9), rotate, flip, auto, light, contrast, colour, warmth and filters; trim a video without re-encoding. Saved as a new file — the original is only read. Rotating in the viewer is kept in Memoria and never written to the file. |
+| **Create** | A collage, a looping animation (made for bursts) or a memory movie from any selection. |
+| **Shared albums people can add to** | A share link can let visitors upload their photos to that album — a wedding, a trip with friends. |
+| **iCloud export** | Reads an iCloud Photos download: favourites, hidden photos (into the Locked folder), recently deleted (hidden), albums, and dates as a last resort. |
+| **Colours & pets** | "blue photos", "red and white"; a Pets collection from the tagger's dogs and cats. |
 | **Web gallery export** | Any album as a folder with an `index.html` that opens offline in any browser or on any web host. |
 | **Quality** | Sharpness, exposure, resolution and an aesthetic proxy, so "best photos of X" means something. |
 | **Timeline / Map / Memories** | Year → month → event browsing, a map of everywhere you've been, and an "on this day" home screen. |
@@ -136,9 +147,12 @@ Re-running `index` only processes what is new or changed.
 | `set-password` | Require a password to open the web app (empty input removes it) |
 | `export <folder> --person NAME [--person NAME2] [--people-mode each\|together\|any]` | Copy originals of people (or `--album`, `--event`, `--year [--month]`) to a folder; `--layout date\|flat\|original`, `--xmp` |
 | `trash list` / `trash restore <ids>` / `trash purge-expired` | Look at or restore the Trash (deleting itself is only done in the app) |
+| `backup [<folder>]` | Copy every photo folder and the database to another drive (copy-only) |
+| `accounts list` / `accounts reset-password <name>` / `accounts reset-pin` | At the computer: see accounts, recover a forgotten password or Locked-folder PIN |
 | `status` | Library summary |
 | `serve --port 8765` | Run the web app |
-| `serve --host 0.0.0.0` | Serve to your network — refused without a password unless you add `--insecure` |
+| `serve --host 0.0.0.0` | Serve to your network — refused without a password or accounts unless you add `--insecure` |
+| `serve --ssl-cert c.pem --ssl-key k.pem` | Serve HTTPS (e.g. with a certificate from `tailscale cert`) |
 
 Everything a library owns lives in one data directory (`./data`, or `--data` / `$PHOTOINTEL_DATA`).
 A few things are properties of the *machine* rather than the library, so a second library can
@@ -240,22 +254,25 @@ the *same* structured filter, and names it invents that aren't in your library a
 Memoria is a website served by your own computer, so every phone, tablet and laptop in the house
 can use it — no cloud account, no subscription, and your photos never leave your network.
 
-1. On the computer with the photos: `python -m photointel set-password`, then
-   `python -m photointel serve --host 0.0.0.0`. Find the computer's local IP (`ipconfig` on
-   Windows, e.g. `192.168.1.20`).
-2. On the phone, on the same Wi-Fi: open `http://192.168.1.20:8765` and log in.
+1. On the computer with the photos: `python -m photointel set-password` (and, for a family, turn
+   on accounts in Settings → People who can sign in), then `python -m photointel serve --host 0.0.0.0`.
+   Find the computer's local IP (`ipconfig` on Windows, e.g. `192.168.1.20`).
+2. On the phone, on the same Wi-Fi: open `http://192.168.1.20:8765` and sign in.
 3. **Add to Home Screen** (Safari: Share → Add to Home Screen; Chrome: ⋮ → Add to Home screen). It
-   gets the Memoria icon and opens full-screen like an app.
-4. Downloads (a photo, or an export as .zip) land on the phone; "Copy to a folder" writes on the
+   gets the Memoria icon and opens full-screen like an app. Swipe between photos, pinch to zoom,
+   swipe down to close.
+4. **Upload** sends photos from the camera roll to the computer (already-uploaded ones are skipped).
+   Downloads (a photo, or an export as .zip) land on the phone; "Copy to a folder" writes on the
    computer.
 
-Away from home, do not forward a port on your router: the app has a password but no HTTPS of its
-own. Use a private VPN such as [Tailscale](https://tailscale.com) or WireGuard (free for personal use),
-or put an HTTPS reverse proxy in front. The computer has to be on for the phone to reach it.
+Away from home, do not forward a port on your router. Use a private VPN such as
+[Tailscale](https://tailscale.com) or WireGuard (free for personal use). With Tailscale,
+`tailscale cert` gives the computer a trusted certificate: `serve --ssl-cert … --ssl-key …` then
+serves HTTPS. The computer has to be on for the phone to reach it.
 
-Getting new phone photos *into* the library is not built in yet; a folder-sync tool such as
-[Syncthing](https://syncthing.net) (free, open source, phone → computer over your Wi-Fi) into a folder
-Memoria indexes does it today.
+Uploading is something you start; a browser cannot back up a phone in the background. For fully
+automatic phone backup, a folder-sync app such as [Syncthing](https://syncthing.net) (free, open
+source, phone → computer over your Wi-Fi) into a folder Memoria indexes works alongside it.
 
 ## Privacy
 
@@ -270,9 +287,11 @@ Memoria indexes does it today.
   the Trash on the same drive, stays restorable for 30 days (Settings → Trash), and only then is
   erased. No automatic process — indexing, duplicates, clean-up lists, the Claude layer — can delete;
   a test fails if any code path other than the Trash removes a file. "Hide" only affects your views.
-- The app listens on this machine only. Serving it to a network requires a password (PBKDF2, signed
-  session cookie). Share links expose one album and nothing else, and can be revoked. There is no
-  built-in HTTPS: anything beyond a home network should go through a reverse proxy that adds it.
+- The app listens on this machine only. Serving it to a network requires a password or accounts
+  (PBKDF2, signed session cookies; a password change ends that account's other sessions). Every API
+  request is checked against the signed-in account's role. Share links expose one album and nothing
+  else, and can be revoked. HTTPS is available with your own certificate (`serve --ssl-cert`).
+- The Locked folder hides photos from people using Memoria; it does not encrypt the files on disk.
 
 ---
 
@@ -406,6 +425,13 @@ against COCO instance annotations), `embed_lfw.py`, `scale_benchmark.py`.
 - **Clean-up lists are heuristics, not measured detectors.** "Possibly blurry" is a sharpness score
   below 35, "large" is ≥ 20 MB, memes and documents come from the tagger. They are review lists; none
   hides anything by itself.
+- **iCloud import is untested on a real export.** The CSV layout comes from Apple's description of
+  the download; it is parsed tolerantly and exercised on a constructed export only.
+- **Colour names are judgement, not measured**: a colour counts when it covers ≥ 12 % of the photo
+  (black, white and grey ≥ 30 %). Pets are the tagger's dogs and cats; which pet is not recognised.
+- **Backup and trash across a second drive** are tested with the paths forced, not on real external
+  disks; phone uploads are tested from a desktop browser, not from an iPhone (Safari may convert
+  HEIC to JPEG on upload depending on its settings, which defeats the duplicate check for those).
 - **Burst stacking thresholds are unmeasured.** Frames must be ≤ 1.5 s apart, within 18 bits of pHash
   and ≥ 0.93 embedding similarity; chosen from the duplicate finder's existing bars and checked on
   generated frames only. RAW+JPEG pairing is exercised with a stand-in file name, since no real RAW
@@ -480,7 +506,7 @@ photointel/
   api/        app.py routes_*.py images.py
 web/          React + TypeScript UI
 eval/         dataset builders, calibration, end-to-end evaluation
-tests/        204 tests, no GPU required
+tests/        236 tests, no GPU required
 ```
 
 The layering is deliberate: vision → features → database → relationship engines → search → UI.
@@ -493,7 +519,7 @@ face recogniser.
 python -m pytest tests/ -q
 ```
 
-They stub the neural nets, so all 204 tests run on CPU in about 70 seconds and still cover
+They stub the neural nets, so all 236 tests run on CPU in about 70 seconds and still cover
 scanning, incremental re-indexing, moves, decoding, metadata, clustering, corrections, events,
 duplicates, search parsing and the HTTP API. The fixtures seed their randomness from stable
 hashes, so a failure reproduces on the next run instead of disappearing.

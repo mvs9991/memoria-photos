@@ -58,7 +58,7 @@ photointel/
   api/       app.py routes_*.py images.py
 web/         React + TypeScript UI (Vite)
 eval/        dataset builders, calibration, evaluation, library inspector
-tests/       204 tests, no GPU required
+tests/       236 tests, no GPU required
 ```
 
 **The indexing pipeline** is a feeder thread → N CPU worker threads (read, hash, decode, EXIF,
@@ -314,6 +314,33 @@ All 14 guards were mutation-checked: each test fails without its guard.
 Building it exposed a latent bug: `update_person_stats(conn, person_ids)` had never been called with ids
 and produced `WHERE … WHERE`. Fixed; `test_person_counts_follow_the_trash` failed before the fix.
 
+**Access is decided in one place.** `api/app.py`'s middleware resolves the account (signed cookie,
+millisecond issue time compared with that account's `pw_changed_at`, so a password change ends its
+sessions even within the same second), then `accounts.allowed(role, method, path)` — an allowlist by
+path prefix, owner-only for anything that deletes, changes settings, writes to the server's disks or
+opens the Locked folder. Tests in `tests/test_v6_access.py` were mutation-checked. Without accounts the
+old single password works as before; with neither, everyone is the owner (loopback only by default).
+
+**Locked photos have their own status.** `status = 'locked'` keeps them out of every view that lists
+`'ok'` photos without touching those queries; `deps.guard_locked` makes every endpoint that serves a
+photo's pixels, details, video or face crop answer 404 unless an owner opened the folder in that
+browser (15-minute token; a PIN change closes it everywhere). The indexer, scanner and moved-file
+logic keep `locked` through re-analysis. Two layers enforce owner-only opening (middleware and guard);
+a test covers the shared-tablet case where a family member signs in on the owner's open browser.
+
+**Uploads, edits and creations are the only files Memoria writes into a root**, and only into the
+upload folder (`Settings.upload_folder`, default `<data>/uploads`, registered as a root). Each is
+written to a unique temp file (`mkstemp`; a clock-based name collided on Windows and mixed two photos'
+bytes — found in a demo run by hash check) and renamed onto a name claimed with exclusive create, so
+nothing is ever overwritten. Duplicates by sha256 against the library and the `uploads` log are
+skipped; a shared-album upload that is a duplicate still joins the album.
+
+**Backup is copy-only.** `engine/backup.py` walks every root (skipping `.memoria-trash` and
+`.incoming`), copies new/changed files through `.part` with a hash computed while reading and compared
+with the indexed sha256, never replaces a newer backup copy with an older file, and never deletes. The
+database is snapshotted with SQLite's backup API. The scheduler (`photointel/scheduler.py`) runs it
+weekly once a folder is set, and looks for new photos hourly; `due()` is pure and tested.
+
 **Export only copies.** `engine/export.py` resolves a spec (ids, album, event, year/month, people in
 `each`/`together`/`any` mode) to files, copies with `shutil.copy2` into a `.part` then renames, and skips
 a destination that already holds the same bytes (sha256), so a re-run resumes and identical copies of
@@ -456,6 +483,15 @@ the future, everything collapsing into one event, fuzzy duplicate thresholds too
 - **Trash across drives:** a photo on a different drive from the data directory is trashed into
   `<root>/.memoria-trash`. Tested with the path forced, not on a real second drive; a read-only or
   network root makes the rename fail, and the file is then reported as not moved (never forced).
+- **iCloud import** is tested on a constructed export only (CSV layout from Apple's description).
+- **Rotation** is Memoria-only: exports copy the original bytes, so another app shows the photo
+  unturned unless the user saves an edited copy (Edit → rotate → Save as a copy).
+- **Colour thresholds** (12 % / 30 %) and the Pets collection (tagger's dog/cat) are unmeasured.
+- **Phone upload from iOS Safari** is untested; Safari may convert HEIC to JPEG on upload.
+- Found and fixed in v6 browser runs and tests: re-indexing after a metadata upgrade turned trashed
+  photos into errors; two concurrent uploads could register the upload folder twice (UNIQUE error)
+  or share a temp file; `update_person_stats(person_ids)` produced invalid SQL (never called with ids
+  before); a fixed-aspect crop chosen before a turned preview arrived was not square.
 - **Zip downloads over 4 GB** use zip64 and are untested at that size; the UI suggests copying to a
   folder instead.
 - **Auth has had no security review.** It is PBKDF2 (240k rounds) + an HMAC session cookie with no
@@ -471,7 +507,7 @@ the future, everything collapsing into one event, fuzzy duplicate thresholds too
 
 ## 10. Working notes
 
-- Run the suite with `.venv/Scripts/python.exe -m pytest -q`. 204 tests, ~95 s, no GPU needed —
+- Run the suite with `.venv/Scripts/python.exe -m pytest -q`. 236 tests, ~95 s, no GPU needed —
   the neural nets are replaced by deterministic fakes.
 - Test fixtures seed randomness from `zlib.crc32` of the **file name**, not `hash()` (salted per
   process) and not the full path (contains pytest's per-run tmp counter). Both made failures
