@@ -221,5 +221,6 @@ def archive(body: ArchiveBody):
     n = conn.execute(f"UPDATE photos SET archived = ? WHERE id IN ({marks})", (int(body.archived), *ids)).rowcount
     db.audit(conn, "photos_archived" if body.archived else "photos_unarchived", "photo", None, {"photos": ids[:2000]})
     conn.commit()
+    visibility.refresh(conn, ids)
     return {"changed": n}
 

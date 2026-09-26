@@ -197,6 +197,7 @@ ALLOWED_REMOVALS = {
     "video.py": 2,                      # transcode temp files
     "engine/uploads.py": 1,             # an upload's own temp file in <upload folder>/.incoming
     "engine/editor.py": 1,              # a trim's own .part file when nothing was copied
+    "api/images.py": 1,                 # a rotated thumbnail's temp file that lost a race
 }
 REMOVAL = re.compile(r"\.unlink\(|os\.remove\(|os\.unlink\(|rmtree\(|\.rmdir\(|os\.rename\(|\.rename\(|send2trash")
 

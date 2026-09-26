@@ -111,4 +111,7 @@ def hide_copies(group_id: int, body: HideBody):
     conn.execute("UPDATE dup_groups SET review_status='reviewed' WHERE id=?", (group_id,))
     db.audit(conn, "duplicates_hidden", "dup_group", group_id, {"photos": body.photo_ids})
     conn.commit()
+    from ..engine import visibility
+
+    visibility.refresh(conn, body.photo_ids)      # a hidden stack cover hands over its stack
     return {"hidden": n, "note": "Photos were hidden from the library; the original files were not modified."}

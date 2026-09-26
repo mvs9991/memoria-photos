@@ -24,10 +24,15 @@ _NAME = re.compile(r"^[\w .@-]{2,40}$", re.U)
 # Paths only an owner may use at all, and ones only an owner may change.
 OWNER_ONLY = ("/api/trash", "/api/locked", "/api/accounts", "/api/roots", "/api/cache", "/api/backup",
               "/api/export/xmp", "/api/gpx", "/api/photos/lock", "/api/photos/unlock", "/api/auth/password",
-              "/api/audit", "/api/errors")
-OWNER_ONLY_WRITES = ("/api/settings", "/api/jobs", "/api/browse")
+              "/api/audit", "/api/errors", "/api/browse")
+OWNER_ONLY_WRITES = ("/api/settings", "/api/jobs")
 OPEN_TO_ALL = ("/api/accounts/me",)
 GUEST_POSTS = ("/api/export/zip", "/api/export/preview")
+
+
+def _ms_now() -> float:
+    """Seconds, truncated to the millisecond — the precision session cookies carry."""
+    return int(time.time() * 1000) / 1000
 
 
 class AccountError(ValueError):
@@ -69,8 +74,9 @@ def enable(ctx, conn: sqlite3.Connection, owner_name: str, owner_password: str |
     stored = auth.hash_password(owner_password) if owner_password else ctx.settings.access_password_hash
     if not stored:
         raise AccountError("set a password for yourself first")
-    uid = conn.execute("INSERT INTO users(username, password_hash, role, created_at) VALUES (?,?,?,?)",
-                       (owner_name.strip(), stored, "owner", time.time())).lastrowid
+    now = _ms_now()
+    uid = conn.execute("INSERT INTO users(username, password_hash, role, created_at, pw_changed_at) VALUES (?,?,?,?,?)",
+                       (owner_name.strip(), stored, "owner", now, now)).lastrowid
     db.audit(conn, "accounts_enabled", "user", uid, {"owner": owner_name})
     conn.commit()
     return get(conn, uid)
@@ -79,8 +85,11 @@ def enable(ctx, conn: sqlite3.Connection, owner_name: str, owner_password: str |
 def create(conn: sqlite3.Connection, username: str, password: str, role: str = "family") -> dict:
     _check(username, password, role)
     try:
-        uid = conn.execute("INSERT INTO users(username, password_hash, role, created_at) VALUES (?,?,?,?)",
-                           (username.strip(), auth.hash_password(password), role, time.time())).lastrowid
+        # pw_changed_at = now: a session cookie issued before this account existed (for a deleted
+        # account whose id SQLite may hand out again) can never sign in as it.
+        now = _ms_now()
+        uid = conn.execute("INSERT INTO users(username, password_hash, role, created_at, pw_changed_at) "
+                           "VALUES (?,?,?,?,?)", (username.strip(), auth.hash_password(password), role, now, now)).lastrowid
     except sqlite3.IntegrityError:
         raise AccountError("that name is taken")
     db.audit(conn, "account_created", "user", uid, {"username": username, "role": role})
@@ -104,7 +113,7 @@ def update(conn: sqlite3.Connection, uid: int, acting_uid: int | None, role: str
         conn.execute("UPDATE users SET role = ? WHERE id = ?", (role, uid))
     if password:        # and every session of that account ends
         conn.execute("UPDATE users SET password_hash = ?, pw_changed_at = ? WHERE id = ?",
-                     (auth.hash_password(password), time.time(), uid))
+                     (auth.hash_password(password), _ms_now(), uid))
     if disabled is not None:
         conn.execute("UPDATE users SET disabled = ? WHERE id = ?", (int(disabled), uid))
     db.audit(conn, "account_changed", "user", uid, {"role": role, "password": bool(password), "disabled": disabled})
@@ -138,7 +147,9 @@ def from_session(ctx, conn: sqlite3.Connection, token: str | None) -> dict | Non
         return None
     uid, issued = got
     r = conn.execute("SELECT id, username, role, disabled, pw_changed_at FROM users WHERE id = ?", (uid,)).fetchone()
-    if r is None or r["disabled"] or issued <= (r["pw_changed_at"] or 0):
+    # Both times are whole milliseconds: a session from before the account (re)started is refused,
+    # one issued in the same millisecond as the change (the one handed out with it) is not.
+    if r is None or r["disabled"] or issued < (r["pw_changed_at"] or 0):
         return None
     return {"id": r["id"], "username": r["username"], "role": r["role"]}
 

@@ -39,6 +39,36 @@ def _key(members: list[int]) -> str:
     return hashlib.sha1(",".join(map(str, sorted(members))).encode()).hexdigest()[:16]
 
 
+def chosen_covers(conn: sqlite3.Connection) -> set[int]:
+    return {int(x) for x in json.loads(db.get_meta(conn, "stack_cover_choices", "[]") or "[]")}
+
+
+def reassign_covers(conn: sqlite3.Connection, photo_ids: list[int]) -> int:
+    """Stack covers among `photo_ids` that have left the timeline (trashed, locked, hidden or
+    archived) hand the stack to its best remaining frame, so the rest of a burst or RAW+JPEG
+    pair does not vanish with them until the next rebuild."""
+    moved = 0
+    for cid in photo_ids:
+        c = conn.execute("SELECT status, hidden, archived, stack_id FROM photos WHERE id = ?", (cid,)).fetchone()
+        if c is None or c["stack_id"] != cid:
+            continue
+        if c["status"] == "ok" and not c["hidden"] and not c["archived"]:
+            continue
+        best = conn.execute(
+            """SELECT id FROM photos WHERE stack_id = ? AND id != ? AND status = 'ok' AND hidden = 0 AND archived = 0
+               ORDER BY rating DESC, COALESCE(quality_score, 0) DESC, id LIMIT 1""", (cid, cid)).fetchone()
+        if best is None:
+            conn.execute("UPDATE photos SET stack_id = NULL, stack_hidden = 0 WHERE stack_id = ?", (cid,))
+        else:
+            new = int(best[0])
+            conn.execute("UPDATE photos SET stack_id = ?, stack_hidden = CASE WHEN id = ? THEN 0 ELSE 1 END "
+                         "WHERE stack_id = ?", (new, new, cid))
+        moved += 1
+    if moved:
+        conn.commit()
+    return moved
+
+
 def dismissed(conn: sqlite3.Connection) -> set[str]:
     return set(json.loads(db.get_meta(conn, "stacks_dismissed", "[]") or "[]"))
 
@@ -52,8 +82,10 @@ def build_stacks(conn: sqlite3.Connection, enabled: bool = True) -> dict:
     rows = conn.execute(
         """SELECT id, root_id, folder, filename, ext, taken_ts, date_source, camera_model, phash,
                   quality_score, rating, source_kind
-           FROM photos WHERE status = 'ok' AND hidden = 0 AND live_component = 0 AND media_type = 'image'
+           FROM photos WHERE status = 'ok' AND hidden = 0 AND archived = 0 AND live_component = 0
+             AND media_type = 'image'
            ORDER BY taken_ts, id""").fetchall()
+    chosen = chosen_covers(conn)
     skip = dismissed(conn)
     vec = _embeddings(conn)
     stacks: list[tuple[str, list]] = []
@@ -102,7 +134,10 @@ def build_stacks(conn: sqlite3.Connection, enabled: bool = True) -> dict:
         ids = [m["id"] for m in members]
         if _key(ids) in skip:
             continue
-        if kind == "raw":
+        picked = [m for m in members if m["id"] in chosen]
+        if picked:                         # the cover the user chose outlives a rebuild
+            cover = picked[0]
+        elif kind == "raw":
             cover = members[0]
         else:
             cover = max(members, key=lambda m: (m["rating"] or 0, m["quality_score"] or 0, -m["id"]))
@@ -140,8 +175,11 @@ def set_cover(conn: sqlite3.Connection, photo_id: int) -> None:
     if row is None or row[0] is None:
         raise ValueError("photo is not in a stack")
     old = int(row[0])
+    siblings = {int(r[0]) for r in conn.execute("SELECT id FROM photos WHERE stack_id = ?", (old,))}
     conn.execute("UPDATE photos SET stack_id = ?, stack_hidden = CASE WHEN id = ? THEN 0 ELSE 1 END "
                  "WHERE stack_id = ?", (photo_id, photo_id, old))
+    choices = (chosen_covers(conn) - siblings) | {photo_id}
+    db.set_meta(conn, "stack_cover_choices", json.dumps(sorted(choices)))
     db.audit(conn, "stack_cover", "photo", photo_id, {"previous": old})
     conn.commit()
 

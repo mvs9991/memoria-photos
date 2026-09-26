@@ -9,6 +9,7 @@ import io
 import json
 import logging
 import os
+import tempfile
 from pathlib import Path
 
 from fastapi import APIRouter, HTTPException, Query, Response
@@ -69,16 +70,26 @@ def thumb(photo_id: int, s: str = Query("m", pattern="^(sm|m|l)$")):
     # A turned copy, cached per photo and angle (duplicates share the unturned one by hash).
     ext = "jpg" if s == "l" else "webp"
     cache = get_state().ctx.paths.thumbs / "rotated" / f"{row['sha256'] or 'x'}_{photo_id}_{s}_{rot}.{ext}"
+    media = "image/jpeg" if s == "l" else "image/webp"
     if not cache.exists():
         plain = _thumb_plain(photo_id, s, row)
         data = Path(plain.path).read_bytes() if isinstance(plain, FileResponse) else plain.body
         img = rotate_image(Image.open(io.BytesIO(data)).convert("RGB"), rot)
+        buf = io.BytesIO()
+        img.save(buf, "JPEG" if s == "l" else "WEBP", quality=86 if s == "l" else 78)
         cache.parent.mkdir(parents=True, exist_ok=True)
-        tmp = cache.with_name(cache.name + ".tmp")
-        img.save(tmp, "JPEG" if s == "l" else "WEBP", quality=86 if s == "l" else 78)
-        os.replace(tmp, cache)
-    return FileResponse(cache, media_type="image/jpeg" if s == "l" else "image/webp",
-                        headers={"Cache-Control": IMMUTABLE})
+        # A unique temp per request: several requests for one photo can arrive together (the
+        # viewer asks for the preview and the original at once).
+        fd, tmp = tempfile.mkstemp(dir=cache.parent, suffix=".tmp")
+        with os.fdopen(fd, "wb") as f:
+            f.write(buf.getvalue())
+        try:
+            os.replace(tmp, cache)
+        except OSError:                    # another request put it there first (Windows: in use)
+            Path(tmp).unlink(missing_ok=True)
+        if not cache.exists():
+            return Response(buf.getvalue(), media_type=media, headers={"Cache-Control": IMMUTABLE})
+    return FileResponse(cache, media_type=media, headers={"Cache-Control": IMMUTABLE})
 
 
 def _thumb_plain(photo_id: int, s: str, row) -> Response:

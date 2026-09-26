@@ -400,6 +400,9 @@ def hide_photos(body: HideBody):
     n = conn.execute(f"UPDATE photos SET hidden = ? WHERE id IN ({marks})", (int(body.hidden), *body.photo_ids)).rowcount
     db.audit(conn, "photos_hidden" if body.hidden else "photos_unhidden", "photo", None, {"photos": body.photo_ids[:2000]})
     conn.commit()
+    from ..engine import visibility
+
+    visibility.refresh(conn, body.photo_ids)
     return {"changed": n}
 
 
@@ -557,6 +560,7 @@ class DescriptionBody(BaseModel):
 
 @router.post("/photos/{photo_id}/description")
 def set_description(photo_id: int, body: DescriptionBody):
+    _visible_photo(get_state().conn(), photo_id)
     conn = get_state().conn()
     text = (body.description or "").strip() or None
     conn.execute("UPDATE photos SET description = ? WHERE id = ?", (text, photo_id))
@@ -567,6 +571,7 @@ def set_description(photo_id: int, body: DescriptionBody):
 
 @router.get("/photos/{photo_id}/similar")
 def similar_photos(photo_id: int, limit: int = Query(24, le=100)):
+    _visible_photo(get_state().conn(), photo_id)
     state = get_state()
     conn = state.conn()
     model_id = db.active_model_id(conn, "semantic")
@@ -584,6 +589,7 @@ def similar_photos(photo_id: int, limit: int = Query(24, le=100)):
 
 @router.post("/photos/{photo_id}/flags")
 def set_flags(photo_id: int, favorite: bool | None = Body(None), hidden: bool | None = Body(None)):
+    _visible_photo(get_state().conn(), photo_id)
     conn = get_state().conn()
     sets, args = [], []
     if favorite is not None:
@@ -598,7 +604,20 @@ def set_flags(photo_id: int, favorite: bool | None = Body(None), hidden: bool | 
     conn.execute(f"UPDATE photos SET {', '.join(sets)} WHERE id=?", args)
     db.audit(conn, "photo_flags", "photo", photo_id, {"favorite": favorite, "hidden": hidden})
     conn.commit()
+    if hidden is not None:
+        from ..engine import visibility
+
+        visibility.refresh(conn, [photo_id])
     return {"ok": True}
+
+
+def _visible_photo(conn, photo_id: int):
+    """404 for a missing photo, and for a locked one unless the Locked folder is open."""
+    row = conn.execute("SELECT * FROM photos WHERE id = ?", (photo_id,)).fetchone()
+    if row is None:
+        raise HTTPException(404, "photo not found")
+    guard_locked(row)
+    return row
 
 
 @router.post("/photos/{photo_id}/describe")
@@ -606,9 +625,7 @@ def describe_photo(photo_id: int, detailed: bool = False):
     """Generate (and cache) a description for one photo with the local vision model."""
     state = get_state()
     conn = state.conn()
-    row = conn.execute("SELECT caption FROM photos WHERE id = ?", (photo_id,)).fetchone()
-    if row is None:
-        raise HTTPException(404, "photo not found")
+    row = _visible_photo(conn, photo_id)
     if row["caption"] and not detailed:
         return {"caption": row["caption"], "cached": True}
     from ..vision.captioner import caption_photos

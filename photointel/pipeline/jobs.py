@@ -102,6 +102,10 @@ def create_job(conn, kind: str, params: dict | None = None) -> int:
     return int(cur.lastrowid)
 
 
+# Jobs that only read the library and run alongside indexing (never "the" index job).
+LONG_SIDE_JOBS = ("export", "backup", "create")
+
+
 def reap_stale_jobs(conn) -> int:
     """Mark jobs whose process died as interrupted (their work is resumable)."""
     cutoff = time.time() - STALE_AFTER
@@ -295,7 +299,7 @@ def spawn_index_job(ctx, params: dict) -> int:
     """Start indexing in a separate process so the web server stays responsive."""
     conn = ctx.connect()
     # An export runs alongside (it only reads the library); it must not swallow an index request.
-    existing = active_job(conn, exclude_kinds=("export",))
+    existing = active_job(conn, exclude_kinds=LONG_SIDE_JOBS)
     if existing:
         conn.close()
         return int(existing["id"])

@@ -14,15 +14,18 @@ from . import db
 
 log = logging.getLogger(__name__)
 TICK_SECONDS = 60
+BACKUP_RETRY_S = 6 * 3600      # after a backup that failed or was cancelled (drive unplugged…)
 
 
 def due(settings, now: float, last_index: float, last_backup: float | None, busy: bool,
-        backup_running: bool) -> list[str]:
+        backup_running: bool, last_backup_attempt: float | None = None) -> list[str]:
     actions = []
     if settings.auto_index_minutes > 0 and not busy and now - last_index >= settings.auto_index_minutes * 60:
         actions.append("index")
     if (settings.backup_folder and settings.backup_every_days > 0 and not backup_running
-            and (last_backup is None or now - last_backup >= settings.backup_every_days * 86400)):
+            and (last_backup is None or now - last_backup >= settings.backup_every_days * 86400)
+            and (last_backup_attempt is None or now - last_backup_attempt >= BACKUP_RETRY_S
+                 or (last_backup is not None and last_backup >= last_backup_attempt))):
         actions.append("backup")
     return actions
 
@@ -55,18 +58,22 @@ def run(ctx, stop: threading.Event) -> None:
             try:
                 last_index = float(db.get_meta(conn, "last_auto_index") or started)
                 lb = last_backup(conn)
-                active = jobs.active_job(conn, exclude_kinds=("export", "backup"))
+                active = jobs.active_job(conn, exclude_kinds=jobs.LONG_SIDE_JOBS)
+                attempt = db.get_meta(conn, "last_backup_attempt")
                 backup_running = conn.execute("SELECT 1 FROM jobs WHERE kind = 'backup' AND status IN "
                                               "('running', 'queued')").fetchone() is not None
                 now = time.time()
                 for action in due(ctx.settings, now, last_index, lb["finished_at"] if lb else None,
-                                  active is not None, backup_running):
+                                  active is not None, backup_running,
+                                  float(attempt) if attempt else None):
                     if action == "index":
                         db.set_meta(conn, "last_auto_index", now)
                         conn.commit()
                         jobs.spawn_index_job(ctx, {"kind": "index"})
                         log.info("Scheduled index started")
                     elif action == "backup":
+                        db.set_meta(conn, "last_backup_attempt", now)
+                        conn.commit()
                         start_backup(ctx, conn, ctx.settings.backup_folder)
                         log.info("Scheduled backup started to %s", ctx.settings.backup_folder)
             finally:

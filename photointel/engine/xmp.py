@@ -91,11 +91,23 @@ def sidecars_for(conn: sqlite3.Connection, photo_ids: list[int], include_auto_ta
     return {int(r["id"]): _sidecar(r, tags_of, faces_of)[0] for r in rows}
 
 
+def refuse_inside_roots(conn: sqlite3.Connection, folders) -> None:
+    """Every folder an export writes to must be outside every photo root. Checking only the chosen
+    folder is not enough: exporting into a root's *parent* with the original layout (or XMP's
+    mirror of it) would recreate the root's own path and write next to the originals."""
+    roots = [Path(r[0]).resolve() for r in conn.execute("SELECT path FROM roots")]
+    for f in {Path(f).resolve() for f in folders}:
+        for r in roots:
+            if f == r or r in f.parents:
+                raise ExportError(f"{f} would be inside the photo folder {r}; choose another export folder")
+
+
 def export_xmp(conn: sqlite3.Connection, out_dir: str | Path, include_auto_tags: bool = False,
                everything: bool = False) -> dict:
     out = _check_destination(conn, Path(out_dir))
     t0 = time.time()
     roots = {int(r[0]): Path(r[1]).name or f"root{r[0]}" for r in conn.execute("SELECT id, path FROM roots")}
+    refuse_inside_roots(conn, [out / name for name in roots.values()])
     rows, tags_of, faces_of = _load(conn, include_auto_tags)
     written = 0
     for r in rows:

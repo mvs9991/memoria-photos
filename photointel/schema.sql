@@ -421,7 +421,7 @@ CREATE TABLE IF NOT EXISTS icloud_items (
 
 -- Accounts (optional): with none, the library is one person's, guarded by one password.
 CREATE TABLE IF NOT EXISTS users (
-    id            INTEGER PRIMARY KEY,
+    id            INTEGER PRIMARY KEY AUTOINCREMENT,   -- ids never reused: an old cookie names no one new
     username      TEXT NOT NULL UNIQUE COLLATE NOCASE,
     password_hash TEXT NOT NULL,
     role          TEXT NOT NULL DEFAULT 'family',      -- owner | family | guest

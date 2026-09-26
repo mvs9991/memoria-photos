@@ -26,7 +26,7 @@ from typing import Callable, Iterator
 from ..metadata import naive_to_ts, ts_to_naive
 from . import albums as albums_mod
 from .people import person_label
-from .xmp import ExportError, _check_destination, sidecars_for
+from .xmp import ExportError, _check_destination, refuse_inside_roots, sidecars_for
 
 log = logging.getLogger(__name__)
 
@@ -213,6 +213,7 @@ def export_to_folder(conn: sqlite3.Connection, spec: ExportSpec, progress: Calla
     p = plan(conn, spec)
     if not p.items:
         raise ExportError("nothing matches: no photos to export")
+    refuse_inside_roots(conn, {out / it.rel_dir if it.rel_dir else out for it in p.items})
     out.mkdir(parents=True, exist_ok=True)
     xmps = sidecars_for(conn, [i.photo_id for i in p.items]) if spec.xmp else {}
     copied = already = failed = 0

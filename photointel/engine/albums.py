@@ -161,19 +161,28 @@ def albums_for_photo(conn: sqlite3.Connection, photo_id: int) -> list[dict]:
 
 
 def _best_photo(conn, ids: list[int]) -> int | None:
-    ids = ids[:900]
-    row = conn.execute(
-        f"SELECT id FROM photos WHERE id IN ({','.join('?' * len(ids))}) "
-        f"ORDER BY COALESCE(quality_score, 0) DESC LIMIT 1", ids).fetchone()
-    return int(row[0]) if row else None
+    best: tuple[float, int] | None = None
+    for i in range(0, len(ids), 900):          # every photo, 900 at a time (SQLite's variable limit)
+        chunk = ids[i:i + 900]
+        row = conn.execute(
+            f"SELECT id, COALESCE(quality_score, 0) q FROM photos WHERE id IN ({','.join('?' * len(chunk))}) "
+            f"ORDER BY q DESC LIMIT 1", chunk).fetchone()
+        if row and (best is None or row[1] > best[0]):
+            best = (row[1], int(row[0]))
+    return best[1] if best else None
 
 
 def _ts(conn, ids: list[int], fn: str) -> float | None:
-    if not ids:
+    vals = []
+    for i in range(0, len(ids), 900):
+        chunk = ids[i:i + 900]
+        v = conn.execute(f"SELECT {fn}(taken_ts) FROM photos WHERE id IN ({','.join('?' * len(chunk))})",
+                         chunk).fetchone()[0]
+        if v is not None:
+            vals.append(v)
+    if not vals:
         return None
-    ids = ids[:900]
-    return conn.execute(f"SELECT {fn}(taken_ts) FROM photos WHERE id IN ({','.join('?' * len(ids))})",
-                        ids).fetchone()[0]
+    return min(vals) if fn == "MIN" else max(vals)
 
 
 # ---------------------------------------------------------------------------- user tags
