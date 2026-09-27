@@ -36,6 +36,10 @@ export interface Album {
   kind: "manual" | "smart";
   /** a smart album's saved search */
   query: string | null;
+  /** only its maker sees it (with accounts) */
+  private?: boolean;
+  /** made by the signed-in account */
+  mine?: boolean;
   photo_count: number;
   cover_photo_id: number | null;
   start_ts: number | null;
@@ -383,7 +387,8 @@ export const api = {
     request<{ id: number }>(`/albums`, { method: "POST", body: JSON.stringify({ name, photo_ids }) }),
   createSmartAlbum: (name: string, query: string) =>
     request<{ id: number }>(`/albums`, { method: "POST", body: JSON.stringify({ name, query }) }),
-  updateAlbum: (id: number, body: { name?: string; description?: string; cover_photo_id?: number; query?: string }) =>
+  updateAlbum: (id: number, body: { name?: string; description?: string; cover_photo_id?: number; query?: string;
+    private?: boolean }) =>
     request(`/albums/${id}`, { method: "POST", body: JSON.stringify(body) }),
   deleteAlbum: (id: number) => request(`/albums/${id}`, { method: "DELETE" }),
   addToAlbum: (id: number, photo_ids: number[]) =>

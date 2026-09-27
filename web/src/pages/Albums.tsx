@@ -25,8 +25,9 @@ export default function Albums() {
   if (isError) return <ErrorState error={error} onRetry={() => refetch()} />;
   if (isLoading) return <Spinner full label="Loading albums" />;
   const albums = data?.albums ?? [];
-  const mine = albums.filter((a) => a.source === "user" && a.kind !== "smart");
-  const smart = albums.filter((a) => a.kind === "smart");
+  const privateAlbums = albums.filter((a) => a.private);
+  const mine = albums.filter((a) => a.source === "user" && a.kind !== "smart" && !a.private);
+  const smart = albums.filter((a) => a.kind === "smart" && !a.private);
   const imported = albums.filter((a) => a.source === "takeout");
   const icloud = albums.filter((a) => a.source === "icloud");
 
@@ -55,6 +56,7 @@ export default function Albums() {
       ) : (
         <>
           {smart.length > 0 && <AlbumGrid albums={smart} title="Smart albums" />}
+          {privateAlbums.length > 0 && <AlbumGrid albums={privateAlbums} title="Private to you" />}
           {mine.length > 0 && <AlbumGrid albums={mine} title={imported.length || smart.length ? "Your albums" : undefined} />}
           {imported.length > 0 && <AlbumGrid albums={imported} title="From Google Photos" />}
           {icloud.length > 0 && <AlbumGrid albums={icloud} title="From iCloud" />}

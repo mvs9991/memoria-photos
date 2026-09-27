@@ -1,7 +1,7 @@
 import { useMemo, useState } from "react";
 import { Link, useNavigate, useParams } from "react-router-dom";
 import { useMutation, useQuery, useQueryClient } from "@tanstack/react-query";
-import { ArrowLeft, Check, CheckSquare, FolderOutput, ImageMinus, Link2, MonitorPlay, Pencil, Search, Star, Trash2, X } from "lucide-react";
+import { ArrowLeft, Check, CheckSquare, FolderOutput, ImageMinus, Link2, Lock, MonitorPlay, Users, Pencil, Search, Star, Trash2, X } from "lucide-react";
 import { api, FLAG, gridItems } from "../lib/api";
 import { PhotoGrid } from "../components/PhotoGrid";
 import { EmptyState, ErrorState, Spinner } from "../components/States";
@@ -90,6 +90,14 @@ export default function AlbumDetail() {
           <button className="btn btn-ghost btn-sm" onClick={() => setDialog("slideshow")} disabled={!items.length}>
             <MonitorPlay size={14} /> Slideshow
           </button>
+          {data.mine && (
+            <button className={`btn btn-ghost btn-sm${data.private ? " is-on" : ""}`}
+              onClick={() => api.updateAlbum(albumId, { private: !data.private }).then(refresh)}
+              title={data.private ? "Only you can see this album — click to share it with the family"
+                : "Make this album visible to you only (the photos stay in the shared library)"}>
+              {data.private ? <><Lock size={14} /> Private</> : <><Users size={14} /> Family</>}
+            </button>
+          )}
           {role === "owner" && (
             <button className="btn btn-ghost btn-sm" onClick={() => setDialog("share")}><Link2 size={14} /> Share</button>
           )}

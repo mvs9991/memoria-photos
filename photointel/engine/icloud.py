@@ -217,7 +217,8 @@ def _apply(conn: sqlite3.Connection, pid: int, row: dict, first_time: bool, stat
     created = parse_date(row.get("originalcreationdate"))
     if first_time:
         if fav:
-            conn.execute("UPDATE photos SET favorite = 1 WHERE id = ?", (pid,))
+            from .favorites import imported
+            imported(conn, pid)
             stats["favorites"] += 1
         if hidden:
             conn.execute("UPDATE photos SET locked = 1 WHERE id = ?", (pid,))

@@ -113,7 +113,10 @@ class SearchEngine:
             where.append("(',' || COALESCE(p.colors, '') || ',') LIKE ?")
             args.append(f"%,{colour},%")
         if q.only_favorites:
-            where.append("p.favorite = 1")
+            from ..api.deps import current_user_id
+            from ..engine.favorites import expr as fav_expr
+
+            where.append(f"{fav_expr('p', current_user_id())} = 1")
         if q.only_screenshots:
             where.append("p.source_kind = 'screenshot'")
         elif q.exclude_screenshots and (q.semantic_text or q.sort == "quality") and not q.text_phrases:
@@ -164,6 +167,7 @@ class SearchEngine:
                use_llm: bool | None = None) -> SearchResult:
         t0 = time.time()
         q = parse(query, conn, me_person_id=self.ctx.settings.me_person_id)
+        _drop_hidden_albums(conn, q)
 
         if q.is_empty() and query.strip():
             q = self._maybe_llm_parse(conn, query, q, use_llm)
@@ -477,3 +481,19 @@ def _explain(q: ParsedQuery, res: SearchResult) -> str:
     if not bits:
         return f"{res.total} results"
     return f"{res.total} results · " + " · ".join(bits)
+
+
+def _drop_hidden_albums(conn: sqlite3.Connection, q) -> None:
+    """The album vocabulary is shared; someone else's private album must not match."""
+    if not q.album_ids:
+        return
+    from ..api.deps import current_user_id
+    from ..engine.albums import can_see
+
+    uid = current_user_id()
+    keep = [a for a in q.album_ids if can_see(conn, a, uid) is not None]
+    if len(keep) != len(q.album_ids):
+        q.album_ids = keep
+        if not keep:
+            q.album_label = None
+            q.interpretation = [i for i in q.interpretation if i.get("kind") != "album"]

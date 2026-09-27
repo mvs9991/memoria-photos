@@ -85,3 +85,9 @@ def guard_locked(row) -> None:
     locked = ("locked" in keys and row["locked"]) or ("status" in keys and row["status"] == "locked")
     if locked and not (locked_open() and current_role() == "owner"):
         raise HTTPException(404, "photo not found")
+
+
+def current_user_id() -> int | None:
+    """The signed-in account's id, or None for a library without accounts."""
+    u = _current_user.get()
+    return int(u["id"]) if u else None

@@ -18,7 +18,8 @@ from ..engine.people import person_label
 from ..engine.places import place_label
 from ..metadata import ts_to_naive
 from ..rotation import rotate_box
-from .deps import get_state, guard_locked
+from ..engine import favorites
+from .deps import current_user_id, get_state, guard_locked
 
 log = logging.getLogger(__name__)
 router = APIRouter()
@@ -93,7 +94,7 @@ def photo_filter_sql(conn, person: list[int] | None = None, place: int | None = 
         where.append("(p.folder = ? OR p.folder LIKE ?)")
         args.extend([folder, folder + "/%"])
     if favorite:
-        where.append("p.favorite = 1")
+        where.append(f"{favorites.expr('p', current_user_id())} = 1")
     if has_faces is True:
         where.append("p.face_count > 0")
     if min_rating:
@@ -193,7 +194,8 @@ def photos_index(person: list[int] = Query(default=[]), place: int | None = None
                  "added": "p.first_seen_at DESC, p.id DESC",
                  "size": "p.size DESC"}[order]
     rows = conn.execute(
-        f"SELECT p.id, p.width, p.height, p.rotation, p.taken_ts, p.face_count, p.favorite, p.media_type, p.duration, "
+        f"SELECT p.id, p.width, p.height, p.rotation, p.taken_ts, p.face_count, "
+        f"{favorites.expr('p', current_user_id())} AS favorite, p.media_type, p.duration, "
         f"p.live_video_id, p.motion_offset, p.rating, p.stack_id, "
         f"(SELECT COUNT(*) FROM photos s WHERE s.stack_id = p.id) AS stack_size FROM photos p "
         f"WHERE {where} ORDER BY {order_sql} LIMIT ?", (*args, limit)).fetchall()
@@ -290,14 +292,14 @@ def photo_detail(photo_id: int):
         "quality": {"score": row["quality_score"], "blur": row["blur"], "brightness": row["brightness"],
                     "contrast": row["contrast"], "clipped": row["clipped"], "aesthetic": row["aesthetic"]},
         "caption": row["caption"], "faces": faces, "tags": tags, "duplicates": dups, "trip": trip,
-        "favorite": bool(row["favorite"]), "hidden": bool(row["hidden"]),
+        "favorite": favorites.is_favorite(conn, photo_id, current_user_id()), "hidden": bool(row["hidden"]),
         "event": {"id": row["event_id2"], "title": event_title(row) if row["event_id2"] else None,
                   "kind": row["event_kind"]} if row["event_id2"] else None,
         "sha256": row["sha256"],
         "media_type": row["media_type"], "duration": row["duration"], "video_codec": row["video_codec"],
         "live": bool(row["live_video_id"] or (row["motion_offset"] or 0) > 0),
         "description": row["description"], "ocr_text": row["ocr_text"] or None,
-        "albums": albums_mod.albums_for_photo(conn, photo_id),
+        "albums": albums_mod.albums_for_photo(conn, photo_id, current_user_id()),
         "rating": row["rating"] or 0,
         "stack": ({"id": row["stack_id"], "members": stacks_mod.members(conn, row["stack_id"])}
                   if row["stack_id"] else None),
@@ -593,15 +595,13 @@ def set_flags(photo_id: int, favorite: bool | None = Body(None), hidden: bool | 
     conn = get_state().conn()
     sets, args = [], []
     if favorite is not None:
-        sets.append("favorite=?")
-        args.append(int(favorite))
+        favorites.set_favorite(conn, [photo_id], favorite, current_user_id())
     if hidden is not None:
         sets.append("hidden=?")
         args.append(int(hidden))
-    if not sets:
-        return {"ok": True}
-    args.append(photo_id)
-    conn.execute(f"UPDATE photos SET {', '.join(sets)} WHERE id=?", args)
+    if sets:
+        args.append(photo_id)
+        conn.execute(f"UPDATE photos SET {', '.join(sets)} WHERE id=?", args)
     db.audit(conn, "photo_flags", "photo", photo_id, {"favorite": favorite, "hidden": hidden})
     conn.commit()
     if hidden is not None:
@@ -702,14 +702,15 @@ def stats():
         "faces": one("SELECT COUNT(*) FROM faces"),
         "events": one("SELECT COUNT(*) FROM events WHERE kind='event'"),
         "trips": one("SELECT COUNT(*) FROM events WHERE kind='trip'"),
-        "albums": one("SELECT COUNT(*) FROM albums WHERE hidden = 0"),
+        "albums": one(f"SELECT COUNT(*) FROM albums a WHERE a.hidden = 0 AND "
+                      f"{albums_mod.visible_sql('a', current_user_id())}"),
         "videos": one("SELECT COUNT(*) FROM photos WHERE status='ok' AND media_type='video' AND live_component=0"),
         "places": one("SELECT COUNT(DISTINCT place_id) FROM photos WHERE place_id IS NOT NULL"),
         "duplicate_groups": one("SELECT COUNT(*) FROM dup_groups WHERE kind != 'similar'"),
         "duplicate_photos": one("SELECT COUNT(DISTINCT photo_id) FROM dup_members m JOIN dup_groups g "
                                 "ON g.id=m.group_id WHERE g.kind != 'similar'"),
         "with_gps": one("SELECT COUNT(*) FROM photos WHERE gps_lat IS NOT NULL AND status='ok'"),
-        "favorites": one("SELECT COUNT(*) FROM photos WHERE favorite=1"),
+        "favorites": favorites.count(conn, current_user_id()),
         "errors": one("SELECT COUNT(*) FROM photos WHERE status='error'"),
         "missing": one("SELECT COUNT(*) FROM photos WHERE status='missing'"),
         "trash": one("SELECT COUNT(*) FROM photos WHERE status='trashed' AND live_component=0"),

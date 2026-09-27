@@ -193,7 +193,7 @@ def locked_photos():
     if not locked_open():
         raise HTTPException(403, "the Locked folder is closed")
     rows = get_state().conn().execute(
-        "SELECT p.id, p.width, p.height, p.rotation, p.taken_ts, p.face_count, p.favorite, p.media_type, p.duration, "
+        "SELECT p.id, p.width, p.height, p.rotation, p.taken_ts, p.face_count, " + _fav() + " AS favorite, p.media_type, p.duration, "
         "p.live_video_id, p.motion_offset, p.rating FROM photos p WHERE p.status = 'locked' AND p.live_component = 0 "
         "ORDER BY p.taken_ts DESC, p.id DESC").fetchall()
     return columnar(rows)
@@ -239,3 +239,9 @@ def archive(body: ArchiveBody):
     visibility.refresh(conn, ids)
     return {"changed": n}
 
+
+def _fav() -> str:
+    from ..engine.favorites import expr
+    from .deps import current_user_id
+
+    return expr("p", current_user_id())

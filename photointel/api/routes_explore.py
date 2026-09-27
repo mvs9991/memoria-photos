@@ -155,7 +155,9 @@ def export_album_html(album_id: int, body: HtmlExportBody):
 
     state = get_state()
     conn = state.conn()
-    a = conn.execute("SELECT * FROM albums WHERE id = ? AND hidden = 0", (album_id,)).fetchone()
+    from .deps import current_user_id
+
+    a = albums_mod.can_see(conn, album_id, current_user_id())
     if a is None:
         raise HTTPException(404, "album not found")
     ids = (state.search.search(conn, a["query"], limit=5000).photo_ids if a["kind"] == "smart"

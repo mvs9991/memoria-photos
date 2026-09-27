@@ -9,7 +9,7 @@ from contextlib import contextmanager
 from pathlib import Path
 from typing import Any, Iterable, Iterator
 
-SCHEMA_VERSION = 6
+SCHEMA_VERSION = 7
 _SCHEMA_FILE = Path(__file__).with_name("schema.sql")
 
 # Columns added to `photos` after v1: (name, SQL type/default).
@@ -55,6 +55,13 @@ V6_COLUMNS = {
         ("linked", "INTEGER NOT NULL DEFAULT 0"),       # 1 once indexed and added to that album
     ],
 }
+# v7: albums private to one account.
+V7_COLUMNS = {
+    "albums": [
+        ("owner_user_id", "INTEGER"),                   # the account that made it (NULL: before accounts, imports)
+        ("private", "INTEGER NOT NULL DEFAULT 0"),      # 1 = only that account sees it
+    ],
+}
 MIGRATION_INDEXES = [
     "CREATE INDEX IF NOT EXISTS ix_photos_media ON photos(media_type)",
     "CREATE INDEX IF NOT EXISTS ix_photos_live ON photos(live_component)",
@@ -72,7 +79,7 @@ def _add_columns(conn: sqlite3.Connection, table: str, columns: list[tuple[str, 
 def _ensure_columns(conn: sqlite3.Connection) -> None:
     """Add every post-v1 column that is missing. Idempotent; runs for new and old databases."""
     _add_columns(conn, "photos", V2_PHOTO_COLUMNS)
-    for table, cols in (*V3_COLUMNS.items(), *V6_COLUMNS.items()):
+    for table, cols in (*V3_COLUMNS.items(), *V6_COLUMNS.items(), *V7_COLUMNS.items()):
         _add_columns(conn, table, cols)
     for sql in MIGRATION_INDEXES:
         conn.execute(sql)

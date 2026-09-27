@@ -237,3 +237,107 @@ def test_a_stem_sidecar_goes_to_the_raw_file(ctx, tmp_path):
     ratings = dict(conn.execute("SELECT filename, rating FROM photos").fetchall())
     assert ratings == {"DSC_1.JPG": 0, "DSC_1.NEF": 5}
     conn.close()
+
+
+# ----------------------------------------------------------------- each person's favourites and private albums
+
+def pid_of(ctx, filename: str) -> int:
+    conn = ctx.connect()
+    try:
+        return int(conn.execute("SELECT id FROM photos WHERE filename = ? ORDER BY id LIMIT 1", (filename,)).fetchone()[0])
+    finally:
+        conn.close()
+
+
+def _signed_in(app, name, pw):
+    c = TestClient(app)
+    assert c.post("/api/auth/login", json={"username": name, "password": pw}).status_code == 200
+    return c
+
+
+def test_each_person_has_their_own_favourites(ctx, library, app):
+    index(ctx, library)
+    solo = TestClient(app)
+    a, b = pid_of(ctx, "IMG_x0.jpg"), pid_of(ctx, "IMG_x1.jpg")
+    solo.post(f"/api/photos/{a}/flags", json={"favorite": True})          # before accounts: the library's
+    solo.post("/api/auth/password", json={"new": "owner-pass"})
+    owner = TestClient(app)
+    owner.post("/api/auth/login", json={"password": "owner-pass"})
+    owner.post("/api/accounts/enable", json={"username": "Sanjay"})
+    owner.post("/api/accounts", json={"username": "Priya", "password": "priya-pass", "role": "family"})
+    priya = _signed_in(app, "Priya", "priya-pass")
+
+    favs = lambda c: set(c.get("/api/photos/index", params={"favorite": True}).json()["ids"])  # noqa: E731
+    assert favs(owner) == {a} and favs(priya) == set()                    # the old favourite is now the owner's
+    priya.post(f"/api/photos/{b}/flags", json={"favorite": True})
+    assert favs(priya) == {b} and favs(owner) == {a}
+    idx = priya.get("/api/photos/index").json()
+    assert idx["flags"][idx["ids"].index(b)] & 1 and not idx["flags"][idx["ids"].index(a)] & 1
+    assert priya.get(f"/api/photos/{b}").json()["favorite"] and not owner.get(f"/api/photos/{b}").json()["favorite"]
+    assert priya.get("/api/stats").json()["favorites"] == 1
+    assert {p["id"] for p in priya.get("/api/search", params={"q": "favourites"}).json()["photos"]} == {b}
+    priya.post(f"/api/photos/{b}/flags", json={"favorite": False})
+    assert favs(priya) == set()
+
+
+def test_a_private_album_is_seen_by_its_maker_only(ctx, library, app):
+    index(ctx, library)
+    solo = TestClient(app)
+    solo.post("/api/auth/password", json={"new": "owner-pass"})
+    owner = TestClient(app)
+    owner.post("/api/auth/login", json={"password": "owner-pass"})
+    owner.post("/api/accounts/enable", json={"username": "Sanjay"})
+    owner.post("/api/accounts", json={"username": "Priya", "password": "priya-pass", "role": "family"})
+    priya = _signed_in(app, "Priya", "priya-pass")
+    pid = pid_of(ctx, "IMG_x2.jpg")
+    aid = priya.post("/api/albums", json={"name": "Birthday surprise", "photo_ids": [pid]}).json()["id"]
+    assert owner.post(f"/api/albums/{aid}", json={"private": True}).status_code == 403     # not theirs to hide
+    assert priya.post(f"/api/albums/{aid}", json={"private": True}).status_code == 200
+
+    assert aid in [x["id"] for x in priya.get("/api/albums").json()["albums"]]
+    assert aid not in [x["id"] for x in owner.get("/api/albums").json()["albums"]]
+    for method, path, body in (("get", f"/api/albums/{aid}", None),
+                               ("post", f"/api/albums/{aid}/photos", {"photo_ids": [pid]}),
+                               ("delete", f"/api/albums/{aid}", None),
+                               ("post", f"/api/albums/{aid}/share", {"allow_download": False}),
+                               ("post", "/api/export/preview", {"album_id": aid})):
+        r = getattr(owner, method)(path, **({"json": body} if body else {}))
+        assert r.status_code == 404, (path, r.status_code)
+    assert not owner.get(f"/api/photos/{pid}").json()["albums"]
+    assert priya.get(f"/api/photos/{pid}").json()["albums"][0]["id"] == aid
+    chips = owner.get("/api/search", params={"q": "birthday surprise"}).json()["interpretation"]
+    assert not any(c["kind"] == "album" for c in chips)
+    assert owner.get("/api/stats").json()["albums"] == 0 and priya.get("/api/stats").json()["albums"] == 1
+
+    # removing Priya's account hands her albums to the owner who removed her
+    uid = next(a["id"] for a in owner.get("/api/accounts").json()["accounts"] if a["username"] == "Priya")
+    owner.delete(f"/api/accounts/{uid}")
+    assert owner.get(f"/api/albums/{aid}").status_code == 200
+
+
+def test_an_imported_album_cannot_be_made_private(ctx, library, app):
+    from photointel.engine import albums
+
+    index(ctx, library)
+    conn = ctx.connect()
+    aid = albums.create_album(conn, "From Google", [pid_of(ctx, "IMG_x0.jpg")], source="takeout")
+    conn.close()
+    solo = TestClient(app)
+    solo.post("/api/auth/password", json={"new": "owner-pass"})
+    owner = TestClient(app)
+    owner.post("/api/auth/login", json={"password": "owner-pass"})
+    owner.post("/api/accounts/enable", json={"username": "Sanjay"})
+    owner.post("/api/accounts", json={"username": "Priya", "password": "priya-pass", "role": "family"})
+    priya = _signed_in(app, "Priya", "priya-pass")
+    assert priya.post(f"/api/albums/{aid}", json={"private": True}).status_code == 403
+    assert aid in [x["id"] for x in owner.get("/api/albums").json()["albums"]]
+
+
+def test_searching_favourites_in_the_plural(ctx, library, client=None):
+    from photointel.search.parser import parse
+
+    index(ctx, library)
+    conn = ctx.connect()
+    for q in ("favourites", "my favorites", "favourite photos"):
+        assert parse(q, conn).only_favorites, q
+    conn.close()

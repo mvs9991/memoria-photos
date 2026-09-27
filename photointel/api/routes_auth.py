@@ -116,7 +116,9 @@ class ShareBody(BaseModel):
 @router.post("/albums/{album_id}/share")
 def share_album(album_id: int, body: ShareBody):
     conn = get_state().conn()
-    album = conn.execute("SELECT kind FROM albums WHERE id = ? AND hidden = 0", (album_id,)).fetchone()
+    from .deps import current_user_id
+
+    album = albums_mod.can_see(conn, album_id, current_user_id())
     if album is None:
         raise HTTPException(404, "album not found")
     if body.allow_upload and album["kind"] != "manual":

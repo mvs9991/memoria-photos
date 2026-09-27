@@ -5,13 +5,17 @@ from fastapi import APIRouter, HTTPException
 from pydantic import BaseModel
 
 from ..engine import albums as albums_mod
-from .deps import get_state
+from ..engine import favorites
+from .deps import current_user_id, get_state
 from .routes_library import columnar
 
 router = APIRouter()
 
-_GRID_COLS = ("id, width, height, rotation, taken_ts, face_count, favorite, media_type, duration, "
-              "live_video_id, motion_offset, rating")
+def _grid_cols() -> str:
+    """The grid's columns, with "favourite" meaning the viewer's own (with accounts)."""
+    return ("id, width, height, rotation, taken_ts, face_count, "
+            f"{favorites.expr('photos', current_user_id())} AS favorite, media_type, duration, "
+            "live_video_id, motion_offset, rating")
 
 
 SMART_LIMIT = 5000
@@ -25,7 +29,7 @@ def _resolver(conn):
 @router.get("/albums")
 def list_albums():
     conn = get_state().conn()
-    return {"albums": albums_mod.list_albums(conn, resolve=_resolver(conn))}
+    return {"albums": albums_mod.list_albums(conn, resolve=_resolver(conn), user_id=current_user_id())}
 
 
 class AlbumCreate(BaseModel):
@@ -40,16 +44,17 @@ def create_album(body: AlbumCreate):
     if not body.name.strip():
         raise HTTPException(400, "an album needs a name")
     conn = get_state().conn()
+    uid = current_user_id()
     if body.query and body.query.strip():
-        return {"id": albums_mod.create_smart_album(conn, body.name, body.query)}
-    aid = albums_mod.create_album(conn, body.name, body.photo_ids, body.description)
+        return {"id": albums_mod.create_smart_album(conn, body.name, body.query, owner_user_id=uid)}
+    aid = albums_mod.create_album(conn, body.name, body.photo_ids, body.description, owner_user_id=uid)
     return {"id": aid}
 
 
 @router.get("/albums/{album_id}")
 def album_detail(album_id: int):
     conn = get_state().conn()
-    a = conn.execute("SELECT * FROM albums WHERE id = ? AND hidden = 0", (album_id,)).fetchone()
+    a = albums_mod.can_see(conn, album_id, current_user_id())
     if a is None:
         raise HTTPException(404, "album not found")
     if a["kind"] == "smart":
@@ -59,13 +64,14 @@ def album_detail(album_id: int):
     rows = []
     for i in range(0, len(ids), 900):
         chunk = ids[i:i + 900]
-        rows += conn.execute(f"SELECT {_GRID_COLS} FROM photos WHERE id IN ({','.join('?' * len(chunk))})",
+        rows += conn.execute(f"SELECT {_grid_cols()} FROM photos WHERE id IN ({','.join('?' * len(chunk))})",
                              chunk).fetchall()
     order = {pid: n for n, pid in enumerate(ids)}
     rows.sort(key=lambda r: order[r["id"]])
     return {"id": a["id"], "name": a["name"], "description": a["description"], "source": a["source"],
             "kind": a["kind"], "query": a["query"], "photo_count": len(ids),
-            "cover_photo_id": a["cover_photo_id"], "photos": columnar(rows)}
+            "cover_photo_id": a["cover_photo_id"], "photos": columnar(rows), "private": bool(a["private"]),
+            "mine": current_user_id() is not None and a["owner_user_id"] == current_user_id()}
 
 
 class AlbumUpdate(BaseModel):
@@ -73,13 +79,21 @@ class AlbumUpdate(BaseModel):
     description: str | None = None
     cover_photo_id: int | None = None
     query: str | None = None
+    private: bool | None = None       # only the account that made the album may change this
 
 
 @router.post("/albums/{album_id}")
 def update_album(album_id: int, body: AlbumUpdate):
     conn = get_state().conn()
-    if conn.execute("SELECT 1 FROM albums WHERE id = ? AND hidden = 0", (album_id,)).fetchone() is None:
+    uid = current_user_id()
+    a = albums_mod.can_see(conn, album_id, uid)
+    if a is None:
         raise HTTPException(404, "album not found")
+    if body.private is not None:
+        if uid is None or a["owner_user_id"] != uid:
+            raise HTTPException(403, "only the person who made an album can make it private")
+        conn.execute("UPDATE albums SET private = ? WHERE id = ?", (int(body.private), album_id))
+        conn.commit()
     albums_mod.rename_album(conn, album_id, body.name, body.description)
     if body.query is not None and body.query.strip():
         conn.execute("UPDATE albums SET query = ? WHERE id = ? AND kind = 'smart'", (body.query.strip(), album_id))
@@ -92,7 +106,10 @@ def update_album(album_id: int, body: AlbumUpdate):
 
 @router.delete("/albums/{album_id}")
 def delete_album(album_id: int):
-    albums_mod.delete_album(get_state().conn(), album_id)
+    conn = get_state().conn()
+    if albums_mod.can_see(conn, album_id, current_user_id()) is None:
+        raise HTTPException(404, "album not found")
+    albums_mod.delete_album(conn, album_id)
     return {"ok": True, "note": "The album was removed; its photos were not touched."}
 
 
@@ -103,7 +120,7 @@ class AlbumPhotos(BaseModel):
 @router.post("/albums/{album_id}/photos")
 def add_photos(album_id: int, body: AlbumPhotos):
     conn = get_state().conn()
-    a = conn.execute("SELECT kind FROM albums WHERE id = ? AND hidden = 0", (album_id,)).fetchone()
+    a = albums_mod.can_see(conn, album_id, current_user_id())
     if a is None:
         raise HTTPException(404, "album not found")
     if a["kind"] == "smart":
@@ -115,4 +132,7 @@ def add_photos(album_id: int, body: AlbumPhotos):
 def remove_photos(album_id: int, body: AlbumPhotos):
     if not body.photo_ids:
         return {"removed": 0}
-    return {"removed": albums_mod.remove_photos(get_state().conn(), album_id, body.photo_ids)}
+    conn = get_state().conn()
+    if albums_mod.can_see(conn, album_id, current_user_id()) is None:
+        raise HTTPException(404, "album not found")
+    return {"removed": albums_mod.remove_photos(conn, album_id, body.photo_ids)}

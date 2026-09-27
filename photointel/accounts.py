@@ -79,6 +79,9 @@ def enable(ctx, conn: sqlite3.Connection, owner_name: str, owner_password: str |
     now = _ms_now()
     uid = conn.execute("INSERT INTO users(username, password_hash, role, created_at, pw_changed_at) VALUES (?,?,?,?,?)",
                        (owner_name.strip(), stored, "owner", now, now)).lastrowid
+    from .engine.favorites import hand_to
+
+    hand_to(conn, uid)                       # the library's favourites become the owner's
     db.audit(conn, "accounts_enabled", "user", uid, {"owner": owner_name})
     conn.commit()
     return get(conn, uid)
@@ -132,6 +135,9 @@ def delete(conn: sqlite3.Connection, uid: int, acting_uid: int | None) -> None:
     if u["role"] == "owner" and conn.execute("SELECT COUNT(*) FROM users WHERE role = 'owner'").fetchone()[0] <= 1:
         raise AccountError("the library needs at least one owner")
     conn.execute("DELETE FROM users WHERE id = ?", (uid,))
+    conn.execute("DELETE FROM user_favorites WHERE user_id = ?", (uid,))
+    # Their albums (private ones included) pass to the owner who removed them: nothing is lost.
+    conn.execute("UPDATE albums SET owner_user_id = ? WHERE owner_user_id = ?", (acting_uid, uid))
     db.audit(conn, "account_removed", "user", uid, {"username": u["username"]})
     conn.commit()
 

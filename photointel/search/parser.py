@@ -32,7 +32,8 @@ MONTHS["sept"] = 9
 SEASONS = {"winter": (12, 2), "spring": (3, 5), "summer": (4, 6), "monsoon": (7, 9), "rainy": (7, 9),
            "autumn": (9, 11), "fall": (9, 11)}
 
-QUALITY_WORDS = {"best", "top", "greatest", "finest", "nicest", "good", "great", "favourite", "favorite"}
+QUALITY_WORDS = {"best", "top", "greatest", "finest", "nicest", "good", "great", "favourite", "favorite",
+                 "favourites", "favorites"}
 BAD_QUALITY_WORDS = {"blurry", "blurred", "bad", "worst"}
 
 
@@ -312,7 +313,7 @@ def parse(query: str, conn: sqlite3.Connection, me_person_id: int | None = None,
         if idx in consumed:
             continue
         if tok in QUALITY_WORDS:
-            if tok in ("favourite", "favorite"):
+            if tok in ("favourite", "favorite", "favourites", "favorites"):
                 q.only_favorites = True
                 q.chip("filter", "Favourites")
             else:

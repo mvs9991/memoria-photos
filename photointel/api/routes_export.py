@@ -38,7 +38,10 @@ def _spec(body: dict) -> export_mod.ExportSpec:
     state = get_state()
     conn = state.conn()
     if body.get("album_id") is not None:
-        a = conn.execute("SELECT kind, query FROM albums WHERE id = ? AND hidden = 0", (body["album_id"],)).fetchone()
+        from ..engine.albums import can_see
+        from .deps import current_user_id
+
+        a = can_see(conn, body["album_id"], current_user_id())
         if a is None:
             raise HTTPException(404, "album not found")
         if a["kind"] == "smart":          # a smart album is a saved search: export what it shows now

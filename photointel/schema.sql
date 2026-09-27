@@ -477,3 +477,10 @@ CREATE TABLE IF NOT EXISTS xmp_sidecars (
     people      TEXT,                              -- JSON list of names on face regions
     imported_at REAL NOT NULL
 );
+
+-- Each account's own favourites (with accounts on; see engine/favorites.py).
+CREATE TABLE IF NOT EXISTS user_favorites (
+    user_id  INTEGER NOT NULL,
+    photo_id INTEGER NOT NULL REFERENCES photos(id) ON DELETE CASCADE,
+    PRIMARY KEY (user_id, photo_id)
+);

@@ -18,12 +18,26 @@ USER_TAG_SCORE = 10.0      # far above every threshold: a tag the user set alway
 
 # ---------------------------------------------------------------------------- albums
 
+def visible_sql(alias: str, user_id: int | None) -> str:
+    """SQL true for albums `user_id` may see: everything shared, and their own private ones."""
+    if user_id is None:
+        return "1"
+    return f"({alias}.private = 0 OR {alias}.owner_user_id = {int(user_id)})"
+
+
+def can_see(conn: sqlite3.Connection, album_id: int, user_id: int | None):
+    """The album row if it exists, is not deleted and this account may see it; else None."""
+    return conn.execute(f"SELECT * FROM albums a WHERE a.id = ? AND a.hidden = 0 AND {visible_sql('a', user_id)}",
+                        (album_id,)).fetchone()
+
+
 def create_album(conn: sqlite3.Connection, name: str, photo_ids: list[int] | None = None,
-                 description: str | None = None, source: str = "user", source_key: str | None = None) -> int:
+                 description: str | None = None, source: str = "user", source_key: str | None = None,
+                 owner_user_id: int | None = None) -> int:
     now = time.time()
     cur = conn.execute(
-        "INSERT INTO albums(name, description, source, source_key, created_at, updated_at) VALUES (?,?,?,?,?,?)",
-        (name.strip(), description, source, source_key, now, now))
+        "INSERT INTO albums(name, description, source, source_key, created_at, updated_at, owner_user_id) "
+        "VALUES (?,?,?,?,?,?,?)", (name.strip(), description, source, source_key, now, now, owner_user_id))
     aid = int(cur.lastrowid)
     if photo_ids:
         add_photos(conn, aid, photo_ids, commit=False)
@@ -123,19 +137,21 @@ def album_photo_ids(conn: sqlite3.Connection, album_id: int) -> list[int]:
     return [pid for _, pid in sorted(out)]
 
 
-def create_smart_album(conn: sqlite3.Connection, name: str, query: str) -> int:
+def create_smart_album(conn: sqlite3.Connection, name: str, query: str, owner_user_id: int | None = None) -> int:
     """An album that is a saved search: its contents follow the library as it changes."""
-    aid = create_album(conn, name)
+    aid = create_album(conn, name, owner_user_id=owner_user_id)
     conn.execute("UPDATE albums SET kind = 'smart', query = ? WHERE id = ?", (query.strip(), aid))
     conn.commit()
     return aid
 
 
-def list_albums(conn: sqlite3.Connection, resolve=None) -> list[dict]:
+def list_albums(conn: sqlite3.Connection, resolve=None, user_id: int | None = None) -> list[dict]:
     """`resolve(query) -> photo ids` runs a smart album's saved search (the API passes the
-    search engine; without it smart albums are listed empty rather than guessed)."""
+    search engine; without it smart albums are listed empty rather than guessed). With
+    `user_id`, only the albums that account may see."""
     out = []
-    for a in conn.execute("SELECT * FROM albums WHERE hidden = 0 ORDER BY updated_at DESC").fetchall():
+    for a in conn.execute(f"SELECT * FROM albums a WHERE a.hidden = 0 AND {visible_sql('a', user_id)} "
+                          "ORDER BY a.updated_at DESC").fetchall():
         if a["kind"] == "smart":
             ids = list(resolve(a["query"])) if resolve else []
         else:
@@ -147,15 +163,16 @@ def list_albums(conn: sqlite3.Connection, resolve=None) -> list[dict]:
                     "kind": a["kind"], "query": a["query"],
                     "photo_count": len(ids), "cover_photo_id": cover,
                     "start_ts": _ts(conn, ids, "MIN"), "end_ts": _ts(conn, ids, "MAX"),
-                    "updated_at": a["updated_at"]})
+                    "updated_at": a["updated_at"], "private": bool(a["private"]),
+                    "mine": user_id is not None and a["owner_user_id"] == user_id})
     return out
 
 
-def albums_for_photo(conn: sqlite3.Connection, photo_id: int) -> list[dict]:
+def albums_for_photo(conn: sqlite3.Connection, photo_id: int, user_id: int | None = None) -> list[dict]:
     rows = conn.execute(
-        """SELECT DISTINCT a.id, a.name, a.source FROM albums a JOIN album_photos ap ON ap.album_id = a.id
+        f"""SELECT DISTINCT a.id, a.name, a.source FROM albums a JOIN album_photos ap ON ap.album_id = a.id
            JOIN photos p ON p.id = ap.photo_id
-           WHERE a.hidden = 0 AND (p.id = ? OR p.sha256 = (SELECT sha256 FROM photos WHERE id = ?))
+           WHERE a.hidden = 0 AND {visible_sql('a', user_id)} AND (p.id = ? OR p.sha256 = (SELECT sha256 FROM photos WHERE id = ?))
            ORDER BY a.name""", (photo_id, photo_id)).fetchall()
     return [dict(r) for r in rows]
 

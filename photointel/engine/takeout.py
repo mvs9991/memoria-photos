@@ -195,7 +195,8 @@ def import_takeout(ctx, conn: sqlite3.Connection) -> dict:
 def _apply(conn, photo_id: int, p, sc: dict, first_time: bool, stats: Counter) -> None:
     if first_time:
         if sc["favorited"]:
-            conn.execute("UPDATE photos SET favorite = 1 WHERE id = ?", (photo_id,))
+            from .favorites import imported
+            imported(conn, photo_id)
             stats["favorites"] += 1
         if sc["trashed"]:
             conn.execute("UPDATE photos SET hidden = 1 WHERE id = ?", (photo_id,))
