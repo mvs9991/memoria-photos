@@ -54,6 +54,71 @@ def _quiet(fn, *args) -> None:
         pass            # recorded on the job
 
 
+HEALTH_EVERY_S = 15 * 60
+RENEW_CHECK_S = 86400
+
+
+def start_offsite(ctx, conn) -> int:
+    from .engine import offsite
+    from .pipeline.jobs import create_job
+
+    job_id = create_job(conn, "offsite", {})
+    threading.Thread(target=_quiet, args=(offsite.run_job, ctx, job_id), daemon=True,
+                     name=f"offsite-{job_id}").start()
+    return job_id
+
+
+def _upkeep(ctx, conn, now: float, busy: bool, backup_running: bool) -> None:
+    """The always-on chores: stay awake if asked, the off-site copy, health alerts, HTTPS renewal.
+    Each is guarded on its own so one failing never stops the others."""
+    from . import health, service, tls
+    from .engine import offsite
+
+    try:
+        service.keep_awake(bool(ctx.settings.keep_awake))
+    except Exception:
+        log.debug("keep-awake failed", exc_info=True)
+    try:
+        lo = offsite.last(conn)
+        attempt = db.get_meta(conn, "offsite_attempt")
+        running = conn.execute("SELECT 1 FROM jobs WHERE kind = 'offsite' AND status IN ('running', 'queued')"
+                               ).fetchone() is not None
+        if not backup_running and offsite.due(ctx.settings, now, lo["finished_at"] if lo else None,
+                                              float(attempt) if attempt else None, running):
+            db.set_meta(conn, "offsite_attempt", now)
+            conn.commit()
+            start_offsite(ctx, conn)
+            log.info("Scheduled off-site copy started")
+    except Exception:
+        log.exception("Off-site scheduling failed")
+    try:
+        last = float(db.get_meta(conn, "last_health_check") or 0)
+        if now - last >= HEALTH_EVERY_S:
+            db.set_meta(conn, "last_health_check", now)
+            conn.commit()
+            problems = health.check(ctx, conn, now)
+            db.set_meta(conn, "health_problem_count", len(problems))
+            conn.commit()
+            health.notify(ctx, conn, problems, now)
+    except Exception:
+        log.exception("Health check failed")
+    try:
+        last = float(db.get_meta(conn, "last_tls_check") or 0)
+        if ctx.settings.https_enabled and not busy and now - last >= RENEW_CHECK_S:
+            db.set_meta(conn, "last_tls_check", now)
+            conn.commit()
+            if tls.renew_due(ctx.paths.data, now):
+                files = tls.cert_files(ctx.paths.data)
+                info = tls.cert_info(files[0]) if files else None
+                if info and info["names"]:
+                    tls.fetch_cert(ctx.paths.data, info["names"][0])
+                    log.info("HTTPS certificate renewed")
+                    if service.supervised():
+                        service.request_restart(delay=5)      # the server loads a certificate only at start
+    except Exception:
+        log.exception("HTTPS renewal failed")
+
+
 def run(ctx, stop: threading.Event) -> None:
     from .engine.backup import last_backup
     from .pipeline import jobs
@@ -83,6 +148,7 @@ def run(ctx, stop: threading.Event) -> None:
                         conn.commit()
                         start_backup(ctx, conn, ctx.settings.backup_folder)
                         log.info("Scheduled backup started to %s", ctx.settings.backup_folder)
+                _upkeep(ctx, conn, now, busy=active is not None, backup_running=backup_running)
                 pending = db.get_meta(conn, "uploads_pending_since")
                 if uploads_due(float(pending) if pending else None, now, active is not None):
                     from .engine.uploads import ensure_upload_root

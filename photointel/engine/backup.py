@@ -68,7 +68,6 @@ def validate_target(ctx, conn: sqlite3.Connection, target: str | Path) -> Path:
 def run_backup(ctx, conn: sqlite3.Connection, target: str | Path, progress: Callable[[int, int], None] | None = None,
                should_stop: Callable[[], bool] | None = None) -> dict:
     out = validate_target(ctx, conn, target)
-    data = ctx.paths.data.resolve()
     base = out / "Memoria Backup"
     t0 = time.time()
     known = {(int(r[0]), r[1]): r[2] for r in conn.execute(
@@ -116,8 +115,24 @@ def run_backup(ctx, conn: sqlite3.Connection, target: str | Path, progress: Call
         if progress and (n % 50 == 0 or n == len(files) - 1):
             progress(n + 1, len(files))
 
-    # Memoria's own data: a consistent database snapshot (the live file may be mid-write).
     mem = base / "memoria"
+    snapshot_memoria(ctx, conn, mem)
+
+    summary = {"folder": str(base), "files": len(files), "copied": copied, "unchanged": unchanged,
+               "failed": failed, "bytes": written, "hash_mismatches": mismatched[:50],
+               "errors": errors[:50], "seconds": round(time.time() - t0, 1),
+               "finished_at": time.time(), "cancelled": bool(should_stop and should_stop())}
+    (mem / "backup-log.json").write_text(json.dumps(summary, indent=1), encoding="utf-8")
+    if not summary["cancelled"]:
+        db.set_meta(conn, "last_backup", json.dumps(summary))
+        conn.commit()
+    return summary
+
+
+def snapshot_memoria(ctx, conn: sqlite3.Connection, mem: Path) -> None:
+    """Memoria's own data into `mem`: a consistent database snapshot (the live file may be
+    mid-write), the settings and the GPS tracks. Shared with the off-site copy."""
+    data = ctx.paths.data.resolve()
     mem.mkdir(parents=True, exist_ok=True)
     snap = mem / "library.db.part"
     dst_conn = sqlite3.connect(snap)
@@ -132,16 +147,6 @@ def run_backup(ctx, conn: sqlite3.Connection, target: str | Path, progress: Call
             shutil.copy2(data / name, mem / name)
     if (data / "gpx").exists():
         shutil.copytree(data / "gpx", mem / "gpx", dirs_exist_ok=True)
-
-    summary = {"folder": str(base), "files": len(files), "copied": copied, "unchanged": unchanged,
-               "failed": failed, "bytes": written, "hash_mismatches": mismatched[:50],
-               "errors": errors[:50], "seconds": round(time.time() - t0, 1),
-               "finished_at": time.time(), "cancelled": bool(should_stop and should_stop())}
-    (mem / "backup-log.json").write_text(json.dumps(summary, indent=1), encoding="utf-8")
-    if not summary["cancelled"]:
-        db.set_meta(conn, "last_backup", json.dumps(summary))
-        conn.commit()
-    return summary
 
 
 def last_backup(conn: sqlite3.Connection) -> dict | None:

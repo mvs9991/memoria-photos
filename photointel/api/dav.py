@@ -47,6 +47,17 @@ def _clean(path: str) -> str | None:
     return "/".join(parts)
 
 
+def _seen(conn, who: str) -> None:
+    """When this backup app last connected (health.py warns when a phone goes quiet). At most
+    one write per ten minutes per name: a sync makes hundreds of requests."""
+    key = f"dav_seen:{who}"
+    last = db.get_meta(conn, key)
+    now = time.time()
+    if not last or now - float(last) > 600:
+        db.set_meta(conn, key, now)
+        conn.commit()
+
+
 def _who(request: Request) -> tuple[str | None, str | None, Response | None]:
     """-> (name, role, refusal). Basic auth against accounts, or the single library password."""
     state = get_state()
@@ -187,6 +198,7 @@ async def dav(request: Request, path: str = ""):
     if clean is None:
         return Response(status_code=400)
     conn = get_state().conn()
+    _seen(conn, who)
     writes = method in ("PUT", "MKCOL", "MOVE", "COPY", "PROPPATCH")
     if writes and role == "guest":
         return Response("your account can only look", status_code=403)

@@ -199,6 +199,8 @@ ALLOWED_REMOVALS = {
     "engine/editor.py": 1,              # a trim's own .part file when nothing was copied
     "api/images.py": 1,                 # a rotated thumbnail's temp file that lost a race
     "api/dav.py": 3,                    # a backup app's own temp uploads (too large / stored / moved)
+    "autostart.py": 3,                  # its own start-up entries (Startup .cmd, launchd plist, systemd unit)
+    "tls.py": 1,                        # a half-fetched certificate in <data>/tls
 }
 REMOVAL = re.compile(r"\.unlink\(|os\.remove\(|os\.unlink\(|rmtree\(|\.rmdir\(|os\.rename\(|\.rename\(|send2trash")
 

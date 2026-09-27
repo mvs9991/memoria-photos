@@ -24,7 +24,8 @@ _NAME = re.compile(r"^[\w .@-]{2,40}$", re.U)
 # Paths only an owner may use at all, and ones only an owner may change.
 OWNER_ONLY = ("/api/trash", "/api/locked", "/api/accounts", "/api/roots", "/api/cache", "/api/backup",
               "/api/export/xmp", "/api/gpx", "/api/photos/lock", "/api/photos/unlock", "/api/auth/password",
-              "/api/audit", "/api/errors", "/api/browse")
+              "/api/audit", "/api/errors", "/api/browse", "/api/alerts", "/api/service", "/api/https",
+              "/api/offsite")
 OWNER_ONLY_WRITES = ("/api/settings", "/api/jobs")
 OPEN_TO_ALL = ("/api/accounts/me",)
 GUEST_POSTS = ("/api/export/zip", "/api/export/preview")

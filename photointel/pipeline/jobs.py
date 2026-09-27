@@ -103,7 +103,7 @@ def create_job(conn, kind: str, params: dict | None = None) -> int:
 
 
 # Jobs that only read the library and run alongside indexing (never "the" index job).
-LONG_SIDE_JOBS = ("export", "backup", "create")
+LONG_SIDE_JOBS = ("export", "backup", "create", "offsite")
 
 
 def reap_stale_jobs(conn) -> int:

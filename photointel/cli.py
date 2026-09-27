@@ -41,29 +41,187 @@ def cmd_index(ctx: AppContext, args) -> None:
 def cmd_serve(ctx: AppContext, args) -> None:
     import uvicorn
 
+    from . import tls as tls_mod
     from .api.app import create_app
     from .auth import is_loopback
 
     from .accounts import enabled as accounts_enabled
 
+    host = args.host or ctx.settings.serve_host
+    port = args.port or ctx.settings.serve_port
     c = ctx.connect()
     protected = bool(ctx.settings.access_password_hash) or accounts_enabled(c)
     c.close()
-    if not is_loopback(args.host) and not protected and not args.insecure:
+    if not is_loopback(host) and not protected and not args.insecure:
         print("Refusing to serve beyond this machine without a password: anyone on the network could "
               "browse every photo.\nSet one first:  python -m photointel set-password\n"
               "(or pass --insecure if you really mean it)", file=sys.stderr)
         sys.exit(2)
 
-    app = create_app(ctx)
-    tls = {}
+    servers = []                                    # (host, port, tls options)
     if args.ssl_cert or args.ssl_key:
         if not (args.ssl_cert and args.ssl_key):
             print("Give both --ssl-cert and --ssl-key", file=sys.stderr)
             sys.exit(2)
-        tls = {"ssl_certfile": args.ssl_cert, "ssl_keyfile": args.ssl_key}
-    print(f"Memoria running at {'https' if tls else 'http'}://{args.host}:{args.port}")
-    uvicorn.run(app, host=args.host, port=args.port, log_level="warning", **tls)
+        servers.append((host, port, {"ssl_certfile": args.ssl_cert, "ssl_keyfile": args.ssl_key}))
+    else:
+        servers.append((host, port, {}))
+        files = tls_mod.cert_files(ctx.paths.data) if ctx.settings.https_enabled else None
+        if files:
+            # HTTPS beside plain http. The certificate's name is reached over Tailscale, which is
+            # not "this machine only", so it listens everywhere and needs the password too.
+            if not protected and not args.insecure:
+                print("HTTPS is on but there is no password: set one first (python -m photointel set-password)",
+                      file=sys.stderr)
+                sys.exit(2)
+            servers.append(("0.0.0.0", ctx.settings.https_port,
+                            {"ssl_certfile": str(files[0]), "ssl_keyfile": str(files[1])}))
+    app = create_app(ctx)
+    for h, p, t in servers:
+        print(f"Memoria running at {'https' if t else 'http'}://{h}:{p}")
+    if len(servers) == 1:
+        h, p, t = servers[0]
+        uvicorn.run(app, host=h, port=p, log_level="warning", **t)
+        return
+    _serve_together(app, servers)
+
+
+def _serve_together(app, servers) -> None:
+    """Several listeners (http and https) on one app, in one process; when one stops, all stop."""
+    import asyncio
+
+    import uvicorn
+
+    running = [uvicorn.Server(uvicorn.Config(app, host=h, port=p, log_level="warning", **t)) for h, p, t in servers]
+
+    async def one(server):
+        try:
+            await server.serve()
+        finally:
+            for other in running:
+                other.should_exit = True
+
+    async def main():
+        await asyncio.gather(*(one(s) for s in running))
+
+    asyncio.run(main())
+
+
+def cmd_run(ctx: AppContext, args) -> None:
+    from . import service
+
+    extra = []
+    if args.host:
+        extra += ["--host", args.host]
+    if args.port:
+        extra += ["--port", str(args.port)]
+    print(f"Memoria's keeper is running (data: {ctx.paths.data}); it restarts the server if it stops. "
+          "Ctrl+C to stop.")
+    why = service.run(ctx.paths.data, extra)
+    if why == "config-error":
+        print("The server refused to start; see logs/server-output.log", file=sys.stderr)
+        sys.exit(2)
+
+
+def cmd_health(ctx: AppContext, args) -> None:
+    from . import health
+
+    conn = ctx.connect()
+    problems = health.check(ctx, conn)
+    conn.close()
+    if not problems:
+        print("Nothing needs attention.")
+    for p in problems:
+        print(f"[{p['level'].upper()}] {p['title']}\n    {p['detail']}" + (f"\n    -> {p['fix']}" if p["fix"] else ""))
+
+
+def cmd_offsite(ctx: AppContext, args) -> None:
+    import getpass
+
+    from .engine import offsite
+    from .engine.xmp import ExportError
+
+    conn = ctx.connect()
+    try:
+        if args.action == "setup":
+            if not args.where:
+                print("Where should the copy go? e.g.  offsite setup E:/MemoriaOffsite  or  sftp:me@host:/backups",
+                      file=sys.stderr)
+                sys.exit(2)
+            if offsite.find_restic(ctx) is None:
+                print("restic is not installed. " + offsite.install_hint(), file=sys.stderr)
+                sys.exit(1)
+            typed = getpass.getpass("Password for the copy (Enter = make a strong one for you): ")
+            if typed and typed != getpass.getpass("Again: "):
+                print("They do not match.", file=sys.stderr)
+                sys.exit(2)
+            password = typed or offsite.new_password()
+            out = offsite.setup(ctx, conn, args.where, password)
+            print(("Created" if out["created"] else "Opened") + f" the encrypted copy at {out['repo']}.")
+            if not typed:
+                print(f"\n  Its password:  {password}\n")
+            print("Write the password down and keep it away from this computer: without it the copy cannot be\n"
+                  "opened, and a fire that takes this computer takes the copy of the password here too.")
+        elif args.action == "run":
+            def show(frac, msg):
+                print(f"\r{frac:6.1%}  {msg:60}", end="", flush=True)
+            out = offsite.run(ctx, conn, progress=show)
+            print(f"\nDone: {len(out['snapshots'])} snapshots, {out['files_new']:,} new and "
+                  f"{out['files_changed']:,} changed files, {out['bytes_added'] / (1 << 20):,.0f} MB added.")
+            for e in out["unreadable"]:
+                print("  could not read:", e)
+        elif args.action == "status":
+            print(json.dumps({"repo": ctx.settings.offsite_repo, "restic": str(offsite.find_restic(ctx) or ""),
+                              "last": offsite.last(conn), "last_check": offsite.last(conn, "offsite_check")},
+                             indent=2, default=str))
+        elif args.action == "snapshots":
+            for snap in offsite.snapshots(ctx):
+                print(snap["id"], snap["time"], ", ".join(snap["paths"]))
+        elif args.action == "check":
+            out = offsite.verify(ctx, conn, subset=args.subset)
+            print("The copy reads back correctly." if out["ok"] else "CHECK FAILED: " + out["detail"])
+        elif args.action == "restore":
+            if not args.where:
+                print("Give an empty folder to restore into", file=sys.stderr)
+                sys.exit(2)
+            out = offsite.restore_snapshot(ctx, conn, args.where, args.snapshot)
+            for r in out["restored"]:
+                print(f"Restored {', '.join(r['paths'])} (snapshot {r['snapshot']}) into {r['into']}")
+            for w in out["warnings"]:
+                print("  note:", w)
+            print("Your library was not touched.")
+    except (offsite.OffsiteError, ExportError) as exc:
+        print(str(exc), file=sys.stderr)
+        sys.exit(1)
+    finally:
+        conn.close()
+
+
+def cmd_autostart(ctx: AppContext, args) -> None:
+    from . import autostart
+
+    if args.action == "status":
+        print(json.dumps(autostart.status(), indent=2))
+        return
+    if args.action == "off":
+        gone = autostart.remove()
+        print("\n".join(f"Removed {g}" for g in gone) or "Memoria was not set to start by itself.")
+        return
+    if args.host:
+        ctx.settings.serve_host = args.host
+    if args.port:
+        ctx.settings.serve_port = args.port
+    ctx.settings.save(ctx.paths.data)
+    try:
+        out = autostart.install(ctx.paths.data, at_boot=args.at_boot)
+    except PermissionError as exc:
+        print(str(exc), file=sys.stderr)
+        sys.exit(1)
+    when = "when the computer starts" if out["method"] == "boot" else "when you sign in"
+    print(f"Memoria will start {when} ({out['where']}), listening on "
+          f"{ctx.settings.serve_host}:{ctx.settings.serve_port}.")
+    if out.get("note"):
+        print(out["note"])
 
 
 def cmd_geo_setup(ctx: AppContext, args) -> None:
@@ -267,6 +425,9 @@ def cmd_status(ctx: AppContext, args) -> None:
 
 
 def main(argv: list[str] | None = None) -> None:
+    for stream in (sys.stdout, sys.stderr):          # a Windows console may not have “ or →: never crash on it
+        if stream is not None and hasattr(stream, "reconfigure"):
+            stream.reconfigure(errors="replace")
     parser = argparse.ArgumentParser(prog="photointel", description="Memoria — local photo intelligence")
     parser.add_argument("--data", help="data directory (default: ./data or $PHOTOINTEL_DATA)")
     parser.add_argument("-v", "--verbose", action="store_true")
@@ -289,11 +450,30 @@ def main(argv: list[str] | None = None) -> None:
     p.add_argument("--stages", help="with --post-only: comma-separated post stages to run (default: all)")
 
     p = sub.add_parser("serve", help="run the web application")
-    p.add_argument("--host", default="127.0.0.1")
-    p.add_argument("--port", type=int, default=8765)
+    p.add_argument("--host", help="default: the saved one (127.0.0.1 = this computer only; 0.0.0.0 = the network)")
+    p.add_argument("--port", type=int, help="default: the saved one (8765)")
     p.add_argument("--insecure", action="store_true", help="allow a non-local host without a password")
     p.add_argument("--ssl-cert", help="serve HTTPS with this certificate (e.g. from `tailscale cert`)")
     p.add_argument("--ssl-key", help="the certificate's private key")
+
+    p = sub.add_parser("run", help="serve, and start the server again if it stops (what auto-start runs)")
+    p.add_argument("--host")
+    p.add_argument("--port", type=int)
+
+    p = sub.add_parser("autostart", help="start Memoria with the computer (on | off | status)")
+    p.add_argument("action", choices=["on", "off", "status"])
+    p.add_argument("--at-boot", action="store_true",
+                   help="Windows: before anyone signs in (Task Scheduler, needs an administrator terminal)")
+    p.add_argument("--host", help="save where it listens, e.g. 0.0.0.0 for phones on the home network")
+    p.add_argument("--port", type=int)
+
+    sub.add_parser("health", help="what needs attention: drives, disk space, backups, phones, HTTPS")
+
+    p = sub.add_parser("offsite", help="the encrypted off-site copy (restic): setup, run, status, snapshots, check, restore")
+    p.add_argument("action", choices=["setup", "run", "status", "snapshots", "check", "restore"])
+    p.add_argument("where", nargs="?", help="setup: where the copy goes; restore: an empty folder to restore into")
+    p.add_argument("--snapshot", default="latest", help="restore: which snapshot (default: the latest)")
+    p.add_argument("--subset", default="5%", help="check: how much of the stored data to read back")
 
     sub.add_parser("set-password", help="require a password for the web app (empty input removes it)")
 
@@ -357,7 +537,8 @@ def main(argv: list[str] | None = None) -> None:
                 "geo-setup": cmd_geo_setup, "models": cmd_models, "caption": cmd_caption, "ocr": cmd_ocr,
                 "export-xmp": cmd_export_xmp,
                 "set-password": cmd_set_password, "import-gpx": cmd_import_gpx, "export": cmd_export,
-                "trash": cmd_trash, "backup": cmd_backup, "accounts": cmd_accounts}
+                "trash": cmd_trash, "backup": cmd_backup, "accounts": cmd_accounts, "run": cmd_run,
+                "autostart": cmd_autostart, "health": cmd_health, "offsite": cmd_offsite}
     t0 = time.time()
     handlers[args.cmd](ctx, args)
     log.debug("%s finished in %.1fs", args.cmd, time.time() - t0)

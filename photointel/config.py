@@ -58,6 +58,15 @@ class Settings:
     upload_folder: str = ""               # where phone uploads are stored; "" = <data>/uploads
     backup_folder: str = ""               # another drive to copy everything to; "" = no backup
     backup_every_days: int = 7            # with a backup folder: how often a running server backs up
+    serve_host: str = "127.0.0.1"         # where `serve`/`run` listen by default; 0.0.0.0 = the home network
+    serve_port: int = 8765
+    https_enabled: bool = False           # also serve HTTPS with the certificate in <data>/tls (see tls.py)
+    https_port: int = 8443
+    keep_awake: bool = False              # Windows: the computer does not sleep while Memoria runs
+    alert_webhook: str = ""               # optional: health problems are POSTed here (e.g. an ntfy topic)
+    offsite_repo: str = ""                # the encrypted off-site copy (restic): a folder, sftp:… or rest:…
+    offsite_every_days: int = 7
+    restic_path: str = ""                 # "" = find restic on PATH or in <data>/bin
     # Privacy: all external services are opt-in.
     allow_online_map_tiles: bool = False
     llm_enabled: bool = False
