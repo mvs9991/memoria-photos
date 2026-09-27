@@ -465,3 +465,15 @@ CREATE TABLE IF NOT EXISTS dav_pending (
     created_at REAL NOT NULL,
     PRIMARY KEY (who, path)
 );
+
+-- What an XMP sidecar from another app said about a photo (see engine/xmp_import.py).
+CREATE TABLE IF NOT EXISTS xmp_sidecars (
+    photo_id    INTEGER PRIMARY KEY REFERENCES photos(id) ON DELETE CASCADE,
+    path        TEXT NOT NULL,
+    mtime       REAL NOT NULL,
+    rating      INTEGER,
+    keywords    TEXT,                              -- JSON list, as last read
+    description TEXT,
+    people      TEXT,                              -- JSON list of names on face regions
+    imported_at REAL NOT NULL
+);

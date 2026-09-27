@@ -278,9 +278,13 @@ def name_suggestions(conn: sqlite3.Connection, min_photos: int = 3, min_share: f
     somebody else who is often photographed with P. Each name and each person is used
     once, strongest evidence first. Nothing is applied — the user accepts or dismisses.
     """
+    from .xmp_import import people_by_content
+
+    # Names from Google Takeout sidecars and from other apps' XMP face regions alike.
     rows = conn.execute(
         """SELECT COALESCE(p.sha256, 'id:' || p.id) AS k, s.people FROM takeout_sidecars s
            JOIN photos p ON p.id = s.photo_id WHERE s.people IS NOT NULL AND s.people != '[]'""").fetchall()
+    rows = list(rows) + list(people_by_content(conn))
     names_of: dict[str, set[str]] = defaultdict(set)
     for r in rows:
         try:

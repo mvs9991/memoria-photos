@@ -127,3 +127,113 @@ def test_uploads_are_indexed_once_they_pause():
     assert not uploads_due(now - 30, now, False)
     assert uploads_due(now - 61, now, False)
     assert not uploads_due(now - 61, now, True)
+
+
+# ----------------------------------------------------------------- XMP sidecars from other apps
+
+DIGIKAM = """<?xpacket begin="" id="W5M0MpCehiHzreSzNTczkc9d"?>
+<x:xmpmeta xmlns:x="adobe:ns:meta/" x:xmptk="XMP Core 4.4.0-Exiv2">
+ <rdf:RDF xmlns:rdf="http://www.w3.org/1999/02/22-rdf-syntax-ns#">
+  <rdf:Description rdf:about="" xmlns:xmp="http://ns.adobe.com/xap/1.0/" xmlns:dc="http://purl.org/dc/elements/1.1/"
+    xmlns:lr="http://ns.adobe.com/lightroom/1.0/" xmlns:mwg-rs="http://www.metadataworkinggroup.com/schemas/regions/"
+    xmp:Rating="4">
+   <dc:subject><rdf:Bag><rdf:li>{kw}</rdf:li><rdf:li>Priya</rdf:li></rdf:Bag></dc:subject>
+   <lr:hierarchicalSubject><rdf:Bag><rdf:li>People|Priya</rdf:li></rdf:Bag></lr:hierarchicalSubject>
+   <dc:description><rdf:Alt><rdf:li xml:lang="x-default">{desc}</rdf:li></rdf:Alt></dc:description>
+   <mwg-rs:Regions rdf:parseType="Resource"><mwg-rs:RegionList><rdf:Bag>
+     <rdf:li rdf:parseType="Resource"><mwg-rs:Name>Priya</mwg-rs:Name><mwg-rs:Type>Face</mwg-rs:Type></rdf:li>
+   </rdf:Bag></mwg-rs:RegionList></mwg-rs:Regions>
+  </rdf:Description>
+ </rdf:RDF>
+</x:xmpmeta>"""
+
+LIGHTROOM = """<x:xmpmeta xmlns:x="adobe:ns:meta/" x:xmptk="Adobe XMP Core 7.0">
+ <rdf:RDF xmlns:rdf="http://www.w3.org/1999/02/22-rdf-syntax-ns#">
+  <rdf:Description rdf:about="" xmlns:xmp="http://ns.adobe.com/xap/1.0/"><xmp:Rating>5</xmp:Rating></rdf:Description>
+ </rdf:RDF>
+</x:xmpmeta>"""
+
+
+def test_parse_sidecars_from_other_apps():
+    from photointel.engine.xmp_import import parse_sidecar
+
+    d = parse_sidecar(DIGIKAM.format(kw="Beach", desc="Sunset at Baga").encode())
+    assert d == {"rating": 4, "keywords": ["Beach"], "description": "Sunset at Baga", "people": ["Priya"],
+                 "tool": "XMP Core 4.4.0-Exiv2"}
+    assert parse_sidecar(LIGHTROOM.encode())["rating"] == 5
+    assert parse_sidecar(b"not xml") is None
+
+
+def test_sidecars_bring_stars_keywords_and_name_suggestions(ctx, library, app):
+    from photointel.engine.takeout import name_suggestions
+    from photointel.engine.xmp_import import import_xmp
+    from photointel.pipeline.post import run_post_stages
+
+    goa = library / "Trips/Goa"
+    for i in range(4):
+        (goa / f"IMG_x{i}.jpg.xmp").write_text(DIGIKAM.format(kw="Beach", desc=f"Day {i}"), encoding="utf-8")
+    (goa / "IMG_x4.xmp").write_text(LIGHTROOM, encoding="utf-8")                   # Lightroom names it by stem
+    index(ctx, library)
+    conn = ctx.connect()
+    conn.execute("UPDATE photos SET rating = 2 WHERE filename = 'IMG_x3.jpg'")      # set here already: kept
+    conn.commit()
+    run_post_stages(ctx, conn, stages=["people"])
+    out = import_xmp(ctx, conn)
+    assert out["sidecars"] == 5
+    row = lambda n: conn.execute("SELECT * FROM photos WHERE filename = ?", (n,)).fetchone()  # noqa: E731
+    assert row("IMG_x0.jpg")["rating"] == 4 and row("IMG_x0.jpg")["description"] == "Day 0"
+    assert row("IMG_x3.jpg")["rating"] == 2 and row("IMG_x4.jpg")["rating"] == 5
+    tagged = {r[0] for r in conn.execute(
+        "SELECT p.filename FROM photo_tags pt JOIN tags t ON t.id = pt.tag_id JOIN photos p ON p.id = pt.photo_id "
+        "WHERE t.name = 'beach' AND pt.source = 'user'")}
+    assert tagged == {f"IMG_x{i}.jpg" for i in range(4)}
+    assert not conn.execute("SELECT 1 FROM tags WHERE name = 'priya'").fetchone()     # a person, not a keyword
+    sug = name_suggestions(conn)
+    assert [s["name"] for s in sug] == ["Priya"]                                         # suggested, not applied
+    assert conn.execute("SELECT COUNT(*) FROM persons WHERE name = 'Priya'").fetchone()[0] == 0
+
+    # removing a tag here sticks; a keyword added later in the other app arrives
+    pid = row("IMG_x0.jpg")["id"]
+    TestClient(app).post("/api/photos/tags/remove", json={"photo_ids": [pid], "name": "beach"})
+    side = goa / "IMG_x0.jpg.xmp"
+    side.write_text(DIGIKAM.format(kw="Beach</rdf:li><rdf:li>Sunset", desc="Day 0"), encoding="utf-8")
+    later = time.time() + 5
+    import os
+    os.utime(side, (later, later))
+    import_xmp(ctx, conn)
+    names = {r[0] for r in conn.execute("SELECT t.name FROM photo_tags pt JOIN tags t ON t.id = pt.tag_id "
+                                        "WHERE pt.photo_id = ? AND pt.source = 'user'", (pid,))}
+    assert names == {"sunset"}
+    conn.close()
+
+
+def test_memoria_own_exports_are_not_read_back(ctx, library):
+    from photointel.engine.xmp_import import import_xmp
+
+    (library / "Trips/Goa/IMG_x0.jpg.xmp").write_text(
+        DIGIKAM.replace("XMP Core 4.4.0-Exiv2", "Memoria").format(kw="auto-tag", desc="x"), encoding="utf-8")
+    index(ctx, library)
+    conn = ctx.connect()
+    out = import_xmp(ctx, conn)
+    assert out.get("memoria_exports_skipped") == 1 and not out.get("sidecars")
+    conn.close()
+
+
+def test_a_stem_sidecar_goes_to_the_raw_file(ctx, tmp_path):
+    from datetime import datetime
+
+    from photointel.engine.xmp_import import import_xmp
+    from tests.conftest import make_image
+
+    root = tmp_path / "cam"
+    make_image(root / "DSC_1.JPG", taken=datetime(2024, 6, 1, 8, 0))
+    make_image(root / "DSC_1.tmp.jpg", colour=(10, 200, 40), taken=datetime(2024, 6, 1, 8, 0, 30))
+    (root / "DSC_1.xmp").write_text(LIGHTROOM, encoding="utf-8")
+    index(ctx, root)
+    conn = ctx.connect()
+    conn.execute("UPDATE photos SET filename='DSC_1.NEF', ext='.nef' WHERE filename='DSC_1.tmp.jpg'")  # stand-in RAW
+    conn.commit()
+    import_xmp(ctx, conn)
+    ratings = dict(conn.execute("SELECT filename, rating FROM photos").fetchall())
+    assert ratings == {"DSC_1.JPG": 0, "DSC_1.NEF": 5}
+    conn.close()
