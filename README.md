@@ -82,6 +82,7 @@ photos ──► scan ──► decode / EXIF / hash / thumbnail ──► faces
 | **Health** | Tells the owner what quietly went wrong — a photo drive unplugged, a disk filling up, a backup that is late or failed, a phone that stopped backing up, repeated crashes, a certificate about to lapse — in the app, and optionally as a notification on your phone (ntfy or Discord). |
 | **Access from anywhere** | HTTPS through Tailscale: a private address only your own devices can reach, with a real certificate that renews itself. No router ports. |
 | **Family accounts** | Optional logins over one shared library: *owner* (everything), *family* (browse, upload, albums, downloads — no deleting or settings), *guest* (look and download). Each person has their own favourites, and can make an album private to themselves. |
+| **Private photos** | With accounts, each person can keep what their phone backs up to themselves: those photos appear only on their own Private page — not in anyone else's timeline, people, search, map or albums, and not the owner's either — until they choose *Share with family*. |
 | **Locked folder** | Move private photos behind a PIN: they vanish from every list, search, person, map and share, and their images are refused until an owner opens the folder on that device for 15 minutes. |
 | **Archive** | Out of the timeline, memories and the photo frame; still in search, albums and people. |
 | **Edit & trim, as copies** | Crop (free or 1:1, 4:3, 3:2, 16:9), rotate, flip, auto, light, contrast, colour, warmth and filters; trim a video without re-encoding. Saved as a new file — the original is only read. Rotating in the viewer is kept in Memoria and never written to the file. |
@@ -318,6 +319,9 @@ A folder-sync app such as [Syncthing](https://syncthing.net) into a folder Memor
   Its images are sent `no-store`, so neither the browser nor the phone's offline copy keeps them.
 - With accounts, favourites are per person and a private album is visible only to the person who
   made it — in lists, search, photo details, exports and share links alike.
+- A person's private photos are left out of everything the family shares — and out of the shared
+  people, events and search index, so a private face never becomes someone's cover. Like the Locked
+  folder this hides photos in the app: whoever runs the computer can still open the files on disk.
 
 ---
 
@@ -545,7 +549,7 @@ face recogniser.
 python -m pytest tests/ -q
 ```
 
-They stub the neural nets, so all 291 tests run on CPU in about 75 seconds and still cover
+They stub the neural nets, so all 300 tests run on CPU in about 90 seconds and still cover
 scanning, incremental re-indexing, moves, decoding, metadata, clustering, corrections, events,
 duplicates, search parsing and the HTTP API. The fixtures seed their randomness from stable
 hashes, so a failure reproduces on the next run instead of disappearing.

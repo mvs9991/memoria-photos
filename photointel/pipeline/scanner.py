@@ -132,7 +132,8 @@ def scan_root(conn: sqlite3.Connection, root_id: int, root_path: Path, exclude: 
         if restored:
             conn.executemany(
                 "UPDATE photos SET status = CASE WHEN meta_version IS NULL THEN 'pending' "
-                "WHEN error IS NOT NULL THEN 'error' WHEN locked = 1 THEN 'locked' ELSE 'ok' END, last_seen_at=? WHERE id=?",
+                "WHEN error IS NOT NULL THEN 'error' WHEN private_to IS NOT NULL THEN 'private' "
+                "WHEN locked = 1 THEN 'locked' ELSE 'ok' END, last_seen_at=? WHERE id=?",
                 restored,
             )
             restored.clear()

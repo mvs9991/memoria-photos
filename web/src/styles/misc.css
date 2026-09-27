@@ -471,3 +471,5 @@
   user-select: all;
 }
 .setting-card code { overflow-wrap: anywhere; }
+.my-privacy { margin-top: 14px; padding-top: 12px; border-top: 1px solid var(--hairline); }
+.my-privacy p { display: flex; flex-wrap: wrap; align-items: center; gap: 8px; margin: 8px 0 0; }

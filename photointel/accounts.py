@@ -139,13 +139,16 @@ def delete(conn: sqlite3.Connection, uid: int, acting_uid: int | None) -> None:
     conn.execute("DELETE FROM user_favorites WHERE user_id = ?", (uid,))
     # Their albums (private ones included) pass to the owner who removed them: nothing is lost.
     conn.execute("UPDATE albums SET owner_user_id = ? WHERE owner_user_id = ?", (acting_uid, uid))
+    # Their private photos too — to that owner, never to everyone.
+    heir = acting_uid or conn.execute("SELECT id FROM users WHERE role = 'owner' ORDER BY id LIMIT 1").fetchone()[0]
+    conn.execute("UPDATE photos SET private_to = ? WHERE private_to = ?", (heir, uid))
     db.audit(conn, "account_removed", "user", uid, {"username": u["username"]})
     conn.commit()
 
 
 def get(conn: sqlite3.Connection, uid: int) -> dict | None:
-    r = conn.execute("SELECT id, username, role, disabled, created_at, last_login_at FROM users WHERE id = ?",
-                     (uid,)).fetchone()
+    r = conn.execute("SELECT id, username, role, disabled, created_at, last_login_at, private_uploads FROM users "
+                     "WHERE id = ?", (uid,)).fetchone()
     return dict(r) if r else None
 
 

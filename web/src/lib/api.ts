@@ -530,6 +530,16 @@ export const api = {
   }),
   closeLocked: () => request(`/locked/close`, { method: "POST" }),
   lockedPhotos: () => request<PhotoIndex>("/locked/photos"),
+  // private photos: one family member's own (engine/private.py)
+  myAccount: () => request<{ id: number | null; username: string | null; role: string; private_uploads?: number }>("/accounts/me"),
+  privatePhotos: () => request<PhotoIndex>("/private/photos"),
+  /** `null`: everything I uploaded */
+  makePrivate: (photo_ids: number[] | null) =>
+    request<{ private: number; not_yours: number }>("/photos/private", { method: "POST", body: JSON.stringify({ photo_ids }) }),
+  shareWithFamily: (photo_ids: number[]) =>
+    request<{ shared: number }>("/photos/share-with-family", { method: "POST", body: JSON.stringify({ photo_ids }) }),
+  setPrivateUploads: (on: boolean) =>
+    request<any>("/accounts/me/private-uploads", { method: "POST", body: JSON.stringify({ on }) }),
   lock: (photo_ids: number[]) =>
     request<{ locked: number }>(`/photos/lock`, { method: "POST", body: JSON.stringify({ photo_ids }) }),
   unlock: (photo_ids: number[]) =>

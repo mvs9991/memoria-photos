@@ -9,7 +9,7 @@ from contextlib import contextmanager
 from pathlib import Path
 from typing import Any, Iterable, Iterator
 
-SCHEMA_VERSION = 7
+SCHEMA_VERSION = 8
 _SCHEMA_FILE = Path(__file__).with_name("schema.sql")
 
 # Columns added to `photos` after v1: (name, SQL type/default).
@@ -56,6 +56,11 @@ V6_COLUMNS = {
     ],
 }
 # v7: albums private to one account.
+# v8: photos private to one account (engine/private.py).
+V8_COLUMNS = {
+    "photos": [("private_to", "INTEGER")],                          # the account that alone sees it
+    "users": [("private_uploads", "INTEGER NOT NULL DEFAULT 0")],   # keep new phone backups private
+}
 V7_COLUMNS = {
     "albums": [
         ("owner_user_id", "INTEGER"),                   # the account that made it (NULL: before accounts, imports)
@@ -79,7 +84,7 @@ def _add_columns(conn: sqlite3.Connection, table: str, columns: list[tuple[str, 
 def _ensure_columns(conn: sqlite3.Connection) -> None:
     """Add every post-v1 column that is missing. Idempotent; runs for new and old databases."""
     _add_columns(conn, "photos", V2_PHOTO_COLUMNS)
-    for table, cols in (*V3_COLUMNS.items(), *V6_COLUMNS.items(), *V7_COLUMNS.items()):
+    for table, cols in (*V3_COLUMNS.items(), *V6_COLUMNS.items(), *V7_COLUMNS.items(), *V8_COLUMNS.items()):
         _add_columns(conn, table, cols)
     for sql in MIGRATION_INDEXES:
         conn.execute(sql)

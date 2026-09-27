@@ -96,7 +96,11 @@ def guard_locked(row) -> None:
     locked = ("locked" in keys and row["locked"]) or ("status" in keys and row["status"] == "locked")
     if locked and not (locked_open() and current_role() == "owner"):
         raise HTTPException(404, "photo not found")
-    if locked:
+    # A private photo exists only for its person (engine/private.py) — not even for the owner.
+    if ("private_to" in keys and row["private_to"] is not None and row["private_to"] != current_user_id()) \
+            or ("status" in keys and row["status"] == "private" and "private_to" not in keys):
+        raise HTTPException(404, "photo not found")
+    if locked or ("private_to" in keys and row["private_to"] is not None):
         # Shown, but never kept: not by the browser, not by the phone's offline copy.
         notes = _response_notes.get()
         if notes is not None:

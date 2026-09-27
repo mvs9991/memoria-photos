@@ -124,6 +124,11 @@ class Indexer:
                 stats = scan_root(conn, root_id, Path(r), exclude=[self.ctx.paths.data],
                                   progress=lambda n: self._report("scan", n, 0, f"Found {n:,} files"),
                                   should_stop=lambda: self._check_cancel(conn))
+                # Before anything is analysed (and so could be seen): new files in the upload folder of
+                # someone who keeps their photos private become theirs.
+                from ..engine.private import claim_new
+
+                claim_new(self.ctx, conn, root_id)
                 results.append(stats)
             return results
         finally:
@@ -544,7 +549,8 @@ class Indexer:
                     conn.execute("DELETE FROM photos WHERE id=?", (pid,))
                     conn.execute(
                         "UPDATE photos SET root_id=?, rel_path=?, folder=?, filename=?, ext=?, size=?, mtime=?, ctime=?, "
-                        "status = CASE WHEN error IS NOT NULL THEN 'error' WHEN locked = 1 THEN 'locked' ELSE 'ok' END, "
+                        "status = CASE WHEN error IS NOT NULL THEN 'error' WHEN private_to IS NOT NULL THEN 'private' "
+                        "WHEN locked = 1 THEN 'locked' ELSE 'ok' END, "
                         "last_seen_at=? WHERE id=?",
                         (*tuple(row), now, old_id),
                     )
@@ -567,8 +573,9 @@ class Indexer:
                 f"UPDATE photos SET {', '.join(c + '=?' for c in cols)}, meta_version=?, status=?, error=?{location_cols} WHERE id=?",
                 (*vals, META_VERSION, "error" if r.error else "ok", r.error, pid),
             )
-            # A photo in the Locked folder stays locked through re-analysis.
-            conn.execute("UPDATE photos SET status = 'locked' WHERE id = ? AND locked = 1 AND status = 'ok'", (pid,))
+            # A private photo stays private, and a locked one locked, through re-analysis.
+            conn.execute("UPDATE photos SET status = CASE WHEN private_to IS NOT NULL THEN 'private' ELSE 'locked' END "
+                         "WHERE id = ? AND status = 'ok' AND (private_to IS NOT NULL OR locked = 1)", (pid,))
             corrections.apply_overrides(conn, [pid])   # the user's date/place fixes beat the file's
             self.stats["processed"] += 1
         if r.error:

@@ -122,8 +122,11 @@ def save_upload(ctx, conn: sqlite3.Connection, stream: BinaryIO, filename: str, 
         if size == 0:
             raise UploadError("empty file")
         digest = h.hexdigest()
+        # Someone else's private photo is not "already in the library" for this person: their copy
+        # must arrive (and nothing about the other one is revealed).
         dup = conn.execute("SELECT id, status FROM photos WHERE sha256 = ? AND status != 'deleted' "
-                           "ORDER BY status = 'ok' DESC LIMIT 1", (digest,)).fetchone()
+                           "AND (private_to IS NULL OR private_to = (SELECT id FROM users WHERE username = ?)) "
+                           "ORDER BY status = 'ok' DESC LIMIT 1", (digest, who)).fetchone()
         if dup is not None:
             where = "in the Trash" if dup["status"] == "trashed" else "already in your library"
             if album_id is not None and dup["status"] == "ok":        # no second copy, but it joins the album
@@ -131,8 +134,9 @@ def save_upload(ctx, conn: sqlite3.Connection, stream: BinaryIO, filename: str, 
                 add_photos(conn, album_id, [int(dup["id"])])
             return Saved("duplicate", name, reason=where, photo_id=int(dup["id"]))
         # uploaded a moment ago and not indexed yet
-        earlier = conn.execute("SELECT path FROM uploads WHERE sha256 = ?", (digest,)).fetchone()
-        if earlier is not None and Path(earlier[0]).exists():
+        earlier = conn.execute("SELECT path, who FROM uploads WHERE sha256 = ?", (digest,)).fetchone()
+        if earlier is not None and Path(earlier[0]).exists() and (earlier["who"] == who or not conn.execute(
+                "SELECT 1 FROM users WHERE username = ? AND private_uploads = 1", (earlier["who"] or "",)).fetchone()):
             if album_id is not None:
                 conn.execute("UPDATE uploads SET album_id = COALESCE(album_id, ?) WHERE sha256 = ?", (album_id, digest))
                 conn.commit()

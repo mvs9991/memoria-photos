@@ -2,7 +2,7 @@ import { NavLink } from "react-router-dom";
 import { useQuery } from "@tanstack/react-query";
 import {
   BookImage, CalendarRange, Copy, Images, MapPin, PanelLeftClose, PanelLeft, Settings as SettingsIcon,
-  Sparkles, Users, Clock, Map as MapIcon, LayoutGrid, FolderTree, ChartColumn, Trash2, Upload, Lock, CircleUser,
+  Sparkles, Users, Clock, Map as MapIcon, LayoutGrid, FolderTree, ChartColumn, Trash2, Upload, Lock, CircleUser, EyeOff,
 } from "lucide-react";
 import { api } from "../lib/api";
 
@@ -70,6 +70,13 @@ export function Sidebar({ collapsed, onToggle }: { collapsed: boolean; onToggle:
       </nav>
 
       <div className="nav-foot">
+        {auth?.accounts && auth.user?.username && role !== "guest" && (
+          <NavLink to="/private" className={({ isActive }) => `nav-link${isActive ? " is-active" : ""}`}
+            title={collapsed ? "Private" : undefined}>
+            <EyeOff size={18} strokeWidth={1.9} />
+            <span className="nav-label">Private</span>
+          </NavLink>
+        )}
         {role === "owner" && (
           <NavLink to="/locked" className={({ isActive }) => `nav-link${isActive ? " is-active" : ""}`}
             title={collapsed ? "Locked folder" : undefined}>

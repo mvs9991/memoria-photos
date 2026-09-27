@@ -4,7 +4,9 @@ import { useMutation, useQuery, useQueryClient } from "@tanstack/react-query";
 import { KeyRound, LogOut, UserPlus, Users } from "lucide-react";
 import { api, type Role } from "../lib/api";
 import { relativeTime } from "../lib/format";
+import { Link } from "react-router-dom";
 import { SectionHeader } from "./States";
+import { Toggle } from "./Toggle";
 
 const ROLE_HELP: Record<Role, string> = {
   owner: "everything, including settings, deleting and the Locked folder",
@@ -124,6 +126,36 @@ export function MyAccountCard() {
       </form>
       {done && <p className="dim">Password changed. Your other devices will ask you to sign in again.</p>}
       {save.error && <p className="danger-text">{(save.error as Error).message}</p>}
+      {user.role !== "guest" && <MyPrivacy />}
     </section>
+  );
+}
+
+/** Keep what my phone backs up to myself (engine/private.py). */
+function MyPrivacy() {
+  const qc = useQueryClient();
+  const me = useQuery({ queryKey: ["me"], queryFn: api.myAccount });
+  const toggle = useMutation({
+    mutationFn: (on: boolean) => api.setPrivateUploads(on),
+    onSuccess: () => qc.invalidateQueries({ queryKey: ["me"] }),
+  });
+  const past = useMutation({
+    mutationFn: () => api.makePrivate(null),
+    onSuccess: () => qc.invalidateQueries(),
+  });
+  if (!me.data) return null;
+  return (
+    <div className="my-privacy">
+      <Toggle label="Keep photos from my phone private" checked={!!me.data.private_uploads}
+        onChange={(v) => toggle.mutate(v)} disabled={toggle.isPending}
+        hint="New photos you upload or back up are seen only by you, on your Private page — not in the family's timeline, people or search, and not by the owner in the app." />
+      <p className="dim">
+        <button className="btn btn-ghost btn-sm" disabled={past.isPending} onClick={() => past.mutate()}>
+          Make my earlier uploads private too
+        </button>{" "}
+        {past.data && `${past.data.private.toLocaleString()} made private. `}
+        <Link to="/private" className="link">Open my Private photos</Link>
+      </p>
+    </div>
   );
 }

@@ -1,7 +1,7 @@
 /** Actions for photos selected in a grid: add to album, tag, plus page-specific extras. */
 import { useCallback, useEffect, useState } from "react";
-import { useMutation, useQueryClient } from "@tanstack/react-query";
-import { Archive, Sparkles, BookImage, CalendarClock, Columns2, FolderOutput, Lock, MapPin, RotateCw, Tag, Trash2, X } from "lucide-react";
+import { useMutation, useQuery, useQueryClient } from "@tanstack/react-query";
+import { Archive, Sparkles, BookImage, CalendarClock, Columns2, EyeOff, FolderOutput, Lock, MapPin, RotateCw, Tag, Trash2, X } from "lucide-react";
 import { useRole } from "../lib/hooks";
 import { api } from "../lib/api";
 import { AlbumPicker } from "./AlbumPicker";
@@ -37,6 +37,17 @@ export function SelectionBar({ selected, onClear, extra, allIds, onSelectAll }: 
   const lock = useMutation({
     mutationFn: () => api.lock(ids),
     onSuccess: () => { qc.invalidateQueries(); onClear(); },
+    onError: (e: Error) => setNote(e.message),
+  });
+  const auth = useQuery({ queryKey: ["auth"], queryFn: api.authStatus, staleTime: Infinity });
+  const makePrivate = useMutation({
+    mutationFn: () => api.makePrivate(ids),
+    onSuccess: (r) => {
+      setNote(r.private
+        ? `${r.private.toLocaleString()} now only yours${r.not_yours ? ` — ${r.not_yours.toLocaleString()} you did not upload stayed shared` : ""}`
+        : "Only photos you uploaded can be made private");
+      if (r.private) { qc.invalidateQueries(); onClear(); }
+    },
     onError: (e: Error) => setNote(e.message),
   });
   const [stars, setStars] = useState(0);
@@ -113,6 +124,12 @@ export function SelectionBar({ selected, onClear, extra, allIds, onSelectAll }: 
         <button className="btn btn-ghost btn-sm" onClick={() => archive.mutate()}
           title="Out of the timeline; still in search, albums and people">
           <Archive size={14} /> Archive
+        </button>
+      )}
+      {role !== "guest" && auth.data?.accounts && (
+        <button className="btn btn-ghost btn-sm" onClick={() => makePrivate.mutate()}
+          title="Only you will see them (photos you uploaded)">
+          <EyeOff size={14} /> Make private
         </button>
       )}
       {role === "owner" && (

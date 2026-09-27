@@ -173,7 +173,8 @@ def face_crop(face_id: int, size: int = Query(200, ge=64, le=512)):
     state = get_state()
     conn = state.conn()
     face = conn.execute(
-        "SELECT f.*, p.sha256, p.locked, p.status FROM faces f JOIN photos p ON p.id = f.photo_id WHERE f.id = ?",
+        "SELECT f.*, p.sha256, p.locked, p.status, p.private_to FROM faces f JOIN photos p ON p.id = f.photo_id "
+        "WHERE f.id = ?",
         (face_id,)).fetchone()
     if face is None:
         raise HTTPException(404, "face not found")

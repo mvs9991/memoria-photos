@@ -58,7 +58,7 @@ photointel/
   api/       app.py routes_*.py images.py
 web/         React + TypeScript UI (Vite)
 eval/        dataset builders, calibration, evaluation, library inspector
-tests/       291 tests, no GPU required
+tests/       300 tests, no GPU required
 ```
 
 **The indexing pipeline** is a feeder thread → N CPU worker threads (read, hash, decode, EXIF,
@@ -422,6 +422,19 @@ alike; deleting them reclaims nothing you had twice.
 - *The restic password lives in `<data>/offsite/`* so copies run unattended; the UI shows a generated one
   once and insists it is written down elsewhere — the data directory burns with the house.
 
+**Private photos (v8).** A private photo has status `'private'` and `private_to` = its account, so the 75
+queries that list visible photos (`status = 'ok'`) and every shared aggregate (people, events, the search
+matrix, counts) leave it out without being touched — the Locked folder's mechanism, per person. What had
+to change is every place a status is *decided* (scanner restore, indexer move and re-analysis): private
+comes first there, before locked, so a private photo can never land in the owner's Locked folder.
+`deps.guard_locked` refuses its pixels and details to anyone but its person, the owner included.
+Ownership follows the upload folder `<upload root>/<name>/` rather than the uploads log, which is keyed by
+content and names only the last sender of those bytes; new files there are claimed right after the scan,
+before analysis, so they are never visible. Upload de-duplication ignores other people's private copies
+(else a family member's own copy of the same photo would be swallowed). `test_nothing_the_owner_can_open_
+mentions_a_private_photo` sweeps every list endpoint for the photo's name, fingerprint and folder; it and
+the rest of `tests/test_private.py` were each checked to fail with the matching protection removed.
+
 ## 5. Measured numbers, and what they are worth
 
 All reproducible via `eval/`. The datasets are named because the numbers only describe them.
@@ -577,6 +590,9 @@ the future, everything collapsing into one event, fuzzy duplicate thresholds too
   seconds, and a restart asked for by the app was not counted as a crash.
 - **The off-site copy on Linux/macOS, and to sftp/rest targets,** is untested; on Windows it was run
   end to end with restic 0.19.1 (copy, re-copy, sampled check, verified restore).
+- **Private photos have one known limit:** a private photo is left out of the shared people, events,
+  map and search index for its own person too (they see it only on their Private page). Building a
+  second, per-person set of those was judged not worth the risk of leaking one set into the other.
 - **The offline copy** was checked in Edge (Chromium) with the network cut: grid, viewer preview and
   opened pages load, the banner shows, sign-out wipes it, locking removes a photo from it. Not tried
   on iOS Safari, which limits service-worker storage and may evict it after weeks unused.
@@ -590,7 +606,7 @@ the future, everything collapsing into one event, fuzzy duplicate thresholds too
 
 ## 10. Working notes
 
-- Run the suite with `.venv/Scripts/python.exe -m pytest -q`. 291 tests, ~75 s, no GPU needed —
+- Run the suite with `.venv/Scripts/python.exe -m pytest -q`. 300 tests, ~90 s, no GPU needed —
   the neural nets are replaced by deterministic fakes.
 - Test fixtures seed randomness from `zlib.crc32` of the **file name**, not `hash()` (salted per
   process) and not the full path (contains pytest's per-run tmp counter). Both made failures

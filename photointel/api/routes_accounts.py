@@ -245,3 +245,59 @@ def _fav() -> str:
     from .deps import current_user_id
 
     return expr("p", current_user_id())
+
+
+# ---------------------------------------------------------------- private photos (engine/private.py)
+
+def _account() -> dict:
+    uid = _me_id()
+    if uid is None:
+        raise HTTPException(400, "private photos need accounts (Settings > People who can sign in)")
+    user = accounts.get(get_state().conn(), uid)
+    if user is None:
+        raise HTTPException(404, "no such account")
+    return user
+
+
+@router.get("/private/photos")
+def private_photos():
+    uid = _me_id()
+    if uid is None:
+        return columnar([])
+    rows = get_state().conn().execute(
+        "SELECT p.id, p.width, p.height, p.rotation, p.taken_ts, p.face_count, " + _fav() + " AS favorite, p.media_type, "
+        "p.duration, p.live_video_id, p.motion_offset, p.rating FROM photos p WHERE p.status = 'private' "
+        "AND p.private_to = ? AND p.live_component = 0 ORDER BY p.taken_ts DESC, p.id DESC", (uid,)).fetchall()
+    return columnar(rows)
+
+
+class MaybeIdsBody(BaseModel):
+    photo_ids: list[int] | None = None       # None: everything this person uploaded
+
+
+@router.post("/photos/private")
+def make_private(body: MaybeIdsBody):
+    from ..engine import private
+
+    state = get_state()
+    return private.make_private(state.ctx, state.conn(), _account(), body.photo_ids)
+
+
+@router.post("/photos/share-with-family")
+def share_with_family(body: IdsBody):
+    from ..engine import private
+
+    return {"shared": private.share(get_state().conn(), _account(), body.photo_ids)}
+
+
+class OnBody(BaseModel):
+    on: bool
+
+
+@router.post("/accounts/me/private-uploads")
+def private_uploads(body: OnBody):
+    user = _account()
+    conn = get_state().conn()
+    conn.execute("UPDATE users SET private_uploads = ? WHERE id = ?", (int(body.on), user["id"]))
+    conn.commit()
+    return {"private_uploads": body.on}
