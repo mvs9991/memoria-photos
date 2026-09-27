@@ -6,7 +6,7 @@ import time
 from fastapi import APIRouter, HTTPException, Query, Request, Response, UploadFile
 from pydantic import BaseModel
 
-from .. import accounts, auth
+from .. import accounts, auth, ratelimit
 from ..engine import albums as albums_mod
 from .deps import get_state
 from .routes_library import columnar
@@ -33,23 +33,38 @@ class LoginBody(BaseModel):
     password: str
 
 
+def _login_keys(request: Request, name: str | None) -> tuple[str, ...]:
+    host = request.client.host if request.client else "?"
+    return (f"ip:{host}", f"user:{(name or '').strip().lower()}")
+
+
+def _check_limit(limiter, keys) -> None:
+    wait = limiter.wait_for(*keys)
+    if wait > 0:
+        raise HTTPException(429, ratelimit.refuse_message(wait))
+
+
 @router.post("/auth/login")
-def login(body: LoginBody, response: Response):
+def login(body: LoginBody, request: Request, response: Response):
     state = get_state()
     ctx, conn = state.ctx, state.conn()
+    keys = _login_keys(request, body.username)
+    _check_limit(ratelimit.LOGINS, keys)
     if accounts.enabled(conn):
         user = accounts.check_login(conn, body.username or "", body.password)
         if user is None:
-            time.sleep(0.4)                  # a little friction for guessing
+            ratelimit.LOGINS.fail(*keys)
             raise HTTPException(401, "wrong name or password")
+        ratelimit.LOGINS.succeed(*keys)
         response.set_cookie(auth.SESSION_COOKIE, auth.make_user_session(ctx.paths.data, user["id"]), httponly=True,
                             samesite="lax", max_age=auth.SESSION_DAYS * 86400)
         return {"ok": True, "user": {"id": user["id"], "username": user["username"], "role": user["role"]}}
     if not ctx.settings.access_password_hash:
         return {"ok": True}
     if not auth.verify_password(body.password, ctx.settings.access_password_hash):
-        time.sleep(0.4)
+        ratelimit.LOGINS.fail(*keys)
         raise HTTPException(401, "wrong password")
+    ratelimit.LOGINS.succeed(*keys)
     response.set_cookie(auth.SESSION_COOKIE, auth.make_session(ctx.paths.data), httponly=True, samesite="lax",
                         max_age=auth.SESSION_DAYS * 86400)
     return {"ok": True}
@@ -74,7 +89,10 @@ def set_password(body: PasswordBody, request: Request, response: Response):
     if accounts.enabled(get_state().conn()):
         raise HTTPException(400, "accounts are on: change passwords in Settings → Accounts")
     stored = ctx.settings.access_password_hash
+    keys = _login_keys(request, "(library password)")
+    _check_limit(ratelimit.LOGINS, keys)
     if stored and not auth.verify_password(body.current or "", stored):
+        ratelimit.LOGINS.fail(*keys)
         raise HTTPException(401, "current password is wrong")
     if body.new and len(body.new) < 6:
         raise HTTPException(400, "use at least 6 characters")

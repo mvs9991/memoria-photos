@@ -10,7 +10,7 @@ import time
 from fastapi import APIRouter, HTTPException, Response
 from pydantic import BaseModel
 
-from .. import accounts, auth, db
+from .. import accounts, auth, db, ratelimit
 from ..engine import locked as locked_mod
 from ..engine import visibility
 from .deps import current_user, get_state, locked_open
@@ -109,7 +109,12 @@ def my_password(body: MyPassword, response: Response):
     if uid is None:
         raise HTTPException(400, "accounts are off; set the library password in Settings → Access")
     name = current_user() or ""
+    keys = (f"user:{name.lower()}",)
+    wait = ratelimit.LOGINS.wait_for(*keys)
+    if wait > 0:
+        raise HTTPException(429, ratelimit.refuse_message(wait))
     if accounts.check_login(conn, name, body.current) is None:
+        ratelimit.LOGINS.fail(*keys)
         raise HTTPException(401, "current password is wrong")
     user = _err(accounts.update, conn, uid, uid, password=body.new)
     response.set_cookie(auth.SESSION_COOKIE, auth.make_user_session(state.ctx.paths.data, uid), httponly=True,
@@ -131,13 +136,21 @@ class PinBody(BaseModel):
     new: str
 
 
+def _pin_limit() -> None:
+    wait = ratelimit.PINS.wait_for("pin")
+    if wait > 0:
+        raise HTTPException(429, ratelimit.refuse_message(wait))
+
+
 @router.post("/locked/pin")
 def set_pin(body: PinBody, response: Response):
     state = get_state()
     s = state.ctx.settings
-    if s.locked_pin_hash and not auth.verify_password(body.current or "", s.locked_pin_hash):
-        time.sleep(0.4)
-        raise HTTPException(401, "current PIN is wrong")
+    if s.locked_pin_hash:
+        _pin_limit()
+        if not auth.verify_password(body.current or "", s.locked_pin_hash):
+            ratelimit.PINS.fail("pin")          # one counter for every device: a PIN has few values
+            raise HTTPException(401, "current PIN is wrong")
     if len(body.new) < 4:
         raise HTTPException(400, "use at least 4 digits or characters")
     s.locked_pin_hash = auth.hash_password(body.new)
@@ -159,9 +172,11 @@ def open_locked(body: OpenBody, response: Response):
     stored = state.ctx.settings.locked_pin_hash
     if not stored:
         raise HTTPException(400, "set a PIN first")
+    _pin_limit()
     if not auth.verify_password(body.pin, stored):
-        time.sleep(0.6)
+        ratelimit.PINS.fail("pin")
         raise HTTPException(401, "wrong PIN")
+    ratelimit.PINS.succeed("pin")
     response.set_cookie(auth.LOCKED_COOKIE, auth.make_locked_token(state.ctx.paths.data), httponly=True,
                         samesite="strict", max_age=auth.LOCKED_MINUTES * 60)
     return {"open": True, "minutes": auth.LOCKED_MINUTES}

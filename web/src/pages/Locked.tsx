@@ -5,7 +5,7 @@
 import { useMemo, useState } from "react";
 import { useMutation, useQuery, useQueryClient } from "@tanstack/react-query";
 import { CheckSquare, Lock, LockOpen, X } from "lucide-react";
-import { api, gridItems } from "../lib/api";
+import { api, ApiError, gridItems } from "../lib/api";
 import { PhotoGrid } from "../components/PhotoGrid";
 import { EmptyState, Spinner } from "../components/States";
 import { useSelectAllShortcut, useSelection } from "../components/SelectionBar";
@@ -61,7 +61,8 @@ function EnterPin({ count }: { count: number }) {
         <p className="dim">{count ? `${count.toLocaleString()} ${count === 1 ? "item" : "items"}. ` : ""}Enter the PIN to open it on this device for 15 minutes.</p>
         <input className="field" type="password" inputMode="numeric" autoFocus value={pin}
           onChange={(e) => setPin(e.target.value)} aria-label="PIN" />
-        {open.error && <p className="danger-text">Wrong PIN.</p>}
+        {open.error && <p className="danger-text">{(open.error as ApiError).status === 429
+          ? `Too many wrong tries — ${(open.error as Error).message.replace(/^.*try again/, "try again")}.` : "Wrong PIN."}</p>}
         <button className="btn btn-primary" type="submit" disabled={!pin || open.isPending}>Open</button>
       </form>
     </div>

@@ -6,7 +6,7 @@
 import { useEffect, useState } from "react";
 import { useMutation, useQuery, useQueryClient } from "@tanstack/react-query";
 import { Lock } from "lucide-react";
-import { api } from "../lib/api";
+import { api, ApiError } from "../lib/api";
 import { Spinner } from "./States";
 
 export function AuthGate({ children }: { children: React.ReactNode }) {
@@ -51,7 +51,9 @@ function Login({ accounts }: { accounts: boolean }) {
         <input className="field" type="password" autoFocus={!accounts || !!name} value={password}
           autoComplete="current-password" placeholder="Password"
           onChange={(e) => setPassword(e.target.value)} aria-label="Password" />
-        {login.error && <p className="danger-text">{accounts ? "Wrong name or password." : "Wrong password."}</p>}
+        {login.error && <p className="danger-text">{(login.error as ApiError).status === 429
+          ? `Too many wrong tries — ${(login.error as Error).message.replace(/^.*try again/, "try again")}.`
+          : accounts ? "Wrong name or password." : "Wrong password."}</p>}
         <button className="btn btn-primary" type="submit" disabled={!ready || login.isPending}>
           {accounts ? "Sign in" : "Unlock"}
         </button>

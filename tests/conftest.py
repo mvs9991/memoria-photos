@@ -194,3 +194,12 @@ def library(tmp_path) -> Path:
     # an unreadable file
     (root / "DCIM/Camera/broken.jpg").write_bytes(b"not an image at all")
     return root
+
+
+@pytest.fixture(autouse=True)
+def _fresh_guess_limits():
+    """Wrong-password counters are per process; each test starts with none."""
+    from photointel import ratelimit
+
+    ratelimit.reset_all()
+    yield

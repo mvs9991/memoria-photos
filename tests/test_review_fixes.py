@@ -290,3 +290,26 @@ def test_an_event_cover_that_left_view_is_replaced(ctx, library, app):
         assert got is not None and got != cover
         assert conn.execute("SELECT status FROM photos WHERE id = ?", (got,)).fetchone()[0] == "ok"
     conn.close()
+
+
+# 12 --------------------------------------------------------------- guessing passwords and PINs
+
+def test_guessing_the_pin_locks_it_for_a_while(ctx, library, app):
+    c = TestClient(app)
+    c.post("/api/locked/pin", json={"new": "2468"})
+    for guess in ("0000", "1111", "2222", "3333", "4444"):
+        assert c.post("/api/locked/open", json={"pin": guess}).status_code == 401
+    r = c.post("/api/locked/open", json={"pin": "2468"})             # even the right PIN waits now
+    assert r.status_code == 429 and "minutes" in r.json()["detail"]
+
+
+def test_guessing_passwords_locks_logins_for_a_while(ctx, library, app):
+    owner = TestClient(app)
+    owner.post("/api/auth/password", json={"new": "owner-pass"})
+    owner.post("/api/accounts/enable", json={"username": "Sanjay"})
+    owner.post("/api/accounts", json={"username": "Priya", "password": "priya-pass", "role": "family"})
+    attacker = TestClient(app)
+    for i in range(10):
+        assert attacker.post("/api/auth/login", json={"username": "Priya", "password": f"guess{i}"}).status_code == 401
+    assert attacker.post("/api/auth/login", json={"username": "Priya", "password": "priya-pass"}).status_code == 429
+    assert owner.get("/api/stats").status_code == 200                  # signed-in people are unaffected
