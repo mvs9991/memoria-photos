@@ -418,3 +418,56 @@
 .offline-banner svg { flex: none; }
 :root { --offline-h: 32px; }
 .is-offline .scrubber { top: calc(var(--topbar-h) + var(--offline-h) + 8px); }
+
+/* ---------------- always on: health, keeper, access, off-site ---------------- */
+.problem-list { list-style: none; margin: 0 0 10px; padding: 0; display: grid; gap: 8px; }
+.problem {
+  display: grid;
+  grid-template-columns: auto 1fr auto;
+  gap: 10px;
+  align-items: start;
+  padding: 10px 12px;
+  border-radius: var(--r-md);
+  border: 1px solid var(--hairline);
+  background: var(--surface);
+}
+.problem > svg { margin-top: 2px; }
+.problem p { margin: 3px 0 0; font-size: 13px; }
+.problem-error { border-color: var(--danger); background: var(--danger-soft); }
+.problem-error > svg { color: var(--danger); }
+.problem-warn > svg { color: var(--accent-text); }
+.problem-fix { color: var(--text-2); }
+.all-well { display: flex; align-items: center; gap: 8px; color: var(--ok); margin: 4px 0 10px; }
+.warn-text { color: var(--accent-text); }
+.setting-subhead { display: flex; align-items: center; gap: 6px; font-size: 13.5px; font-weight: 600; margin: 16px 0 8px; }
+.notice-danger { background: var(--danger-soft); border-color: var(--danger); color: var(--text); }
+.notice-danger svg { color: var(--danger); flex: none; }
+.setup-steps { margin: 4px 0 10px; padding-left: 20px; display: grid; gap: 8px; font-size: 13.5px; }
+.setup-steps li.done { color: var(--text-3); }
+.setup-steps li.done::marker { content: "✓  "; color: var(--ok); }
+.offsite-setup { display: grid; gap: 10px; }
+.offsite-setup label { display: grid; gap: 4px; }
+.password-reveal {
+  display: grid;
+  gap: 10px;
+  padding: 14px;
+  margin-bottom: 12px;
+  border-radius: var(--r-md);
+  border: 1px solid var(--accent-line);
+  background: var(--accent-soft);
+  font-size: 13.5px;
+}
+.password-reveal .btn { justify-self: start; }
+.password-reveal p { margin: 0; }
+.password-code {
+  display: block;
+  font-family: var(--font-mono);
+  font-size: 18px;
+  letter-spacing: 0.04em;
+  padding: 8px 12px;
+  border-radius: var(--r-sm);
+  background: var(--surface-2);
+  overflow-wrap: anywhere;
+  user-select: all;
+}
+.setting-card code { overflow-wrap: anywhere; }

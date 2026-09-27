@@ -77,6 +77,10 @@ photos ──► scan ──► decode / EXIF / hash / thumbnail ──► faces
 | **Upload from your phone** | An Upload page (and "Add to Home Screen") for picking photos and videos from a phone's camera roll. Filed by the date each was taken; a photo whose bytes are already in the library is skipped, so uploading a whole camera roll twice is safe. |
 | **Automatic** | While it runs, Memoria looks for new photos every hour (configurable) and backs up to another drive weekly once a backup folder is set. |
 | **Backup** | Copies every photo folder and Memoria's own database to another drive, checking each copy against its fingerprint. Copy-only: nothing in the backup is ever deleted, so a photo you delete is still there. |
+| **Off-site copy** | An encrypted copy somewhere other than your house — a drive kept at work or with family, a relative's computer over SSH, or (your choice) a cloud bucket — made with [restic](https://restic.net), which can also restore without Memoria. Never pruned; restores go into an empty folder, verified. |
+| **Keeps itself running** | Starts with the computer, starts again if it stops, can keep Windows from sleeping, and restarts itself for a new certificate. |
+| **Health** | Tells the owner what quietly went wrong — a photo drive unplugged, a disk filling up, a backup that is late or failed, a phone that stopped backing up, repeated crashes, a certificate about to lapse — in the app, and optionally as a notification on your phone (ntfy or Discord). |
+| **Access from anywhere** | HTTPS through Tailscale: a private address only your own devices can reach, with a real certificate that renews itself. No router ports. |
 | **Family accounts** | Optional logins over one shared library: *owner* (everything), *family* (browse, upload, albums, downloads — no deleting or settings), *guest* (look and download). Each person has their own favourites, and can make an album private to themselves. |
 | **Locked folder** | Move private photos behind a PIN: they vanish from every list, search, person, map and share, and their images are refused until an owner opens the folder on that device for 15 minutes. |
 | **Archive** | Out of the timeline, memories and the photo frame; still in search, albums and people. |
@@ -153,6 +157,10 @@ Re-running `index` only processes what is new or changed.
 | `backup [<folder>]` | Copy every photo folder and the database to another drive (copy-only) |
 | `accounts list` / `accounts reset-password <name>` / `accounts reset-pin` | At the computer: see accounts, recover a forgotten password or Locked-folder PIN |
 | `status` | Library summary |
+| `health` | What needs attention: drives, disk space, backups, phones, HTTPS, the off-site copy |
+| `offsite setup <where>` / `run` / `status` / `snapshots` / `check` / `restore <empty folder>` | The encrypted off-site copy (needs restic) |
+| `run` | Serve, and start the server again whenever it stops — what auto-start runs |
+| `autostart on [--host 0.0.0.0]` / `off` / `status` | Start Memoria when you sign in (Windows Startup, systemd user unit, launchd); `--at-boot` (Windows, admin terminal) starts it before anyone signs in |
 | `serve --port 8765` | Run the web app |
 | `serve --host 0.0.0.0` | Serve to your network — refused without a password or accounts unless you add `--insecure` |
 | `serve --ssl-cert c.pem --ssl-key k.pem` | Serve HTTPS (e.g. with a certificate from `tailscale cert`) |
@@ -258,8 +266,9 @@ Memoria is a website served by your own computer, so every phone, tablet and lap
 can use it — no cloud account, no subscription, and your photos never leave your network.
 
 1. On the computer with the photos: `python -m photointel set-password` (and, for a family, turn
-   on accounts in Settings → People who can sign in), then `python -m photointel serve --host 0.0.0.0`.
-   Find the computer's local IP (`ipconfig` on Windows, e.g. `192.168.1.20`).
+   on accounts in Settings → People who can sign in), then `python -m photointel autostart on --host 0.0.0.0`
+   so it starts with the computer and restarts itself if it ever stops (or just `serve --host 0.0.0.0`
+   to try it). Find the computer's local IP (`ipconfig` on Windows, e.g. `192.168.1.20`).
 2. On the phone, on the same Wi-Fi: open `http://192.168.1.20:8765` and sign in.
 3. **Add to Home Screen** (Safari: Share → Add to Home Screen; Chrome: ⋮ → Add to Home screen). It
    gets the Memoria icon and opens full-screen like an app. Swipe between photos, pinch to zoom,
@@ -271,10 +280,12 @@ can use it — no cloud account, no subscription, and your photos never leave yo
    and the steps for FolderSync (Android) and PhotoSync (iPhone). Sign in with your own name and
    password; each person's backup app sees only what it sent. Deleting a photo on the phone never deletes it here.
 
-Away from home, do not forward a port on your router. Use a private VPN such as
-[Tailscale](https://tailscale.com) or WireGuard (free for personal use). With Tailscale,
-`tailscale cert` gives the computer a trusted certificate: `serve --ssl-cert … --ssl-key …` then
-serves HTTPS. The computer has to be on for the phone to reach it.
+Away from home, do not forward a port on your router. Use [Tailscale](https://tailscale.com) (free
+for personal use): install it on the computer and the phones, turn on MagicDNS and HTTPS certificates
+in its admin console, then Settings → Access from anywhere → *Get the certificate*. Memoria then also
+serves `https://<computer>.<tailnet>.ts.net:8443` — trusted, from anywhere your phone has Tailscale —
+and renews the certificate itself. Plain http on the home Wi-Fi keeps working. The computer has to be
+on for the phone to reach it: Settings → Keep Memoria running can stop Windows from sleeping.
 
 **Offline:** over HTTPS the app keeps what you have looked at on the phone — the pages you opened and
 the last ~2,000 thumbnails and previews — so it still opens, and shows those, with no connection.
@@ -534,7 +545,7 @@ face recogniser.
 python -m pytest tests/ -q
 ```
 
-They stub the neural nets, so all 269 tests run on CPU in about 70 seconds and still cover
+They stub the neural nets, so all 291 tests run on CPU in about 75 seconds and still cover
 scanning, incremental re-indexing, moves, decoding, metadata, clustering, corrections, events,
 duplicates, search parsing and the HTTP API. The fixtures seed their randomness from stable
 hashes, so a failure reproduces on the next run instead of disappearing.

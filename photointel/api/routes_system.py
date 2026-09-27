@@ -68,12 +68,23 @@ class SettingsBody(BaseModel):
     upload_folder: str | None = None
     backup_folder: str | None = None
     backup_every_days: int | None = Field(None, ge=0, le=365)
+    serve_host: str | None = Field(None, pattern=r"^(127\.0\.0\.1|0\.0\.0\.0)$")
+    keep_awake: bool | None = None
+    alert_webhook: str | None = Field(None, max_length=500, pattern=r"^(|https?://\S+)$")
+    offsite_every_days: int | None = Field(None, ge=0, le=365)
 
 
 @router.post("/settings")
 def update_settings(body: SettingsBody):
+    from .. import accounts
+    from ..auth import is_loopback
+
     state = get_state()
     s = state.ctx.settings
+    if body.serve_host and not is_loopback(body.serve_host) and not (
+            s.access_password_hash or accounts.enabled(state.conn())):
+        # The next start would refuse (and the keeper would rightly not retry): Memoria would be off.
+        raise HTTPException(400, "set a password (or turn on accounts) before opening Memoria to the network")
     for field, value in body.model_dump(exclude_unset=True).items():
         if value is not None or field == "me_person_id":
             setattr(s, field, value)

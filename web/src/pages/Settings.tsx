@@ -6,11 +6,13 @@ import {
 } from "lucide-react";
 import { api } from "../lib/api";
 import { ErrorState, SectionHeader, Spinner } from "../components/States";
+import { Toggle } from "../components/Toggle";
 import { formatBytes, formatDuration, relativeTime } from "../lib/format";
 import { useRole, useTitle } from "../lib/hooks";
 import { AccountsCard, MyAccountCard } from "../components/AccountsCard";
 import { FrameCard, GpxCard, SecurityCard, TrashCard } from "../components/SettingsExtras";
 import { BackupCard, ScheduleCard } from "../components/LibraryCards";
+import { AccessCard, HealthCard, KeepRunningCard, OffsiteCard } from "../components/AlwaysOnCards";
 
 export default function Settings() {
   const role = useRole();
@@ -270,10 +272,14 @@ function OwnerSettings() {
         </div>
       </section>
 
+      <HealthCard />
       <MyAccountCard />
       <SecurityCard />
       <AccountsCard />
       <BackupCard />
+      <OffsiteCard />
+      <KeepRunningCard />
+      <AccessCard />
       <ScheduleCard />
       <TrashCard />
       <GpxCard />
@@ -327,23 +333,6 @@ function Stat({ label, value }: { label: string; value: string }) {
       <span className="stat-cell-value tnum">{value}</span>
       <span className="dim">{label}</span>
     </div>
-  );
-}
-
-function Toggle({ label, hint, checked, onChange, disabled }: {
-  label: string; hint?: string; checked: boolean; onChange: (v: boolean) => void; disabled?: boolean;
-}) {
-  return (
-    <label className={`toggle-row${disabled ? " is-disabled" : ""}`}>
-      <span className="toggle-text">
-        <span className="setting-label">{label}</span>
-        {hint && <span className="dim toggle-hint">{hint}</span>}
-      </span>
-      <button type="button" role="switch" aria-checked={checked} disabled={disabled}
-        className={`switch${checked ? " on" : ""}`} onClick={() => onChange(!checked)}>
-        <span />
-      </button>
-    </label>
   );
 }
 

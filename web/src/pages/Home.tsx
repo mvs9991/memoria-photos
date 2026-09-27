@@ -7,6 +7,7 @@ import { ErrorState, NoLibrary, Spinner } from "../components/States";
 import { formatBytes, formatDate } from "../lib/format";
 import { useCountUp, useTitle } from "../lib/hooks";
 import { BackupReminder } from "../components/LibraryCards";
+import { HealthNotice } from "../components/AlwaysOnCards";
 
 export default function Home() {
   useTitle();
@@ -25,6 +26,7 @@ export default function Home() {
 
   return (
     <div className="page home">
+      <HealthNotice />
       <BackupReminder />
       <section className="hero rise">
         <div className="hero-copy">

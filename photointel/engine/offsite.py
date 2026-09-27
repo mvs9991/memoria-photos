@@ -64,8 +64,10 @@ def new_password() -> str:
 
 def find_restic(ctx) -> Path | None:
     exe = "restic.exe" if os.name == "nt" else "restic"
+    # winget's links folder too: a server that was running when restic was installed has the old PATH.
+    winget = Path(os.environ.get("LOCALAPPDATA", "")) / "Microsoft" / "WinGet" / "Links" / exe if os.name == "nt" else None
     for c in (ctx.settings.restic_path, os.environ.get("PHOTOINTEL_RESTIC"), shutil.which("restic"),
-              str(ctx.paths.data / "bin" / exe)):
+              str(ctx.paths.data / "bin" / exe), str(winget) if winget else None):
         if c and Path(c).is_file():
             return Path(c)
     return None

@@ -58,7 +58,7 @@ photointel/
   api/       app.py routes_*.py images.py
 web/         React + TypeScript UI (Vite)
 eval/        dataset builders, calibration, evaluation, library inspector
-tests/       269 tests, no GPU required
+tests/       291 tests, no GPU required
 ```
 
 **The indexing pipeline** is a feeder thread → N CPU worker threads (read, hash, decode, EXIF,
@@ -399,6 +399,29 @@ alike; deleting them reclaims nothing you had twice.
   is checked by a test that parses `sw.js`. `index.html`, `sw.js` and `manifest.json` are served
   `no-cache` so a phone picks up a new build.
 
+**v8: running unattended (Sept 2026).**
+
+- *The keeper restarts on crash, never on refusal.* `service.decide`: exit 0 stops, exit 2 (a
+  configuration refusal such as serving to the network without a password) stops for good — retrying
+  would fail forever and hide the reason — exit 75 is the server asking for a restart, anything else is a
+  crash, retried after 3, 10, 30, 60, then 300 s (reset after 10 healthy minutes). Because a refusal
+  stops the keeper, the settings API refuses `serve_host = 0.0.0.0` without a password: otherwise one
+  click would leave Memoria off after its next restart.
+- *Health is judgement, labelled as such.* The thresholds (2 GB / 20 GB and 10 %, a phone quiet for 7
+  days, a backup late at 1.5× its interval, 3 crashes a day) are not measured. "Quiet phone" uses the
+  time a backup app last *connected* (`meta dav_seen:<name>`), not the last upload: a phone with no new
+  photos is not a problem. Webhook alerts go out again after a day for errors and a week for warnings,
+  and again as new if a problem is fixed and comes back.
+- *The off-site copy names each folder relatively.* Given full paths, restic records every ancestor
+  (C:\, C:\Users…) with its Windows security descriptor, and a restore recreates it: the first real
+  restore produced a `C\Users` folder its own user could not write into or delete. Each root is now
+  backed up from its parent by name (one snapshot per root, plus `memoria` for the database), and a
+  restore gives `<target>/<folder name>/…`. `test_each_folder_is_copied_by_its_own_name` fails against
+  the old behaviour. Snapshots are never pruned (copy-only, like the local backup), restores go only to
+  an empty folder outside the roots and the data directory, with `--verify`.
+- *The restic password lives in `<data>/offsite/`* so copies run unattended; the UI shows a generated one
+  once and insists it is written down elsewhere — the data directory burns with the house.
+
 ## 5. Measured numbers, and what they are worth
 
 All reproducible via `eval/`. The datasets are named because the numbers only describe them.
@@ -545,6 +568,15 @@ the future, everything collapsing into one event, fuzzy duplicate thresholds too
   PROPPATCH answer 501. If an app insists on LOCK, it will need a no-op lock.
 - **XMP import has been tested on hand-written sidecars** in the shapes Lightroom, digiKam and
   darktable document, not on files those apps actually wrote.
+- **Tailscale HTTPS is untested with the real Tailscale** (none on the build machine): the flow runs
+  against a stand-in program printing `tailscale status --json` in its documented shape and copying a
+  certificate. HTTP and HTTPS served together were checked for real with an openssl-made certificate.
+- **Auto-start** was tested by writing into a temporary Startup folder, never the real one; `--at-boot`
+  (schtasks as SYSTEM) and the systemd/launchd entries are checked as text only, not run. SYSTEM does
+  not see mapped network drives. The keeper itself was run for real: a killed server came back in
+  seconds, and a restart asked for by the app was not counted as a crash.
+- **The off-site copy on Linux/macOS, and to sftp/rest targets,** is untested; on Windows it was run
+  end to end with restic 0.19.1 (copy, re-copy, sampled check, verified restore).
 - **The offline copy** was checked in Edge (Chromium) with the network cut: grid, viewer preview and
   opened pages load, the banner shows, sign-out wipes it, locking removes a photo from it. Not tried
   on iOS Safari, which limits service-worker storage and may evict it after weeks unused.
@@ -558,7 +590,7 @@ the future, everything collapsing into one event, fuzzy duplicate thresholds too
 
 ## 10. Working notes
 
-- Run the suite with `.venv/Scripts/python.exe -m pytest -q`. 269 tests, ~70 s, no GPU needed —
+- Run the suite with `.venv/Scripts/python.exe -m pytest -q`. 291 tests, ~75 s, no GPU needed —
   the neural nets are replaced by deterministic fakes.
 - Test fixtures seed randomness from `zlib.crc32` of the **file name**, not `hash()` (salted per
   process) and not the full path (contains pytest's per-run tmp counter). Both made failures

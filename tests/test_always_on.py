@@ -517,3 +517,14 @@ def test_upkeep_keeps_awake_checks_health_and_starts_the_offsite_copy(ctx, monke
     scheduler._upkeep(ctx, conn, now + 60, busy=False, backup_running=False)
     assert len(sent) == n and started == [1]                  # health every 15 minutes; the copy waits its retry
     conn.close()
+
+
+def test_memoria_is_not_opened_to_the_network_without_a_password(ctx, app):
+    c = TestClient(app)
+    r = c.post("/api/settings", json={"serve_host": "0.0.0.0"})
+    assert r.status_code == 400 and ctx.settings.serve_host == "127.0.0.1"   # the next start would refuse: off
+    assert c.post("/api/settings", json={"serve_host": "192.168.1.5"}).status_code == 422
+    assert c.post("/api/settings", json={"alert_webhook": "file:///etc/passwd"}).status_code == 422
+    c = _owner_with_password(app)
+    assert c.post("/api/settings", json={"serve_host": "0.0.0.0", "alert_webhook": "https://ntfy.sh/x"}).status_code == 200
+    assert ctx.settings.serve_host == "0.0.0.0"

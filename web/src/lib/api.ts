@@ -47,6 +47,23 @@ export interface Album {
   end_ts: number | null;
 }
 
+/** Something that needs the owner's attention (photointel/health.py). */
+export interface Problem {
+  key: string;
+  level: "error" | "warn";
+  title: string;
+  detail: string;
+  fix: string;
+}
+
+export interface ServiceState {
+  supervised: boolean;
+  keeper: { status: string | null; started_at: number | null; restarts_today: number };
+  autostart: { sign_in: boolean; boot: boolean };
+  keep_awake_supported: boolean;
+  platform: string;
+}
+
 export interface NameSuggestion {
   person_id: number;
   name: string;
@@ -541,6 +558,24 @@ export const api = {
   startBackup: (folder?: string) =>
     request<{ job_id: number }>(`/backup`, { method: "POST", body: JSON.stringify({ folder }) }),
   backupStatus: () => request<{ last: any | null; folder: string; every_days: number }>("/backup"),
+  // always on: health, the keeper, HTTPS, the off-site copy (owner only)
+  alerts: () => request<{ problems: Problem[]; snoozed: number; webhook: boolean }>("/alerts"),
+  snoozeAlert: (key: string, days = 7) =>
+    request<any>("/alerts/snooze", { method: "POST", body: JSON.stringify({ key, days }) }),
+  testAlert: () => request<any>("/alerts/test", { method: "POST" }),
+  service: () => request<ServiceState>("/service"),
+  setAutostart: (on: boolean) => request<any>("/service/autostart", { method: "POST", body: JSON.stringify({ on }) }),
+  restartServer: () => request<any>("/service/restart", { method: "POST" }),
+  https: () => request<any>("/https"),
+  httpsSetup: () => request<any>("/https/setup", { method: "POST" }),
+  httpsOff: () => request<any>("/https/off", { method: "POST" }),
+  offsite: () => request<any>("/offsite"),
+  offsiteSetup: (repo: string, password?: string) =>
+    request<{ repo: string; created: boolean; password: string | null }>("/offsite/setup",
+      { method: "POST", body: JSON.stringify({ repo, password: password || null }) }),
+  offsiteRun: () => request<any>("/offsite/run", { method: "POST" }),
+  offsiteVerify: () => request<any>("/offsite/verify", { method: "POST" }),
+  offsitePassword: () => request<{ password: string }>("/offsite/password"),
 
   trash: () => request<{ items: TrashItem[]; bytes: number; days: number; allow_delete: boolean }>("/trash"),
   moveToTrash: (photo_ids: number[], confirm: number) =>
