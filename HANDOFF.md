@@ -58,7 +58,7 @@ photointel/
   api/       app.py routes_*.py images.py
 web/         React + TypeScript UI (Vite)
 eval/        dataset builders, calibration, evaluation, library inspector
-tests/       236 tests, no GPU required
+tests/       254 tests, no GPU required
 ```
 
 **The indexing pipeline** is a feeder thread → N CPU worker threads (read, hash, decode, EXIF,
@@ -341,6 +341,20 @@ with the indexed sha256, never replaces a newer backup copy with an older file, 
 database is snapshotted with SQLite's backup API. The scheduler (`photointel/scheduler.py`) runs it
 weekly once a folder is set, and looks for new photos hourly; `due()` is pure and tested.
 
+**Guessing is locked out** (`photointel/ratelimit.py`): 10 wrong logins in 15 minutes per device
+and per account name, or 5 wrong Locked-folder PINs across all devices, shut that door for 15
+minutes — even to the right answer. In memory per process; a restart clears it.
+
+**A deep review (2026-09-26/27) found 16 more bugs**, all fixed with regression tests in
+`tests/test_review_fixes.py` that failed first: an old cookie signing in as a re-used account id;
+exports into a root's parent writing inside the library; non-owners listing server folders, publishing
+share links and seeing library paths in settings; locked photos leaking through describe/similar;
+backup/movie jobs swallowing index requests; a failed backup retried every minute; stack covers
+leaving view taking their stacks with them, and chosen covers lost on rebuild; a rotated-thumbnail
+temp race; albums over 900 photos; event covers that had left view; unlimited password/PIN guessing.
+Known and left: thumbnails are cached for good, so places that show a photo without its rotation in
+the URL (covers, slideshow, compare) can show it unturned until the browser cache clears.
+
 **Export only copies.** `engine/export.py` resolves a spec (ids, album, event, year/month, people in
 `each`/`together`/`any` mode) to files, copies with `shutil.copy2` into a `.part` then renames, and skips
 a destination that already holds the same bytes (sha256), so a re-run resumes and identical copies of
@@ -507,7 +521,7 @@ the future, everything collapsing into one event, fuzzy duplicate thresholds too
 
 ## 10. Working notes
 
-- Run the suite with `.venv/Scripts/python.exe -m pytest -q`. 236 tests, ~95 s, no GPU needed —
+- Run the suite with `.venv/Scripts/python.exe -m pytest -q`. 254 tests, ~95 s, no GPU needed —
   the neural nets are replaced by deterministic fakes.
 - Test fixtures seed randomness from `zlib.crc32` of the **file name**, not `hash()` (salted per
   process) and not the full path (contains pytest's per-run tmp counter). Both made failures

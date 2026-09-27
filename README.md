@@ -289,7 +289,8 @@ source, phone → computer over your Wi-Fi) into a folder Memoria indexes works 
   a test fails if any code path other than the Trash removes a file. "Hide" only affects your views.
 - The app listens on this machine only. Serving it to a network requires a password or accounts
   (PBKDF2, signed session cookies; a password change ends that account's other sessions). Every API
-  request is checked against the signed-in account's role. Share links expose one album and nothing
+  request is checked against the signed-in account's role. Repeated wrong passwords or PINs lock
+  that door for 15 minutes. Share links expose one album and nothing
   else, and can be revoked. HTTPS is available with your own certificate (`serve --ssl-cert`).
 - The Locked folder hides photos from people using Memoria; it does not encrypt the files on disk.
 
@@ -506,7 +507,7 @@ photointel/
   api/        app.py routes_*.py images.py
 web/          React + TypeScript UI
 eval/         dataset builders, calibration, end-to-end evaluation
-tests/        236 tests, no GPU required
+tests/        254 tests, no GPU required
 ```
 
 The layering is deliberate: vision → features → database → relationship engines → search → UI.
@@ -519,7 +520,7 @@ face recogniser.
 python -m pytest tests/ -q
 ```
 
-They stub the neural nets, so all 236 tests run on CPU in about 70 seconds and still cover
+They stub the neural nets, so all 254 tests run on CPU in about 70 seconds and still cover
 scanning, incremental re-indexing, moves, decoding, metadata, clustering, corrections, events,
 duplicates, search parsing and the HTTP API. The fixtures seed their randomness from stable
 hashes, so a failure reproduces on the next run instead of disappearing.
