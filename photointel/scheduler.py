@@ -30,6 +30,13 @@ def due(settings, now: float, last_index: float, last_backup: float | None, busy
     return actions
 
 
+UPLOAD_SETTLE_S = 60           # index uploads from backup apps once they pause for a minute
+
+
+def uploads_due(pending_since: float | None, now: float, busy: bool) -> bool:
+    return pending_since is not None and not busy and now - pending_since >= UPLOAD_SETTLE_S
+
+
 def start_backup(ctx, conn, target: str) -> int:
     from .engine import backup
     from .pipeline.jobs import create_job
@@ -76,6 +83,15 @@ def run(ctx, stop: threading.Event) -> None:
                         conn.commit()
                         start_backup(ctx, conn, ctx.settings.backup_folder)
                         log.info("Scheduled backup started to %s", ctx.settings.backup_folder)
+                pending = db.get_meta(conn, "uploads_pending_since")
+                if uploads_due(float(pending) if pending else None, now, active is not None):
+                    from .engine.uploads import ensure_upload_root
+
+                    db.set_meta(conn, "uploads_pending_since", "")
+                    conn.commit()
+                    _, root = ensure_upload_root(ctx, conn)
+                    jobs.spawn_index_job(ctx, {"kind": "index", "roots": [str(root)]})
+                    log.info("Indexing uploads from backup apps")
             finally:
                 conn.close()
         except Exception:

@@ -10,7 +10,8 @@ import { useQuery, useQueryClient } from "@tanstack/react-query";
 import { CheckCircle2, CircleSlash, Copy, ImagePlus, Loader2, Upload as UploadIcon, XCircle } from "lucide-react";
 import { api } from "../lib/api";
 import { formatBytes } from "../lib/format";
-import { useTitle } from "../lib/hooks";
+import { useRole, useTitle } from "../lib/hooks";
+import { BackupAppCard } from "../components/BackupAppCard";
 import { uploadAll, type UploadStatus } from "../lib/upload";
 
 type Status = UploadStatus;
@@ -18,6 +19,7 @@ interface Item { key: string; file: File; status: Status; progress: number; reas
 
 export default function Upload() {
   useTitle("Upload");
+  const role = useRole();
   const qc = useQueryClient();
   const input = useRef<HTMLInputElement>(null);
   const [items, setItems] = useState<Item[]>([]);
@@ -110,6 +112,7 @@ export default function Upload() {
       <p className="dim upload-note">Saved on the Memoria computer{folder ? <> in <code>{folder}</code></> : ""}, in folders by
         the date each photo was taken. Nothing already there is overwritten. For automatic backup of a phone, a sync app
         such as Syncthing into a folder Memoria indexes works alongside this.</p>
+      {role !== "guest" && <BackupAppCard />}
     </div>
   );
 }

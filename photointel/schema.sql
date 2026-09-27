@@ -439,3 +439,29 @@ CREATE TABLE IF NOT EXISTS edits (
     kind        TEXT NOT NULL,                     -- photo | trim
     created_at  REAL NOT NULL
 );
+
+-- The WebDAV drop box for phone backup apps: what each account uploaded, at the path the
+-- app used (so the app can list it back), and where it was stored. Folders the app made,
+-- and files sent under a temporary name awaiting their MOVE.
+CREATE TABLE IF NOT EXISTS dav_files (
+    who         TEXT NOT NULL,
+    path        TEXT NOT NULL,
+    stored_path TEXT NOT NULL,
+    size        INTEGER NOT NULL,
+    mtime       REAL NOT NULL,
+    uploaded_at REAL NOT NULL,
+    PRIMARY KEY (who, path)
+);
+CREATE TABLE IF NOT EXISTS dav_dirs (
+    who  TEXT NOT NULL,
+    path TEXT NOT NULL,
+    PRIMARY KEY (who, path)
+);
+CREATE TABLE IF NOT EXISTS dav_pending (
+    who        TEXT NOT NULL,
+    path       TEXT NOT NULL,
+    tmp_path   TEXT NOT NULL,
+    size       INTEGER NOT NULL,
+    created_at REAL NOT NULL,
+    PRIMARY KEY (who, path)
+);

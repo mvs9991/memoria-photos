@@ -353,3 +353,13 @@ a.month-col:hover .month-bar { opacity: 1; }
 }
 .export-layout.is-off { opacity: 0.45; }
 .export-layout span svg { vertical-align: -2px; }
+
+/* ---------------- backup app ---------------- */
+.backup-app { margin-top: 24px; padding: 18px 20px; display: grid; gap: 10px; }
+.backup-app h2 { display: flex; align-items: center; gap: 8px; font-size: 16px; }
+.backup-app-url { display: flex; flex-wrap: wrap; align-items: center; gap: 10px; }
+.backup-app-url code { font-family: var(--font-mono); font-size: 13px; padding: 6px 10px; border-radius: var(--r-sm);
+  background: var(--surface-2); overflow-wrap: anywhere; }
+.backup-app-steps { display: grid; grid-template-columns: repeat(auto-fit, minmax(260px, 1fr)); gap: 14px; font-size: 13px; }
+.backup-app-steps ol { margin: 6px 0 0; padding-left: 18px; display: grid; gap: 4px; }
+.backup-app-steps code { font-family: var(--font-mono); font-size: 12px; }

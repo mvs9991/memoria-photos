@@ -198,6 +198,7 @@ ALLOWED_REMOVALS = {
     "engine/uploads.py": 1,             # an upload's own temp file in <upload folder>/.incoming
     "engine/editor.py": 1,              # a trim's own .part file when nothing was copied
     "api/images.py": 1,                 # a rotated thumbnail's temp file that lost a race
+    "api/dav.py": 3,                    # a backup app's own temp uploads (too large / stored / moved)
 }
 REMOVAL = re.compile(r"\.unlink\(|os\.remove\(|os\.unlink\(|rmtree\(|\.rmdir\(|os\.rename\(|\.rename\(|send2trash")
 

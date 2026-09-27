@@ -14,7 +14,7 @@ from fastapi.staticfiles import StaticFiles
 
 from .. import accounts, auth
 from ..context import AppContext
-from . import images, routes_accounts, routes_albums, routes_auth, routes_duplicates, routes_explore, routes_export, routes_trash, routes_upload, routes_events, routes_library, routes_people, routes_search, routes_system
+from . import dav, images, routes_accounts, routes_albums, routes_auth, routes_duplicates, routes_explore, routes_export, routes_trash, routes_upload, routes_events, routes_library, routes_people, routes_search, routes_system
 from .deps import ApiState, get_state, set_current_user, set_locked_open, set_state
 
 log = logging.getLogger(__name__)
@@ -71,6 +71,7 @@ def create_app(ctx: AppContext) -> FastAPI:
     for router in (routes_auth.router, routes_accounts.router, routes_explore.router, routes_export.router, routes_trash.router, routes_upload.router, routes_library.router, routes_albums.router, routes_people.router, routes_events.router, routes_search.router,
                    routes_duplicates.router, routes_system.router, images.router):
         app.include_router(router, prefix="/api")
+    app.include_router(dav.router)          # /dav/: the backup-app drop box (its own sign-in)
 
     @app.middleware("http")
     async def access(request: Request, call_next):
