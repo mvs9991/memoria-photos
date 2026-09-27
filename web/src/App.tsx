@@ -7,6 +7,7 @@ import { ViewerProvider } from "./components/ViewerContext";
 import { ErrorBoundary } from "./components/ErrorBoundary";
 import { Shortcuts } from "./components/Shortcuts";
 import { AuthGate } from "./components/AuthGate";
+import { OfflineBanner } from "./components/OfflineBanner";
 
 const Home = lazy(() => import("./pages/Home"));
 const Photos = lazy(() => import("./pages/Photos"));
@@ -72,6 +73,7 @@ function Shell() {
         <Sidebar collapsed={collapsed} onToggle={() => setCollapsed((c) => !c)} />
         <div className="main">
           <TopBar />
+          <OfflineBanner />
           <main className="content" data-scroll-root>
             <ErrorBoundary key={location.pathname}>
               <Suspense fallback={<Spinner label="Loading" full />}>

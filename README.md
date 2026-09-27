@@ -62,6 +62,7 @@ photos ──► scan ──► decode / EXIF / hash / thumbnail ──► faces
 | **Birthdays & ages** | Add a birthday to a person: their past birthdays show up in Memories as the day approaches, faces show their age, and `Priya at age 5` searches that year of their life. |
 | **Fix dates & places** | Shift a wrong camera clock or set a date/place for a selection. Stored in Memoria and re-applied after re-indexing — the files are never written. |
 | **Export to other apps** | XMP sidecars (people with face regions, your tags, stars, descriptions, corrected dates/places) for digiKam, darktable and Lightroom — written to a folder you choose, never next to your photos. |
+| **Read other apps' XMP** | Stars, keywords, descriptions and people names that Lightroom, digiKam or darktable left in `.xmp` sidecars beside your photos are read in: stars and descriptions only where you have not set one, keywords as tags, names only as *suggestions* for the faces Memoria found. A changed sidecar is re-read; Memoria's own exports are not. |
 | **Collections & clean-up** | Videos, Live photos, panoramas, selfies, RAW and stacks in one place, plus review lists — screenshots, documents, memes, possibly blurry, large files, no location, unsure date — where the only action is *hide*. A Hidden list brings anything back. |
 | **Folders** | Browse the library the way it sits on disk, with counts and a cover per folder. |
 | **Insights & year in review** | Photos per month, busiest day, who appears most and who appears together, new faces, places, furthest from home, trips, cameras, and the best photos of the year — all counted, nothing estimated. |
@@ -71,10 +72,12 @@ photos ──► scan ──► decode / EXIF / hash / thumbnail ──► faces
 | **Export** | Copy the original files of a selection, an album, an event, a year or month, or **people** — a folder for each person, only photos where they are together, or any of them — to a folder or as a .zip download. Sorted by date, by the original folders, or all in one; Live-photo videos, RAW/burst frames and XMP sidecars optional. Copies only, byte-exact; re-running skips what is already there. |
 | **Trash** | Delete from a selection, the viewer (Delete key) or Duplicates. Files go to a 30-day Trash on the same drive and can be restored to where they were; only then are they erased. Nothing is ever deleted automatically, and deleting can be switched off. |
 | **On your phone** | Open it from any phone or laptop on your Wi-Fi and "Add to Home Screen" — it runs full-screen like an app, from your own computer. See [Use it from your phone](#use-it-from-your-phone). |
+| **Automatic phone backup** | A WebDAV folder (`/dav/`) for backup apps such as FolderSync (Android) or PhotoSync (iPhone): each person signs in with their own name and password and new photos arrive by themselves, filed like uploads, duplicates skipped. The backup app can add but never delete — a deletion is refused. |
+| **Offline on the phone** | Pages and photos you've looked at stay on the phone (the last ~2,000 thumbnails and previews), so the app opens and shows them away from home. Locked photos, originals and videos are never kept; signing out wipes the copy. Needs HTTPS. |
 | **Upload from your phone** | An Upload page (and "Add to Home Screen") for picking photos and videos from a phone's camera roll. Filed by the date each was taken; a photo whose bytes are already in the library is skipped, so uploading a whole camera roll twice is safe. |
 | **Automatic** | While it runs, Memoria looks for new photos every hour (configurable) and backs up to another drive weekly once a backup folder is set. |
 | **Backup** | Copies every photo folder and Memoria's own database to another drive, checking each copy against its fingerprint. Copy-only: nothing in the backup is ever deleted, so a photo you delete is still there. |
-| **Family accounts** | Optional logins over one shared library: *owner* (everything), *family* (browse, upload, albums, downloads — no deleting or settings), *guest* (look and download). |
+| **Family accounts** | Optional logins over one shared library: *owner* (everything), *family* (browse, upload, albums, downloads — no deleting or settings), *guest* (look and download). Each person has their own favourites, and can make an album private to themselves. |
 | **Locked folder** | Move private photos behind a PIN: they vanish from every list, search, person, map and share, and their images are refused until an owner opens the folder on that device for 15 minutes. |
 | **Archive** | Out of the timeline, memories and the photo frame; still in search, albums and people. |
 | **Edit & trim, as copies** | Crop (free or 1:1, 4:3, 3:2, 16:9), rotate, flip, auto, light, contrast, colour, warmth and filters; trim a video without re-encoding. Saved as a new file — the original is only read. Rotating in the viewer is kept in Memoria and never written to the file. |
@@ -264,15 +267,23 @@ can use it — no cloud account, no subscription, and your photos never leave yo
 4. **Upload** sends photos from the camera roll to the computer (already-uploaded ones are skipped).
    Downloads (a photo, or an export as .zip) land on the phone; "Copy to a folder" writes on the
    computer.
+5. **Automatic backup:** the Upload page shows the WebDAV address (`http://192.168.1.20:8765/dav/`)
+   and the steps for FolderSync (Android) and PhotoSync (iPhone). Sign in with your own name and
+   password; each person's backup app sees only what it sent. Deleting a photo on the phone never deletes it here.
 
 Away from home, do not forward a port on your router. Use a private VPN such as
 [Tailscale](https://tailscale.com) or WireGuard (free for personal use). With Tailscale,
 `tailscale cert` gives the computer a trusted certificate: `serve --ssl-cert … --ssl-key …` then
 serves HTTPS. The computer has to be on for the phone to reach it.
 
-Uploading is something you start; a browser cannot back up a phone in the background. For fully
-automatic phone backup, a folder-sync app such as [Syncthing](https://syncthing.net) (free, open
-source, phone → computer over your Wi-Fi) into a folder Memoria indexes works alongside it.
+**Offline:** over HTTPS the app keeps what you have looked at on the phone — the pages you opened and
+the last ~2,000 thumbnails and previews — so it still opens, and shows those, with no connection.
+A banner says when you are seeing that copy; changes need the connection. Browsers only allow this
+over HTTPS, so on plain `http://192.168.…` the app simply works online-only. Locked photos,
+originals and videos are never kept, locking a photo removes it from the copy, and signing out wipes it.
+
+A browser cannot back up a phone in the background, which is what the WebDAV folder (step 5) is for.
+A folder-sync app such as [Syncthing](https://syncthing.net) into a folder Memoria indexes also works.
 
 ## Privacy
 
@@ -293,6 +304,9 @@ source, phone → computer over your Wi-Fi) into a folder Memoria indexes works 
   that door for 15 minutes. Share links expose one album and nothing
   else, and can be revoked. HTTPS is available with your own certificate (`serve --ssl-cert`).
 - The Locked folder hides photos from people using Memoria; it does not encrypt the files on disk.
+  Its images are sent `no-store`, so neither the browser nor the phone's offline copy keeps them.
+- With accounts, favourites are per person and a private album is visible only to the person who
+  made it — in lists, search, photo details, exports and share links alike.
 
 ---
 
@@ -520,7 +534,7 @@ face recogniser.
 python -m pytest tests/ -q
 ```
 
-They stub the neural nets, so all 254 tests run on CPU in about 70 seconds and still cover
+They stub the neural nets, so all 269 tests run on CPU in about 70 seconds and still cover
 scanning, incremental re-indexing, moves, decoding, metadata, clustering, corrections, events,
 duplicates, search parsing and the HTTP API. The fixtures seed their randomness from stable
 hashes, so a failure reproduces on the next run instead of disappearing.

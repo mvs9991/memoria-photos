@@ -15,7 +15,7 @@ from fastapi.staticfiles import StaticFiles
 from .. import accounts, auth
 from ..context import AppContext
 from . import dav, images, routes_accounts, routes_albums, routes_auth, routes_duplicates, routes_explore, routes_export, routes_trash, routes_upload, routes_events, routes_library, routes_people, routes_search, routes_system
-from .deps import ApiState, get_state, set_current_user, set_locked_open, set_state
+from .deps import ApiState, get_state, set_current_user, set_locked_open, set_state, start_response_notes
 
 log = logging.getLogger(__name__)
 WEB_DIST = Path(__file__).resolve().parent.parent.parent / "web" / "dist"
@@ -98,7 +98,10 @@ def create_app(ctx: AppContext) -> FastAPI:
         set_current_user(user)
         set_locked_open(role == "owner" and auth.valid_locked_token(
             ctx.paths.data, request.cookies.get(auth.LOCKED_COOKIE)))
+        notes = start_response_notes()
         response = await call_next(request)
+        if notes.get("no_store"):             # a locked photo: see deps.guard_locked
+            response.headers["Cache-Control"] = "no-store"
         if request.url.scheme == "https":
             # Over HTTPS (directly or behind a local proxy), cookies must never travel in the clear.
             response.raw_headers[:] = [
@@ -118,8 +121,11 @@ def create_app(ctx: AppContext) -> FastAPI:
         def spa(full_path: str):
             candidate = WEB_DIST / full_path
             if full_path and candidate.is_file():
-                return FileResponse(candidate)
-            return FileResponse(WEB_DIST / "index.html")
+                # The service worker and the page must be re-checked on every visit, or a
+                # phone keeps running an old build (hashed /assets/ files can be kept forever).
+                fresh = full_path in ("sw.js", "index.html", "manifest.json")
+                return FileResponse(candidate, headers={"Cache-Control": "no-cache"} if fresh else None)
+            return FileResponse(WEB_DIST / "index.html", headers={"Cache-Control": "no-cache"})
     else:
         @app.get("/")
         def placeholder():

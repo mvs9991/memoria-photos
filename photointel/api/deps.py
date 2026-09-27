@@ -76,6 +76,17 @@ def set_locked_open(value: bool):
     return _locked_open.set(value)
 
 
+# Per-request notes for the middleware. A dict, not a flag: sync routes run on a copy of the
+# context, so only a change made *inside* this shared object reaches the response.
+_response_notes: ContextVar[dict | None] = ContextVar("memoria_response_notes", default=None)
+
+
+def start_response_notes() -> dict:
+    notes: dict = {}
+    _response_notes.set(notes)
+    return notes
+
+
 def guard_locked(row) -> None:
     """A locked photo is invisible (404, not 403: its existence is not confirmed) unless the
     Locked folder is open in this browser and the account may use it."""
@@ -85,6 +96,11 @@ def guard_locked(row) -> None:
     locked = ("locked" in keys and row["locked"]) or ("status" in keys and row["status"] == "locked")
     if locked and not (locked_open() and current_role() == "owner"):
         raise HTTPException(404, "photo not found")
+    if locked:
+        # Shown, but never kept: not by the browser, not by the phone's offline copy.
+        notes = _response_notes.get()
+        if notes is not None:
+            notes["no_store"] = True
 
 
 def current_user_id() -> int | None:

@@ -1,4 +1,5 @@
 /** Typed client for the Memoria API. */
+import { forgetOfflineCopy, noteResponse } from "./offline";
 
 export interface PhotoIndex {
   ids: number[];
@@ -314,6 +315,7 @@ async function request<T>(path: string, init?: RequestInit): Promise<T> {
     headers: init?.body ? { "Content-Type": "application/json" } : undefined,
     ...init,
   });
+  noteResponse(res);
   if (!res.ok) {
     let detail = res.statusText;
     try {
@@ -517,7 +519,7 @@ export const api = {
     request<{ unlocked: number }>(`/photos/unlock`, { method: "POST", body: JSON.stringify({ photo_ids }) }),
   archive: (photo_ids: number[], archived = true) =>
     request<{ changed: number }>(`/photos/archive`, { method: "POST", body: JSON.stringify({ photo_ids, archived }) }),
-  logout: () => request(`/auth/logout`, { method: "POST" }),
+  logout: () => request(`/auth/logout`, { method: "POST" }).finally(forgetOfflineCopy),
   setPassword: (current: string, next: string) =>
     request<{ protected: boolean }>(`/auth/password`, { method: "POST", body: JSON.stringify({ current, new: next }) }),
   shareAlbum: (id: number, allow_download: boolean, expires_days: number | null, allow_upload = false) =>

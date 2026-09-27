@@ -17,6 +17,9 @@ import "./styles/explore.css";
 import "leaflet/dist/leaflet.css";
 
 import App from "./App";
+import { registerOfflineCopy } from "./lib/offline";
+
+registerOfflineCopy();
 
 const queryClient = new QueryClient({
   defaultOptions: {

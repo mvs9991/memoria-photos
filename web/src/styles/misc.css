@@ -402,3 +402,19 @@
 .xmp-form { display: flex; flex-wrap: wrap; align-items: center; gap: 10px; margin-bottom: 8px; }
 .xmp-form .field { flex: 1; min-width: 240px; }
 .xmp-auto { display: inline-flex; align-items: center; gap: 6px; font-size: 12.5px; }
+
+/* ---------------- offline copy ---------------- */
+.offline-banner {
+  display: flex;
+  align-items: center;
+  gap: 8px;
+  height: var(--offline-h);
+  padding: 0 16px;
+  background: var(--surface);
+  border-bottom: 1px solid var(--hairline);
+  color: var(--text-2);
+  font-size: 12.5px;
+}
+.offline-banner svg { flex: none; }
+:root { --offline-h: 32px; }
+.is-offline .scrubber { top: calc(var(--topbar-h) + var(--offline-h) + 8px); }

@@ -1,4 +1,4 @@
-import { AlertTriangle, ImageOff, Loader2, RefreshCw } from "lucide-react";
+import { AlertTriangle, CloudOff, ImageOff, Loader2, RefreshCw } from "lucide-react";
 import { Link } from "react-router-dom";
 
 export function Spinner({ label, full }: { label?: string; full?: boolean }) {
@@ -12,6 +12,18 @@ export function Spinner({ label, full }: { label?: string; full?: boolean }) {
 
 export function ErrorState({ error, onRetry }: { error: unknown; onRetry?: () => void }) {
   const message = error instanceof Error ? error.message : String(error ?? "Unknown error");
+  if (message.startsWith("offline:")) {          // the phone's offline copy has no such page (sw.js)
+    return (
+      <div className="state state-full empty">
+        <div className="empty-icon"><CloudOff size={26} /></div>
+        <h3>Not on this device yet</h3>
+        <p className="dim" style={{ maxWidth: 420, textAlign: "center" }}>
+          Your library can't be reached from here. Open this page once while connected and it will be kept for next time.
+        </p>
+        {onRetry && <button className="btn btn-ghost" onClick={onRetry}><RefreshCw size={15} /> Try again</button>}
+      </div>
+    );
+  }
   return (
     <div className="state state-full">
       <AlertTriangle size={24} className="danger-text" />

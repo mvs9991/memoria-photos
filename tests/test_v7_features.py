@@ -341,3 +341,54 @@ def test_searching_favourites_in_the_plural(ctx, library, client=None):
     for q in ("favourites", "my favorites", "favourite photos"):
         assert parse(q, conn).only_favorites, q
     conn.close()
+
+
+# ----------------------------------------------------------------- the phone's offline copy
+
+def test_a_locked_photo_is_shown_but_never_kept(ctx, library, app):
+    index(ctx, library)
+    c = TestClient(app)
+    pid = pid_of(ctx, "IMG_x0.jpg")
+    for url in (f"/api/thumb/{pid}?s=m", f"/api/thumb/{pid}?s=l"):
+        cc = c.get(url).headers["cache-control"]
+        assert "immutable" in cc and "private" in cc and "public" not in cc, cc
+    c.post("/api/locked/pin", json={"new": "2468"})
+    c.post("/api/photos/lock", json={"photo_ids": [pid]})
+    c.post("/api/locked/open", json={"pin": "2468"})
+    for url in (f"/api/thumb/{pid}?s=sm", f"/api/thumb/{pid}?s=m", f"/api/thumb/{pid}?s=l",
+                f"/api/photos/{pid}/original", f"/api/photos/{pid}"):
+        r = c.get(url)
+        assert r.status_code == 200, url
+        assert r.headers["cache-control"] == "no-store", url
+    other = pid_of(ctx, "IMG_x1.jpg")          # the rule is per photo, not per session
+    assert "immutable" in c.get(f"/api/thumb/{other}?s=m").headers["cache-control"]
+
+
+def test_the_page_and_the_offline_worker_are_rechecked_every_visit(app):
+    from photointel.api.app import WEB_DIST
+
+    if not (WEB_DIST / "sw.js").exists():
+        pytest.skip("web UI not built")
+    c = TestClient(app)
+    for url in ("/", "/photos", "/sw.js", "/index.html"):
+        assert c.get(url).headers.get("cache-control") == "no-cache", url
+
+
+def _never_kept() -> list:
+    r"""The service worker's NEVER list, as Python regexes (JS literals like /^\/api\/share\//)."""
+    import re
+
+    src = (Path(__file__).parents[1] / "web" / "public" / "sw.js").read_text(encoding="utf-8")
+    block = re.search(r"const NEVER = \[(.*?)\];", src, re.S).group(1)
+    return [re.compile(lit.replace(r"\/", "/")) for lit in re.findall(r"/((?:\\.|[^/\\\n])+)/", block)]
+
+
+def test_the_offline_copy_never_keeps_private_or_heavy_things():
+    never = _never_kept()
+    kept = lambda path: not any(r.search(path) for r in never)          # noqa: E731
+    for path in ("/api/locked", "/api/locked/photos", "/api/share/abc/album", "/api/auth/login",
+                 "/api/accounts", "/api/photos/5/original", "/api/photos/5/download", "/api/photos/5/video",
+                 "/api/photos/5/motion", "/api/browse", "/api/upload", "/api/audit", "/dav/Priya/a.jpg"):
+        assert not kept(path), path
+    for path in ("/api/auth/status", "/api/photos/index", "/api/albums", "/api/people", "/api/photos/5"):
+        assert kept(path), path

@@ -24,7 +24,8 @@ from .deps import get_state, guard_locked
 log = logging.getLogger(__name__)
 router = APIRouter()
 
-IMMUTABLE = "public, max-age=31536000, immutable"
+# "private": only this browser (and its offline copy) may keep them, never a shared cache.
+IMMUTABLE = "private, max-age=31536000, immutable"
 BROWSER_EXT = {".jpg", ".jpeg", ".png", ".webp", ".gif"}
 
 

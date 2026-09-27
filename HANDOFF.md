@@ -58,7 +58,7 @@ photointel/
   api/       app.py routes_*.py images.py
 web/         React + TypeScript UI (Vite)
 eval/        dataset builders, calibration, evaluation, library inspector
-tests/       254 tests, no GPU required
+tests/       269 tests, no GPU required
 ```
 
 **The indexing pipeline** is a feeder thread → N CPU worker threads (read, hash, decode, EXIF,
@@ -371,6 +371,34 @@ alike; deleting them reclaims nothing you had twice.
 
 ---
 
+**v7: phone backup, other apps' XMP, per-person favourites, offline (Sept 2026).**
+
+- *WebDAV is a drop box, not a file server.* `/dav/` lists only what that account sent through it,
+  every write goes through the same `save_upload` as the Upload page (dedupe by sha256, filed by date),
+  and DELETE is refused: a backup app that "mirrors" deletions must never be able to remove a photo.
+  Files a backup app parks under a temporary name are held in `dav_pending` until the MOVE to the real
+  name. Indexing waits for 60 s without uploads (`scheduler.uploads_due`) so a 2,000-photo first sync
+  is one index run, not 2,000.
+- *XMP import never overrides the user.* A sidecar's rating and description apply only where Memoria has
+  none; its keywords become tags only if they are new since that sidecar was last read (so removing a
+  tag here sticks); names only feed the same suggestion list as Takeout. Memoria's own exports carry
+  `memoria` as the creator tool and are skipped, or export → import would loop.
+- *Favourites become per person when accounts are turned on*: `photos.favorite` is handed to the owner
+  (`favorites.hand_to`) and stays the library's flag without accounts. An import's favourite goes to
+  every owner. `favorites.expr(alias, uid)` is the one SQL fragment every query uses — a place that
+  reads `p.favorite` directly is a bug.
+- *A private album is invisible, not forbidden*: `albums.can_see` returns nothing, so the API answers
+  404, like a locked photo. Only the account that made an album can make it private; imported and
+  pre-accounts albums have no maker and stay shared. Search drops private album names from the
+  vocabulary for everyone else, so an album name cannot be probed through search.
+- *Offline caching is decided by the server's headers, not a list of routes.* The service worker keeps
+  an image only when it is `immutable` and never when `no-store`; `guard_locked` marks every response
+  that shows a locked photo `no-store` (through a dict in a contextvar — sync routes run on a copied
+  context, so a plain flag set there never reaches the middleware). Images changed from `public` to
+  `private`. The worker's never-list (auth, share, locked, accounts, originals, downloads, video, dav)
+  is checked by a test that parses `sw.js`. `index.html`, `sw.js` and `manifest.json` are served
+  `no-cache` so a phone picks up a new build.
+
 ## 5. Measured numbers, and what they are worth
 
 All reproducible via `eval/`. The datasets are named because the numbers only describe them.
@@ -508,9 +536,18 @@ the future, everything collapsing into one event, fuzzy duplicate thresholds too
   before); a fixed-aspect crop chosen before a turned preview arrived was not square.
 - **Zip downloads over 4 GB** use zip64 and are untested at that size; the UI suggests copying to a
   folder instead.
-- **Auth has had no security review.** It is PBKDF2 (240k rounds) + an HMAC session cookie with no
-  HTTPS of its own and no rate limit on login. Fine behind a home router; put a TLS reverse proxy in
-  front of anything wider.
+- **Auth has had no outside security review.** It is PBKDF2 (240k rounds) + an HMAC session cookie,
+  with a guessing lockout (10 wrong passwords per 15 min per address and per name, 5 wrong PINs) and
+  HTTPS only with your own certificate. Fine behind a home router or a private VPN; do not forward a
+  port to it.
+- **WebDAV has been tested with a test client only**, not with a real FolderSync or PhotoSync. The
+  methods they are documented to use (PROPFIND, MKCOL, PUT, MOVE) are implemented; COPY, LOCK and
+  PROPPATCH answer 501. If an app insists on LOCK, it will need a no-op lock.
+- **XMP import has been tested on hand-written sidecars** in the shapes Lightroom, digiKam and
+  darktable document, not on files those apps actually wrote.
+- **The offline copy** was checked in Edge (Chromium) with the network cut: grid, viewer preview and
+  opened pages load, the banner shows, sign-out wipes it, locking removes a photo from it. Not tried
+  on iOS Safari, which limits service-worker storage and may evict it after weeks unused.
 - Observed in the v4 demo: a Takeout album copy and its year-folder twin (same pixels, same second) are
   folded into one *stack* as well as grouped as duplicates. Harmless — the copy leaves the timeline —
   but the stack is a burst of one photo. Not changed; worth a rule if it confuses anyone.
@@ -521,7 +558,7 @@ the future, everything collapsing into one event, fuzzy duplicate thresholds too
 
 ## 10. Working notes
 
-- Run the suite with `.venv/Scripts/python.exe -m pytest -q`. 254 tests, ~95 s, no GPU needed —
+- Run the suite with `.venv/Scripts/python.exe -m pytest -q`. 269 tests, ~70 s, no GPU needed —
   the neural nets are replaced by deterministic fakes.
 - Test fixtures seed randomness from `zlib.crc32` of the **file name**, not `hash()` (salted per
   process) and not the full path (contains pytest's per-run tmp counter). Both made failures
