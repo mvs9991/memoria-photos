@@ -22,11 +22,21 @@ log = logging.getLogger(__name__)
 router = APIRouter()
 
 
+# What an app screen needs to know, for someone who is not the owner (no folders or paths).
+MEMBER_SETTINGS = ("allow_online_map_tiles", "allow_delete", "trash_days", "auto_index_minutes")
+
+
 @router.get("/settings")
 def get_settings():
+    from .deps import current_role
+
     state = get_state()
     s = state.ctx.settings
     conn = state.conn()
+    if current_role() != "owner":
+        pub = s.public_dict()
+        return {"settings": {k: pub[k] for k in MEMBER_SETTINGS}, "roots": [], "data_dir": "",
+                "supported_extensions": sorted(SUPPORTED_EXTENSIONS)}
     return {
         "settings": s.public_dict(),
         "roots": [dict(r) for r in conn.execute("SELECT id, path, added_at, last_scan_at FROM roots")],

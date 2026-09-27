@@ -10,7 +10,7 @@ import { Slideshow } from "../components/Slideshow";
 import { HtmlExportDialog, ShareDialog } from "../components/ShareDialog";
 import { ExportDialog } from "../components/ExportDialog";
 import { useViewer } from "../components/ViewerContext";
-import { useTitle } from "../lib/hooks";
+import { useRole, useTitle } from "../lib/hooks";
 
 export default function AlbumDetail() {
   const { id } = useParams();
@@ -22,6 +22,7 @@ export default function AlbumDetail() {
   const [name, setName] = useState("");
   const [selecting, setSelecting] = useState(false);
   const selection = useSelection();
+  const role = useRole();
   const [dialog, setDialog] = useState<"share" | "export" | "web" | "slideshow" | null>(null);
 
   const { data, isLoading, isError, error, refetch } = useQuery({
@@ -89,7 +90,9 @@ export default function AlbumDetail() {
           <button className="btn btn-ghost btn-sm" onClick={() => setDialog("slideshow")} disabled={!items.length}>
             <MonitorPlay size={14} /> Slideshow
           </button>
-          <button className="btn btn-ghost btn-sm" onClick={() => setDialog("share")}><Link2 size={14} /> Share</button>
+          {role === "owner" && (
+            <button className="btn btn-ghost btn-sm" onClick={() => setDialog("share")}><Link2 size={14} /> Share</button>
+          )}
           <button className="btn btn-ghost btn-sm" onClick={() => setDialog("export")} disabled={!items.length}
             title="Copy the original files, or make a web gallery"><FolderOutput size={14} /> Export</button>
           <button className={`btn btn-ghost btn-sm${selecting ? " is-on" : ""}`}

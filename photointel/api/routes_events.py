@@ -15,13 +15,27 @@ from .routes_library import columnar
 router = APIRouter()
 
 
+def _visible_cover(conn, e) -> int | None:
+    """The stored cover, unless it has since been trashed, locked, hidden or archived; then the
+    event's best visible photo instead (until the events are rebuilt)."""
+    cid = e["cover_photo_id"]
+    if cid is not None and conn.execute("SELECT 1 FROM photos WHERE id = ? AND status = 'ok' AND hidden = 0 "
+                                        "AND archived = 0", (cid,)).fetchone():
+        return cid
+    row = conn.execute(
+        """SELECT p.id FROM photos p WHERE (p.event_id = ? OR p.id IN (SELECT photo_id FROM trip_photos WHERE trip_id = ?))
+             AND p.status = 'ok' AND p.hidden = 0 AND p.archived = 0 AND p.live_component = 0
+           ORDER BY p.rating DESC, COALESCE(p.quality_score, 0) DESC LIMIT 1""", (e["id"], e["id"])).fetchone()
+    return int(row[0]) if row else None
+
+
 def _event_dict(conn, e, with_places: bool = False) -> dict:
     place = conn.execute("SELECT * FROM places WHERE id=?", (e["place_id"],)).fetchone() if e["place_id"] else None
     out = {
         "id": e["id"], "kind": e["kind"], "title": event_title(e), "auto_title": e["auto_title"],
         "user_title": e["user_title"], "category": e["category"], "start_ts": e["start_ts"], "end_ts": e["end_ts"],
         "date_label": date_range_label(e["start_ts"], e["end_ts"]), "photo_count": e["photo_count"],
-        "people_count": e["people_count"], "cover_photo_id": e["cover_photo_id"], "summary": e["summary"],
+        "people_count": e["people_count"], "cover_photo_id": _visible_cover(conn, e), "summary": e["summary"],
         "place": {"id": place["id"], "label": place_label(place), "city": place["city"],
                   "country": place["country"], "lat": place["lat"], "lon": place["lon"]} if place is not None else None,
         "location_confidence": e["location_confidence"], "parent_id": e["parent_id"],

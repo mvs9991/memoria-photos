@@ -50,6 +50,8 @@ def allowed(role: str, method: str, path: str) -> bool:
         return True
     if path.startswith(OWNER_ONLY) or path.endswith("/export-html") or path == "/api/export":
         return False
+    if path.startswith("/api/shares") or (path.startswith("/api/albums/") and path.endswith(("/share", "/shares"))):
+        return False          # a share link publishes an album outside the household
     if method not in ("GET", "HEAD") and path.startswith(OWNER_ONLY_WRITES):
         return False
     if role == "guest":

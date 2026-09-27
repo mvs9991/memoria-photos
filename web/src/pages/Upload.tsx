@@ -45,7 +45,9 @@ export default function Upload() {
 
   const counts = items.reduce((m, it) => ({ ...m, [it.status]: (m[it.status] ?? 0) + 1 }), {} as Record<string, number>);
   const total = items.reduce((a, it) => a + it.file.size, 0);
-  const folder = settings.data?.settings?.upload_folder || `${settings.data?.data_dir ?? "the data folder"}\\uploads`;
+  // Only the owner is shown the server's folders (see the settings API).
+  const folder = settings.data?.data_dir
+    ? settings.data.settings?.upload_folder || `${settings.data.data_dir}\\uploads` : "";
 
   return (
     <div className="page upload-page">
@@ -105,9 +107,9 @@ export default function Upload() {
           ) : null}
         </>
       )}
-      <p className="dim upload-note">Saved on the Memoria computer in <code>{folder}</code>, in folders by the date each photo was
-        taken. Nothing already there is overwritten. For automatic backup of a phone, a sync app such as Syncthing into a
-        folder Memoria indexes works alongside this.</p>
+      <p className="dim upload-note">Saved on the Memoria computer{folder ? <> in <code>{folder}</code></> : ""}, in folders by
+        the date each photo was taken. Nothing already there is overwritten. For automatic backup of a phone, a sync app
+        such as Syncthing into a folder Memoria indexes works alongside this.</p>
     </div>
   );
 }

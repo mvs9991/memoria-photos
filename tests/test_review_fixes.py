@@ -231,3 +231,62 @@ def test_album_dates_and_cover_use_every_photo(ctx, library):
     assert a["end_ts"] == pytest.approx(t0 + 999 * 86400)
     assert a["cover_photo_id"] == ids[999]
     conn.close()
+
+
+# 11 --------------------------------------------------------------- second pass
+
+def _family(app):
+    owner = TestClient(app)
+    owner.post("/api/auth/password", json={"new": "owner-pass"})
+    owner.post("/api/accounts/enable", json={"username": "Sanjay"})
+    owner.post("/api/accounts", json={"username": "Priya", "password": "priya-pass", "role": "family"})
+    owner.post("/api/accounts", json={"username": "Guest", "password": "guest-pass", "role": "guest"})
+    fam, guest = TestClient(app), TestClient(app)
+    fam.post("/api/auth/login", json={"username": "Priya", "password": "priya-pass"})
+    guest.post("/api/auth/login", json={"username": "Guest", "password": "guest-pass"})
+    return owner, fam, guest
+
+
+def test_only_the_owner_publishes_share_links(ctx, library, app):
+    index(ctx, library)
+    owner, fam, guest = _family(app)
+    album = owner.post("/api/albums", json={"name": "Goa", "photo_ids": [pid_of(ctx, "IMG_x0.jpg")]}).json()["id"]
+    token = owner.post(f"/api/albums/{album}/share", json={"allow_upload": True}).json()["token"]
+    assert fam.post(f"/api/albums/{album}/share", json={"allow_upload": True}).status_code == 403
+    assert guest.get(f"/api/albums/{album}/shares").status_code == 403
+    assert fam.get(f"/api/albums/{album}/shares").status_code == 403
+    assert fam.delete(f"/api/shares/{token}").status_code == 403
+    assert owner.get(f"/api/albums/{album}/shares").json()["shares"][0]["token"] == token
+
+
+def test_settings_do_not_show_server_paths_to_others(ctx, library, app):
+    index(ctx, library)
+    owner, fam, guest = _family(app)
+    def strings(o):          # every string value in a JSON body (str(dict) would escape Windows paths)
+        if isinstance(o, dict):
+            return [x for v in o.values() for x in strings(v)]
+        if isinstance(o, list):
+            return [x for v in o for x in strings(v)]
+        return [o] if isinstance(o, str) else []
+
+    for c in (fam, guest):
+        body = c.get("/api/settings").json()
+        found = strings(body)
+        assert not any(str(library) in x or str(ctx.paths.data) in x for x in found), found
+        assert "allow_online_map_tiles" in body["settings"]
+    assert any(str(library) in x for x in strings(owner.get("/api/settings").json()))
+
+
+def test_an_event_cover_that_left_view_is_replaced(ctx, library, app):
+    index(ctx, library)
+    conn = ctx.connect()
+    run_post_stages(ctx, conn, stages=["people", "events"])
+    c = TestClient(app)
+    ev = next(e for e in c.get("/api/events").json()["events"] if e["photo_count"] >= 5)
+    cover = ev["cover_photo_id"]
+    c.post("/api/trash", json={"photo_ids": [cover], "confirm": 1})
+    for got in (next(e for e in c.get("/api/events").json()["events"] if e["id"] == ev["id"])["cover_photo_id"],
+                c.get(f"/api/events/{ev['id']}").json()["cover_photo_id"]):
+        assert got is not None and got != cover
+        assert conn.execute("SELECT status FROM photos WHERE id = ?", (got,)).fetchone()[0] == "ok"
+    conn.close()
