@@ -17,7 +17,7 @@ ENV PYTHONUNBUFFERED=1 \
 # opencv-python-headless still wants libglib; the rest ship self-contained wheels.
 # curl is here only so the container can report its own health.
 RUN apt-get update \
- && apt-get install -y --no-install-recommends libglib2.0-0 curl \
+ && apt-get install -y --no-install-recommends libglib2.0-0 curl gosu \
  && rm -rf /var/lib/apt/lists/*
 
 WORKDIR /app
@@ -40,12 +40,16 @@ COPY docker-entrypoint.sh /usr/local/bin/
 # and a shebang ending in CR fails with a confusing "no such file or directory".
 RUN sed -i 's/\r$//' /usr/local/bin/docker-entrypoint.sh && chmod +x /usr/local/bin/docker-entrypoint.sh
 
-# Run as a non-root user. It needs to write /data, but must never be able to write
-# the photos even if the mount were read-write by mistake.
+# A non-root user to run as. It must never be able to write the photos even if the
+# mount were read-write by mistake.
+#
+# USER is deliberately not set: a *bind-mounted* /data arrives owned by root, so the
+# entrypoint fixes ownership as root and then drops to this user with gosu. (A named
+# volume inherits the image's ownership, which is why this only bites on bind mounts —
+# and why it passed locally but failed in CI.)
 RUN useradd --create-home --uid 10001 memoria \
  && mkdir -p /data /photos \
  && chown -R memoria:memoria /data /app
-USER memoria
 
 VOLUME ["/data"]
 EXPOSE 8765

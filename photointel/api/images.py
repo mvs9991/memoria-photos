@@ -10,6 +10,7 @@ import json
 import logging
 import os
 import tempfile
+import time
 from pathlib import Path
 
 from fastapi import APIRouter, HTTPException, Query, Response
@@ -72,25 +73,47 @@ def thumb(photo_id: int, s: str = Query("m", pattern="^(sm|m|l)$")):
     ext = "jpg" if s == "l" else "webp"
     cache = get_state().ctx.paths.thumbs / "rotated" / f"{row['sha256'] or 'x'}_{photo_id}_{s}_{rot}.{ext}"
     media = "image/jpeg" if s == "l" else "image/webp"
-    if not cache.exists():
-        plain = _thumb_plain(photo_id, s, row)
-        data = Path(plain.path).read_bytes() if isinstance(plain, FileResponse) else plain.body
-        img = rotate_image(Image.open(io.BytesIO(data)).convert("RGB"), rot)
-        buf = io.BytesIO()
-        img.save(buf, "JPEG" if s == "l" else "WEBP", quality=86 if s == "l" else 78)
-        cache.parent.mkdir(parents=True, exist_ok=True)
-        # A unique temp per request: several requests for one photo can arrive together (the
-        # viewer asks for the preview and the original at once).
-        fd, tmp = tempfile.mkstemp(dir=cache.parent, suffix=".tmp")
-        with os.fdopen(fd, "wb") as f:
-            f.write(buf.getvalue())
+    if cache.exists():
+        hit = _read_cached(cache)
+        if hit is not None:
+            return Response(hit, media_type=media, headers={"Cache-Control": IMMUTABLE})
+        # Unreadable right now because another request is swapping it in: fall through
+        # and rebuild rather than fail. The result is identical either way.
+    plain = _thumb_plain(photo_id, s, row)
+    data = Path(plain.path).read_bytes() if isinstance(plain, FileResponse) else plain.body
+    img = rotate_image(Image.open(io.BytesIO(data)).convert("RGB"), rot)
+    buf = io.BytesIO()
+    img.save(buf, "JPEG" if s == "l" else "WEBP", quality=86 if s == "l" else 78)
+    cache.parent.mkdir(parents=True, exist_ok=True)
+    # A unique temp per request: several requests for one photo can arrive together (the
+    # viewer asks for the preview and the original at once).
+    fd, tmp = tempfile.mkstemp(dir=cache.parent, suffix=".tmp")
+    with os.fdopen(fd, "wb") as f:
+        f.write(buf.getvalue())
+    try:
+        os.replace(tmp, cache)
+    except OSError:                        # another request put it there first (Windows: in use)
+        Path(tmp).unlink(missing_ok=True)
+    # Serve what we just built rather than re-opening the file. Returning a FileResponse
+    # here was the bug: it opens the path later, while sending, and on Windows that open
+    # fails outright if a concurrent request is mid-replace on the same name.
+    return Response(buf.getvalue(), media_type=media, headers={"Cache-Control": IMMUTABLE})
+
+
+def _read_cached(path: Path) -> bytes | None:
+    """Cached bytes, or None if the file is momentarily unreadable.
+
+    Windows refuses to open a file another thread is replacing, so a brief retry turns
+    a 500 into a hit; a miss just means the caller regenerates.
+    """
+    for attempt in range(3):
         try:
-            os.replace(tmp, cache)
-        except OSError:                    # another request put it there first (Windows: in use)
-            Path(tmp).unlink(missing_ok=True)
-        if not cache.exists():
-            return Response(buf.getvalue(), media_type=media, headers={"Cache-Control": IMMUTABLE})
-    return FileResponse(cache, media_type=media, headers={"Cache-Control": IMMUTABLE})
+            return path.read_bytes()
+        except OSError:
+            if attempt == 2:
+                return None
+            time.sleep(0.02)
+    return None
 
 
 def _thumb_plain(photo_id: int, s: str, row) -> Response:
