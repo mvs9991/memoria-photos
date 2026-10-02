@@ -1,5 +1,10 @@
 # Memoria — local photo intelligence
 
+[![CI](https://github.com/mvs9991/memoria-photos/actions/workflows/ci.yml/badge.svg)](https://github.com/mvs9991/memoria-photos/actions/workflows/ci.yml)
+[![Tests](https://img.shields.io/badge/tests-301-brightgreen)](https://github.com/mvs9991/memoria-photos/actions/workflows/ci.yml)
+[![Licence](https://img.shields.io/badge/licence-MIT%20(code)-blue)](LICENSE)
+[![Docker](https://img.shields.io/badge/docker-compose%20up-2496ED?logo=docker&logoColor=white)](#run-with-docker)
+
 Point it at a folder of photos. It reads every image once, works out **who** is in them,
 **when** and **where** they were taken, **what** they show, which ones are **duplicates**,
 and groups them into **events and trips** — then gives you a photo app to browse and search
@@ -107,10 +112,16 @@ photos ──► scan ──► decode / EXIF / hash / thumbnail ──► faces
 ## Run with Docker
 
 ```bash
+docker run -d --name memoria -p 127.0.0.1:8765:8765   -v /path/to/your/photos:/photos:ro   -v memoria-data:/data   ghcr.io/mvs9991/memoria-photos:latest
+# open http://127.0.0.1:8765
+```
+
+or, to build it yourself:
+
+```bash
 git clone https://github.com/mvs9991/memoria-photos.git
 cd memoria-photos
 PHOTOS=/path/to/your/photos docker compose up -d
-# open http://127.0.0.1:8765
 ```
 
 Your photos are mounted **read-only**, so never altering an original is enforced by the
