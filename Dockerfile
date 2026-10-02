@@ -31,8 +31,17 @@ ARG TORCH_INDEX=https://download.pytorch.org/whl/cpu
 RUN pip install torch torchvision --index-url ${TORCH_INDEX}
 
 # Dependencies first, so editing source does not reinstall them.
+#
+# rapidocr_onnxruntime depends on the full opencv-python, which drags in X11 libraries
+# (libGL, libxcb…) that a headless server has no use for. Both distributions provide
+# the same `cv2` API, so the GUI build is replaced by the headless one afterwards —
+# that removes the whole class of missing-shared-library failures rather than
+# installing X11 piece by piece.
 COPY requirements.txt ./
-RUN pip install -r requirements.txt
+RUN pip install -r requirements.txt \
+ && pip uninstall -y opencv-python \
+ && pip install --no-deps --force-reinstall opencv-python-headless \
+ && python -c "import cv2; print('cv2', cv2.__version__, 'headless ok')"
 
 COPY photointel/ ./photointel/
 COPY web/dist/ ./web/dist/
