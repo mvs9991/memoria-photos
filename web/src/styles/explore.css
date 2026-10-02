@@ -8,7 +8,11 @@
 }
 .collection-tile { display: block; border-radius: var(--r-lg); transition: transform var(--t) var(--ease); }
 .collection-tile:hover { transform: translateY(-2px); }
-.collection-tile.is-empty { opacity: 0.55; }
+/* Dim only the artwork for an empty collection. Fading the whole tile also faded
+   its title and count below a readable contrast — the label already says "none". */
+.collection-tile.is-empty .collection-img { opacity: 0.5; }
+.collection-tile.is-empty .collection-title,
+.collection-tile.is-empty .collection-count { color: var(--text-3); }
 .collection-img {
   aspect-ratio: 4 / 3;
   border-radius: var(--r-lg);

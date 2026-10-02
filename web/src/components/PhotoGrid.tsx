@@ -286,6 +286,10 @@ function Tile({ id, w, h, flags, dur, rating, stack, rot, index, selected, selec
   const [loaded, setLoaded] = useState(false);
   const size = w > 420 || h > 420 ? "m" : "sm";
   return (
+    // The select button is a SIBLING of the tile, not a child: a focusable control
+    // nested inside a focusable control is invalid, and assistive technology can still
+    // reach it however it is hidden. The wrapper positions them over one another.
+    <div className="tile-wrap" style={{ width: w, height: h }}>
     <div
       className={`tile${selected ? " is-selected" : ""}`}
       style={{ width: w, height: h }}
@@ -303,6 +307,8 @@ function Tile({ id, w, h, flags, dur, rating, stack, rot, index, selected, selec
         }
       }}
       aria-label={(flags & FLAG.video) ? `Video ${id}` : `Photo ${id}`}
+      // In select mode the tile itself is the toggle, so it carries the state.
+      aria-pressed={selectable && selectMode ? selected : undefined}
     >
       <img
         src={thumbFor ? thumbFor(id, size) + (rot ? `&r=${rot}` : "") : thumbUrl(id, size, rot)}
@@ -328,6 +334,7 @@ function Tile({ id, w, h, flags, dur, rating, stack, rot, index, selected, selec
           {Array.from({ length: rating }).map((_, i) => <Star key={i} size={9} fill="currentColor" />)}
         </span>
       )}
+    </div>
       {selectable && (
         <button
           className={`tile-select${selected ? " on" : ""}`}
@@ -335,7 +342,8 @@ function Tile({ id, w, h, flags, dur, rating, stack, rot, index, selected, selec
             e.stopPropagation();
             onSelect(id, index, e.shiftKey);
           }}
-          aria-label={selected ? "Deselect" : "Select"}
+          aria-label={selected ? `Deselect photo ${id}` : `Select photo ${id}`}
+          aria-pressed={selected}
         >
           <Check size={13} strokeWidth={3} />
         </button>

@@ -63,7 +63,8 @@ export default function Timeline() {
                 const evs = eventsByMonth.get(`${y.year}-${m.month}`) ?? [];
                 return (
                   <div key={m.month} className="tl-month">
-                    <Link to={`/photos?year=${y.year}&month=${m.month}`} className="tl-month-cover">
+                    <Link to={`/photos?year=${y.year}&month=${m.month}`} className="tl-month-cover"
+                      aria-label={`${monthName(m.month)} ${y.year} — ${m.count.toLocaleString()} photos`}>
                       {m.cover_photo_id ? <img src={thumbUrl(m.cover_photo_id, "sm")} alt="" loading="lazy" />
                         : <div className="event-card-blank" />}
                       <span className="tl-month-bar" style={{ width: `${(m.count / maxMonth) * 100}%` }} />

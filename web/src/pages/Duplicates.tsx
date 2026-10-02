@@ -127,6 +127,7 @@ export default function Duplicates() {
                 {g.members.map((m: any) => (
                   <div key={m.photo_id} className={`dup-member${m.is_keeper ? " is-keeper" : ""}`}>
                     <button className="dup-thumb"
+                      aria-label={`Open ${m.filename}${m.is_keeper ? " (the copy being kept)" : ""}`}
                       onClick={() => viewer.open(g.members.map((x: any) => x.photo_id),
                         g.members.findIndex((x: any) => x.photo_id === m.photo_id))}>
                       <img src={thumbUrl(m.photo_id, "sm")} alt="" loading="lazy" />

@@ -213,3 +213,15 @@
   filter: drop-shadow(0 1px 2px rgba(0, 0, 0, 0.7));
   pointer-events: none;
 }
+
+/* Holds the tile and its select button side by side in the DOM while they sit on top
+   of one another visually — the button must not be a descendant of the tile, which is
+   itself a focusable control. */
+.tile-wrap {
+  position: relative;
+  flex: none;
+}
+.tile-wrap .tile { position: absolute; inset: 0; width: 100% !important; height: 100% !important; }
+.tile-wrap:hover .tile-select,
+.tile-wrap .tile-select:focus-visible,
+.tile-wrap .tile-select.on { opacity: 1; }

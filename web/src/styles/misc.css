@@ -29,9 +29,11 @@
 .ellipsis { overflow: hidden; text-overflow: ellipsis; white-space: nowrap; }
 
 .notice {
-  display: flex;
-  align-items: center;
-  gap: 9px;
+  /* Not flex: the text is a sentence, and in a flex container every text node and
+     inline element (an <em>, a <strong>) becomes its own flex item — so a sentence
+     with emphasis inside broke into separate columns instead of wrapping. The icon
+     flows inline with the first line instead. */
+  display: block;
   padding: 11px 15px;
   border-radius: var(--r-md);
   background: var(--accent-soft);
@@ -39,6 +41,11 @@
   color: var(--accent-text);
   font-size: 13px;
   margin: 18px 0;
+}
+.notice > svg {
+  vertical-align: -2px;
+  margin-right: 8px;
+  flex: none;
 }
 .notice-quiet {
   background: var(--surface);
@@ -119,7 +126,11 @@
 .dup-small { font-size: 11px; }
 .dup-keep-btn { margin-top: auto; align-self: flex-start; }
 
+/* Chip text colours are per-theme: a shade legible on a dark background is far too
+   light on the same hue's pale tint, which failed WCAG AA at 2.0:1. */
 .chip-exact { background: rgba(242, 117, 106, 0.16); color: #f58b80; border-color: rgba(242, 117, 106, 0.3); }
+:root[data-theme="light"] .chip-exact { color: #a33329; }
+:root[data-theme="light"] .chip-likely { color: #1b5e9e; }
 .chip-near { background: rgba(226, 176, 98, 0.16); color: var(--accent-text); border-color: var(--accent-line); }
 .chip-likely { background: rgba(127, 182, 240, 0.14); color: #93c2f3; border-color: rgba(127, 182, 240, 0.28); }
 .chip-similar { background: var(--surface-2); color: var(--text-2); }

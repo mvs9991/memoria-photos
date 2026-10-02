@@ -37,12 +37,16 @@ export default function Insights() {
           <p className="dim">{year ? "The year in photos — counted, not estimated" : "Everything so far, counted from your photos"}</p>
         </div>
       </div>
-      <div className="year-chips" role="tablist" aria-label="Year">
-        <button className={`chip chip-button${!year ? " chip-accent" : ""}`} onClick={() => setParams({}, { replace: true })}>
+      {/* A group of filter buttons, not tabs: role="tablist" requires role="tab"
+          children and arrow-key navigation, neither of which applies here. */}
+      <div className="year-chips" role="group" aria-label="Filter by year">
+        <button className={`chip chip-button${!year ? " chip-accent" : ""}`}
+          aria-pressed={!year} onClick={() => setParams({}, { replace: true })}>
           All time
         </button>
         {data.years.map((y) => (
           <button key={y} className={`chip chip-button${year === y ? " chip-accent" : ""}`}
+            aria-pressed={year === y}
             onClick={() => setParams({ year: String(y) }, { replace: true })}>{y}</button>
         ))}
       </div>
