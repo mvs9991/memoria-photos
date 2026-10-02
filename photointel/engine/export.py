@@ -2,7 +2,8 @@
 the photos of one or more people (a folder each, only where they are together, or any).
 
 Only ever *copies*. The originals are read, never changed, and a destination inside a
-photo root is refused. Copies keep the file's bytes and modification time exactly; with
+photo root is refused. Copies keep the file's bytes exactly, and are stamped with the date the photo was
+taken (including any correction made here) so other programs sort them correctly; with
 `xmp` a `<file>.xmp` beside each copy carries people, tags, stars and corrections for
 other apps. Re-running an export into the same folder skips files already there, so an
 interrupted export resumes. The same selection can instead stream as a .zip download,
@@ -72,6 +73,27 @@ class Item:
     size: int
     sha256: str | None
     mtime: float
+    taken_ts: float | None = None         # Memoria's capture date, including any correction
+
+    @property
+    def stamp(self) -> float:
+        """The modification time to give the copy.
+
+        Prefer the capture date Memoria holds over the file's own mtime: a corrected
+        camera clock, or a date recovered from the filename, is the whole point of
+        exporting — another program sorting the folder by date should see the date the
+        photo was actually taken, not when the file happened to be written.
+
+        `taken_ts` is wall-clock time *encoded as if UTC* (see schema.sql), not a real
+        epoch, so it must be converted back through the local zone. Using it raw would
+        shift every exported file by the local UTC offset.
+        """
+        if not self.taken_ts:
+            return float(self.mtime)
+        try:
+            return ts_to_naive(float(self.taken_ts)).timestamp()
+        except (ValueError, OSError, OverflowError):
+            return float(self.mtime)
 
 
 @dataclass
@@ -195,7 +217,8 @@ def plan(conn: sqlite3.Connection, spec: ExportSpec) -> Plan:
                 sub = ""
             rel_dir = "/".join(x for x in (label, sub) if x)
             result.items.append(Item(pid, root / r["rel_path"], rel_dir, r["filename"], int(r["size"] or 0),
-                                     r["sha256"], float(r["mtime"] or 0)))
+                                     r["sha256"], float(r["mtime"] or 0),
+                                     float(r["taken_ts"]) if r["taken_ts"] else None))
             n_bytes += int(r["size"] or 0)
             count += 1
         result.groups.append({"label": label, "count": count, "bytes": n_bytes})
@@ -233,6 +256,10 @@ def export_to_folder(conn: sqlite3.Connection, spec: ExportSpec, progress: Calla
                 tmp = dest.with_name(dest.name + ".part")
                 shutil.copy2(it.src, tmp)           # bytes and modification time, from a read-only open
                 os.replace(tmp, dest)
+                try:
+                    os.utime(dest, (it.stamp, it.stamp))    # date taken, so other apps sort it right
+                except OSError:
+                    pass                                     # a drive that cannot set times is not fatal
                 copied += 1
                 written_bytes += it.size
             if it.photo_id in xmps:
@@ -278,7 +305,9 @@ def _same_file(path: Path, it: Item) -> bool:
             for block in iter(lambda: f.read(CHUNK), b""):
                 h.update(block)
         return h.hexdigest() == it.sha256
-    return abs(st.st_mtime - it.mtime) < 2
+    # Compare against the stamp we write, not the source mtime, or every re-run would
+    # think the copies differ and write them all again.
+    return abs(st.st_mtime - it.stamp) < 2
 
 
 # ------------------------------------------------------------------ streaming a .zip
@@ -328,6 +357,7 @@ def _zip_stream(p: Plan, xmps: dict[int, str]) -> Iterator[bytes]:
                 log.warning("Skipping unreadable %s", it.src)
                 continue
             info.compress_type = zipfile.ZIP_STORED      # photos and videos are already compressed
+            info.date_time = _zip_date(it.stamp)         # date taken, to match the folder export
             with open(it.src, "rb") as src, zf.open(info, "w") as w:
                 for block in iter(lambda: src.read(CHUNK), b""):
                     w.write(block)
@@ -337,6 +367,18 @@ def _zip_stream(p: Plan, xmps: dict[int, str]) -> Iterator[bytes]:
                 zf.writestr(name + ".xmp", xmps[it.photo_id])
             yield sink.take()
     yield sink.take()
+
+
+def _zip_date(stamp: float) -> tuple[int, int, int, int, int, int]:
+    """A zip entry's date. The format cannot store anything before 1980, so older or
+    unreadable stamps fall back to that floor rather than raising."""
+    try:
+        dt = datetime.fromtimestamp(stamp)
+        if dt.year < 1980:
+            raise ValueError
+        return (dt.year, dt.month, dt.day, dt.hour, dt.minute, dt.second)
+    except (ValueError, OSError, OverflowError):
+        return (1980, 1, 1, 0, 0, 0)
 
 
 def _free_arcname(used: set[str], it: Item) -> str:

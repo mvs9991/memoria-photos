@@ -558,6 +558,8 @@ export const api = {
   shared: (token: string) =>
     request<{ name: string; allow_download: boolean; allow_upload: boolean; photos: PhotoIndex }>(`/share/${token}`),
 
+  exportLocation: () =>
+    request<{ base: string; suggested: string; configured: boolean }>(`/export/location`),
   exportPreview: (spec: ExportSpec) =>
     request<{ items: number; bytes: number; groups: { label: string; count: number; bytes: number }[] }>(
       `/export/preview`, { method: "POST", body: JSON.stringify(spec) }),

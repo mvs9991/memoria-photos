@@ -391,3 +391,61 @@ def test_person_counts_follow_the_trash(ctx, library, client):
     assert client.post("/api/trash/restore", json={"photo_ids": [pid]}).status_code == 200
     assert count() == before
     conn.close()
+
+
+def test_exported_copies_carry_the_capture_date_not_the_file_date(ctx, library, tmp_path):
+    """A copy must be stamped with when the photo was *taken*.
+
+    Whoever receives the folder — another computer, a phone, a pen drive — sorts by the
+    file's modification time. If that is when the file happened to be written, or a wrong
+    camera clock Memoria has since corrected, the photos land in the wrong order.
+    """
+    import os
+    from datetime import datetime
+
+    from photointel.metadata import ts_to_naive
+
+    index(ctx, library)
+    conn = ctx.connect()
+    src = library / "Trips/Goa" / "IMG_x0.jpg"
+    pid, taken = conn.execute(
+        "SELECT id, taken_ts FROM photos WHERE rel_path LIKE '%IMG_x0.jpg'").fetchone()
+    assert taken, "fixture photo should have a capture date"
+
+    # The file's own mtime is wrong — as it is after a copy, a download or a bad clock.
+    wrong = datetime(2001, 1, 1, 9, 0).timestamp()
+    os.utime(src, (wrong, wrong))
+    assert abs(src.stat().st_mtime - wrong) < 2
+
+    out = tmp_path / "stamped"
+    r = export_to_folder(conn, ExportSpec(photo_ids=[pid], layout="flat", folder=str(out)))
+    assert r["copied"] == 1
+    copy = out / "IMG_x0.jpg"
+    # taken_ts is wall-clock encoded as UTC, so the expected mtime goes back through
+    # the local zone — exactly what the export does.
+    want = ts_to_naive(taken).timestamp()
+    assert abs(copy.stat().st_mtime - want) < 2, "copy should carry the capture date"
+    assert abs(copy.stat().st_mtime - wrong) > 60, "copy should not carry the wrong file date"
+    assert sha(copy) == sha(src)                       # still byte-exact
+    assert abs(src.stat().st_mtime - wrong) < 2        # the original is left alone
+
+    # And a re-run still recognises it, rather than copying everything again.
+    again = export_to_folder(conn, ExportSpec(photo_ids=[pid], layout="flat", folder=str(out)))
+    assert again["copied"] == 0 and again["already_there"] == 1
+    conn.close()
+
+
+def test_zip_entries_also_carry_the_capture_date(ctx, library, tmp_path):
+    from photointel.engine.export import iter_zip
+    from photointel.metadata import ts_to_naive
+
+    index(ctx, library)
+    conn = ctx.connect()
+    pid, taken = conn.execute(
+        "SELECT id, taken_ts FROM photos WHERE rel_path LIKE '%IMG_x0.jpg'").fetchone()
+    blob = b"".join(iter_zip(conn, ExportSpec(photo_ids=[pid], layout="flat")))
+    zf = zipfile.ZipFile(io.BytesIO(blob))
+    info = zf.infolist()[0]
+    want = ts_to_naive(taken)                 # the wall clock the photo was taken at
+    assert info.date_time[:5] == (want.year, want.month, want.day, want.hour, want.minute)
+    conn.close()

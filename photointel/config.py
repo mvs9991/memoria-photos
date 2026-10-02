@@ -54,6 +54,7 @@ class Settings:
     stacks_enabled: bool = True           # fold RAW+JPEG pairs and bursts into one timeline item
     allow_delete: bool = True             # the Trash: deleting moves files there (see engine/trash.py)
     trash_days: int = 30                  # days a deleted file can be restored before it is erased
+    export_dir: str = ""                  # where exports land; empty = <data>/exports
     auto_index_minutes: int = 60          # a running server looks for new photos this often; 0 = only by hand
     upload_folder: str = ""               # where phone uploads are stored; "" = <data>/uploads
     backup_folder: str = ""               # another drive to copy everything to; "" = no backup
@@ -124,6 +125,7 @@ class Paths:
     models: Path = field(init=False)
     geo: Path = field(init=False)
     logs: Path = field(init=False)
+    exports: Path = field(init=False)
 
     def __post_init__(self) -> None:
         self.data = Path(self.data).resolve()
@@ -136,9 +138,13 @@ class Paths:
         self.models = Path(os.environ.get("PHOTOINTEL_MODELS") or (self.data / "models")).resolve()
         self.geo = Path(os.environ.get("PHOTOINTEL_GEO") or (self.data / "geo")).resolve()
         self.logs = self.data / "logs"
+        # Exports get their own place, like the Trash, so copies land somewhere
+        # predictable you can pick up whole and move to a drive or send on.
+        self.exports = Path(os.environ.get("PHOTOINTEL_EXPORTS") or (self.data / "exports")).resolve()
 
     def ensure(self) -> "Paths":
-        for p in (self.data, self.thumbs, self.previews, self.faces, self.models, self.geo, self.logs):
+        for p in (self.data, self.thumbs, self.previews, self.faces, self.models, self.geo, self.logs,
+                  self.exports):
             p.mkdir(parents=True, exist_ok=True)
         return self
 

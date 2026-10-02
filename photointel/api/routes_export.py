@@ -53,6 +53,23 @@ def _spec(body: dict) -> export_mod.ExportSpec:
         raise HTTPException(400, str(exc))
 
 
+def default_export_dir(ctx) -> Path:
+    """Where exports go unless told otherwise: the configured folder, else <data>/exports."""
+    configured = (getattr(ctx.settings, "export_dir", "") or "").strip()
+    return Path(configured).expanduser().resolve() if configured else ctx.paths.exports
+
+
+@router.get("/export/location")
+def export_location():
+    """The folder the UI pre-fills, plus a dated sub-folder so each export stays separate
+    and can be picked up whole — copied to a drive, or sent on."""
+    ctx = get_state().ctx
+    base = default_export_dir(ctx)
+    suggested = base / time.strftime("%Y-%m-%d %H%M")
+    return {"base": str(base), "suggested": str(suggested),
+            "configured": bool((getattr(ctx.settings, "export_dir", "") or "").strip())}
+
+
 @router.post("/export/preview")
 def preview(body: SpecBody):
     spec = _spec(body.model_dump())
@@ -67,7 +84,9 @@ def start_export(body: SpecBody):
     spec = _spec(body.model_dump())
     conn = state.conn()
     if not spec.folder:
-        raise HTTPException(400, "choose a folder to export to")
+        # No folder given: fall back to the export location rather than refusing, so
+        # "Export" alone always has somewhere sensible to put the copies.
+        spec.folder = str(default_export_dir(get_state().ctx) / time.strftime("%Y-%m-%d %H%M"))
     try:
         _check_destination(conn, Path(spec.folder))
     except ExportError as exc:

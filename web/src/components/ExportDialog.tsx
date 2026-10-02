@@ -31,6 +31,12 @@ export function ExportDialog({ spec, title, onClose, footer }: {
   const [frames, setFrames] = useState(false);
   const [live, setLive] = useState(true);
   const [folder, setFolder] = useState("");
+  // Pre-fill where exports go, so "Copy" works without typing a path. Each export gets
+  // its own dated sub-folder, so copies stay separate and can be picked up whole.
+  const location = useQuery({ queryKey: ["export-location"], queryFn: api.exportLocation });
+  useEffect(() => {
+    if (location.data?.suggested && !folder) setFolder(location.data.suggested);
+  }, [location.data?.suggested]);
   const [jobId, setJobId] = useState<number | null>(null);
   const full: ExportSpec = { ...spec, layout, person_mode: mode, xmp, include_stack_frames: frames, include_live: live };
 
@@ -119,6 +125,12 @@ export function ExportDialog({ spec, title, onClose, footer }: {
                     <FolderOutput size={14} /> Copy
                   </button>
                 </div>
+                {!job && location.data && (
+                  <span className="export-hint dim">
+                    Copies only — your originals stay where they are. Default is a dated folder
+                    in <code>{location.data.base}</code>; change it here, or set another place in Settings.
+                  </span>
+                )}
                 {job && (
                   <div className="export-progress">
                     {!finished && <span className="job-pill-bar"><span style={{ width: `${pct}%` }} /></span>}
