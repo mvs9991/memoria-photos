@@ -14,10 +14,12 @@ ENV PYTHONUNBUFFERED=1 \
     PIP_NO_CACHE_DIR=1 \
     PHOTOINTEL_DATA=/data
 
-# opencv-python-headless still wants libglib; the rest ship self-contained wheels.
-# curl is here only so the container can report its own health.
+# opencv-python-headless still links libglib and libxcb even in the headless build —
+# importing cv2 fails without them. The other imaging wheels are self-contained.
+# curl is here only so the container can report its own health; gosu lets the
+# entrypoint drop privileges after fixing /data ownership.
 RUN apt-get update \
- && apt-get install -y --no-install-recommends libglib2.0-0 curl gosu \
+ && apt-get install -y --no-install-recommends libglib2.0-0 libxcb1 curl gosu \
  && rm -rf /var/lib/apt/lists/*
 
 WORKDIR /app
