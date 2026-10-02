@@ -27,3 +27,10 @@ Thumbs.db
 # Scratch
 *.log
 *.tmp
+
+# throwaway diagnostic scripts
+web/st*.mjs
+web/qa.mjs
+web/perf.mjs
+web/jank.mjs
+web/diag*.mjs
