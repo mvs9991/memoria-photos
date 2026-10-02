@@ -114,7 +114,16 @@ async function shoot(ctx, name, path, opts = {}) {
   // photographed with half-finished count-ups and un-revealed images.
   await page.bringToFront();
   try {
-    await page.goto(BASE + path, { waitUntil: "networkidle", timeout: 45000 });
+    // Not "networkidle": a photo grid streams thumbnails as rows mount, so on a large
+    // library the network never goes quiet for 500ms and the wait times out even though
+    // the page is perfectly usable. Wait for content to exist instead.
+    await page.goto(BASE + path, { waitUntil: "domcontentloaded", timeout: 45000 });
+    await page.waitForFunction(() => {
+      if (document.querySelector(".spinner-full")) return false;   // still loading
+      return document.querySelectorAll(
+        ".tile, .person-tile, .dup-group, .event-card, .tl-month, .collection-tile, .album-card, .place-card"
+      ).length > 0 || !!document.querySelector(".empty-state, .page-head");
+    }, { timeout: 45000 });
   } catch {
     await page.waitForTimeout(3000);
   }
@@ -128,7 +137,12 @@ async function shoot(ctx, name, path, opts = {}) {
       errors.push(`[${name}] action failed: ${String(e).slice(0, 120)}`);
     }
   }
-  await page.screenshot({ path: `${OUT}/${name}.png`, fullPage: !!opts.full });
+  try {
+    await page.screenshot({ path: `${OUT}/${name}.png`, fullPage: !!opts.full });
+  } catch (e) {
+    // One unshootable page should not lose the other twenty screenshots.
+    errors.push(`[${name}] screenshot failed: ${String(e).slice(0, 110)}`);
+  }
   await page.close();
 }
 
