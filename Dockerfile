@@ -69,6 +69,9 @@ HEALTHCHECK --interval=30s --timeout=5s --start-period=90s --retries=3 \
   CMD curl -fsS http://127.0.0.1:8765/api/stats || exit 1
 
 ENTRYPOINT ["docker-entrypoint.sh"]
-# 0.0.0.0 so the port is reachable from outside the container; publish it only to the
-# interface you want (compose binds it to localhost by default).
-CMD ["python", "-m", "photointel", "serve", "--host", "0.0.0.0", "--port", "8765"]
+# Bind 0.0.0.0 *inside the container* — that is its own network namespace, and what
+# the port is actually reachable from is decided by the publish mapping (compose binds
+# it to 127.0.0.1). --insecure is needed because the app's own guard reads 0.0.0.0 as
+# "exposed to the LAN", which is not true here. The entrypoint still warns when no
+# password is set, because publishing the port more widely would make it true.
+CMD ["python", "-m", "photointel", "serve", "--host", "0.0.0.0", "--port", "8765", "--insecure"]
