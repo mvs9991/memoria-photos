@@ -101,7 +101,7 @@
 
 .person-facts, .event-facts {
   display: grid;
-  grid-template-columns: repeat(auto-fit, minmax(270px, 1fr));
+  grid-template-columns: repeat(auto-fit, minmax(min(270px, 100%), 1fr));
   gap: 14px;
   margin: 8px 0 8px;
 }
@@ -207,7 +207,7 @@
 .merge-bar-actions { margin-left: auto; display: flex; gap: 8px; }
 .merge-cards {
   display: grid;
-  grid-template-columns: repeat(auto-fill, minmax(260px, 1fr));
+  grid-template-columns: repeat(auto-fill, minmax(min(260px, 100%), 1fr));
   gap: 12px;
 }
 .merge-card {

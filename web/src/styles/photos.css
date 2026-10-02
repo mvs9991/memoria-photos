@@ -192,7 +192,10 @@
   background: var(--surface-2);
   border: 1px solid var(--hairline);
 }
-.input-inline input { border: 0; background: none; outline: none; width: 130px; font-size: 13px; }
+/* align-self: stretch so the whole 32px pill is tappable — the bare input is only
+   22px tall, and a tap on the padding missed it. */
+.input-inline input { border: 0; background: none; outline: none; width: 130px; font-size: 13px;
+  align-self: stretch; min-width: 0; }
 .field-sm { height: 32px; width: auto; font-size: 12.5px; padding: 0 8px; }
 
 .skeleton-grid {

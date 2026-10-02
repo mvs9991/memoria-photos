@@ -171,6 +171,10 @@
   align-items: center;
   gap: 9px;
   flex: 1;
+  /* A flex item defaults to min-width:auto and will not shrink below its content.
+     On a 320px phone that kept the search box at its natural width and pushed the
+     topbar buttons clean off the screen (they sat at 334-370px in a 320px viewport). */
+  min-width: 0;
   max-width: 620px;
   height: 38px;
   padding: 0 10px 0 13px;

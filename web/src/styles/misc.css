@@ -325,7 +325,7 @@
 .modal-foot .danger-text { margin-right: auto; font-size: 12px; }
 
 .shortcuts { width: min(620px, 100%); }
-.shortcuts-body { display: grid; grid-template-columns: repeat(auto-fit, minmax(230px, 1fr)); gap: 20px; padding: 18px; }
+.shortcuts-body { display: grid; grid-template-columns: repeat(auto-fit, minmax(min(230px, 100%), 1fr)); gap: 20px; padding: 18px; }
 .shortcut-group { min-width: 0; }
 .shortcut-row { display: flex; align-items: center; gap: 10px; padding: 4px 0; font-size: 12.5px; }
 .shortcut-row kbd {
@@ -421,7 +421,9 @@
 .smart-query-form .field { flex: 1; }
 .birthday-form { margin: 4px 0; flex-wrap: wrap; }
 .xmp-form { display: flex; flex-wrap: wrap; align-items: center; gap: 10px; margin-bottom: 8px; }
-.xmp-form .field { flex: 1; min-width: 240px; }
+/* min(…, 100%): a hard 240px floor overflowed a 320px phone, where the content
+   column is only about 250px wide. */
+.xmp-form .field { flex: 1; min-width: min(240px, 100%); }
 .xmp-auto { display: inline-flex; align-items: center; gap: 6px; font-size: 12.5px; }
 
 /* ---------------- offline copy ---------------- */
@@ -512,4 +514,26 @@
 .dup-more {
   display: block;
   margin: 6px auto 0;
+}
+
+/* Settings shows file paths, commands and URLs. Those have no break opportunities,
+   so on a narrow phone they push their row wider than the screen and the end of the
+   line becomes unreachable. Let them break anywhere rather than overflow. */
+@media (max-width: 620px) {
+  .setup-steps li,
+  .trash-settings,
+  .trash-settings .dim,
+  .job-actions .btn,
+  .offsite-setup label,
+  .mono,
+  code {
+    overflow-wrap: anywhere;
+    min-width: 0;
+  }
+  .job-actions .btn,
+  .setup-steps .btn { max-width: 100%; white-space: normal; text-align: left; }
+  /* A select/input inside a label that is itself a flex item needs both to shrink. */
+  .trash-settings .dim,
+  .trash-settings label { min-width: 0; flex-wrap: wrap; }
+  .trash-settings .field { max-width: 100%; }
 }

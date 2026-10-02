@@ -118,7 +118,7 @@
 .event-year-head h2 { font-size: 28px; }
 .event-grid {
   display: grid;
-  grid-template-columns: repeat(auto-fill, minmax(258px, 1fr));
+  grid-template-columns: repeat(auto-fill, minmax(min(258px, 100%), 1fr));
   gap: 16px;
 }
 .event-tile { transition: transform var(--t) var(--ease); }
@@ -291,7 +291,7 @@
 .tl-year-num { font-size: 32px; }
 .tl-months {
   display: grid;
-  grid-template-columns: repeat(auto-fill, minmax(230px, 1fr));
+  grid-template-columns: repeat(auto-fill, minmax(min(230px, 100%), 1fr));
   gap: 16px;
 }
 .tl-month { display: flex; gap: 12px; }
