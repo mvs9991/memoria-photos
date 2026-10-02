@@ -176,7 +176,7 @@ function OwnerSettings() {
         {(jobs.data?.jobs ?? []).length > 0 && (
           <details className="job-history">
             <summary className="dim">Recent jobs</summary>
-            <table className="mini-table">
+            <div className="mini-table-wrap"><table className="mini-table">
               <tbody>
                 {jobs.data.jobs.slice(0, 8).map((j: any) => (
                   <tr key={j.id}>
@@ -190,7 +190,7 @@ function OwnerSettings() {
                   </tr>
                 ))}
               </tbody>
-            </table>
+            </table></div>
           </details>
         )}
       </section>
@@ -249,7 +249,7 @@ function OwnerSettings() {
 
       <section className="card setting-card">
         <SectionHeader title="Models" sub="What is doing the understanding, and which version produced your data." />
-        <table className="mini-table">
+        <div className="mini-table-wrap"><table className="mini-table">
           <thead>
             <tr><th>Kind</th><th>Model</th><th>Version</th><th>Dim</th><th>Outputs</th><th /></tr>
           </thead>
@@ -265,7 +265,7 @@ function OwnerSettings() {
               </tr>
             ))}
           </tbody>
-        </table>
+        </table></div>
         <div className="dim model-note">
           <Cpu size={13} /> Running on {models.data?.device === "cuda" ? "GPU (CUDA)" : "CPU"}.
           Embeddings from different models are never mixed — changing a model re-analyses the affected photos.
@@ -310,7 +310,7 @@ function OwnerSettings() {
         <section className="card setting-card">
           <SectionHeader title="Problem files" count={errors.data.total}
             sub="Files that could not be read. They stay listed so nothing silently disappears." />
-          <table className="mini-table">
+          <div className="mini-table-wrap"><table className="mini-table">
             <tbody>
               {errors.data.errors.slice(0, 12).map((e: any) => (
                 <tr key={e.id}>
@@ -320,7 +320,7 @@ function OwnerSettings() {
                 </tr>
               ))}
             </tbody>
-          </table>
+          </table></div>
         </section>
       )}
     </div>

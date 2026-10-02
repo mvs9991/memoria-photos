@@ -90,8 +90,9 @@
   position: absolute;
   left: 7px;
   top: 7px;
-  width: 21px;
-  height: 21px;
+  /* 24px is the smallest pointer target WCAG 2.2 accepts; this was 21. */
+  width: 24px;
+  height: 24px;
   border-radius: 50%;
   display: grid;
   place-items: center;

@@ -24,9 +24,16 @@ def compute(conn: sqlite3.Connection, year: int | None = None) -> dict:
         args = [naive_to_ts(datetime(year, 1, 1)), naive_to_ts(datetime(year + 1, 1, 1))]
     one = lambda sql, *a: conn.execute(sql, (*args, *a)).fetchone()[0]  # noqa: E731
 
-    photos = one(f"SELECT COUNT(*) FROM photos p WHERE {where} AND p.media_type = 'image'")
-    videos = one(f"SELECT COUNT(*) FROM photos p WHERE {where} AND p.media_type = 'video'")
-    video_seconds = one(f"SELECT COALESCE(SUM(p.duration), 0) FROM photos p WHERE {where} AND p.media_type = 'video'")
+    # One pass for all three totals. As three separate counts this scanned the photo
+    # table three times, which at 250k photos cost over a second on its own.
+    totals_row = conn.execute(
+        f"""SELECT SUM(CASE WHEN p.media_type = 'image' THEN 1 ELSE 0 END) AS photos,
+                   SUM(CASE WHEN p.media_type = 'video' THEN 1 ELSE 0 END) AS videos,
+                   COALESCE(SUM(CASE WHEN p.media_type = 'video' THEN p.duration END), 0) AS secs
+            FROM photos p WHERE {where}""", args).fetchone()
+    photos = totals_row["photos"] or 0
+    videos = totals_row["videos"] or 0
+    video_seconds = totals_row["secs"] or 0
 
     months = [0] * 12
     for r in conn.execute(f"SELECT CAST(strftime('%m', p.taken_ts, 'unixepoch') AS INT) m, COUNT(*) n "
@@ -36,12 +43,23 @@ def compute(conn: sqlite3.Connection, year: int | None = None) -> dict:
         f"SELECT date(p.taken_ts, 'unixepoch') d, COUNT(*) n FROM photos p WHERE {where} AND p.taken_ts IS NOT NULL "
         f"GROUP BY d ORDER BY n DESC LIMIT 1", args).fetchone()
 
+    # Who appears most. Counting it from the faces table means a three-way join and a
+    # COUNT(DISTINCT) over every face — 4.7s of a 6.8s build at 250k photos. Without a
+    # year filter the answer is already maintained on the person row, so read it there;
+    # the join is only needed when the question is "most photos *in this year*".
+    if year:
+        people_rows = conn.execute(
+            f"""SELECT pe.id, pe.name, pe.display_no, pe.cover_face_id, COUNT(DISTINCT p.id) n
+                FROM faces f JOIN photos p ON p.id = f.photo_id JOIN persons pe ON pe.id = f.person_id
+                WHERE {where} AND pe.merged_into IS NULL AND pe.ignored = 0 AND pe.hidden = 0
+                GROUP BY pe.id ORDER BY n DESC LIMIT 12""", args).fetchall()
+    else:
+        people_rows = conn.execute(
+            """SELECT id, name, display_no, cover_face_id, photo_count AS n FROM persons
+               WHERE merged_into IS NULL AND ignored = 0 AND hidden = 0 AND photo_count > 0
+               ORDER BY photo_count DESC LIMIT 12""").fetchall()
     people = [{"id": r["id"], "label": person_label(r), "cover_face_id": r["cover_face_id"], "photos": r["n"]}
-              for r in conn.execute(
-        f"""SELECT pe.id, pe.name, pe.display_no, pe.cover_face_id, COUNT(DISTINCT p.id) n
-            FROM faces f JOIN photos p ON p.id = f.photo_id JOIN persons pe ON pe.id = f.person_id
-            WHERE {where} AND pe.merged_into IS NULL AND pe.ignored = 0 AND pe.hidden = 0
-            GROUP BY pe.id ORDER BY n DESC LIMIT 12""", args)]
+              for r in people_rows]
     top_ids = [p["id"] for p in people]
     constellation = []
     if len(top_ids) > 1:

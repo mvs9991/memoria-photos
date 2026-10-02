@@ -188,6 +188,8 @@
 .searchbox-input {
   flex: 1;
   min-width: 0;
+  /* Fill the pill so the whole control is tappable, not just the text line. */
+  align-self: stretch;
   border: 0;
   background: none;
   outline: none;

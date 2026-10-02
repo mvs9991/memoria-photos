@@ -189,7 +189,17 @@
 .stat-cell { display: flex; flex-direction: column; gap: 1px; font-size: 11.5px; }
 .stat-cell-value { font-size: 18px; font-weight: 600; letter-spacing: -0.01em; }
 
+/* Tables of jobs/accounts have several columns and cannot shrink below their content.
+   On a phone that left ~190px hanging off the right with nothing able to scroll to it,
+   so the last columns were simply unreachable. The table scrolls on its own instead. */
+.mini-table-wrap {
+  overflow-x: auto;
+  -webkit-overflow-scrolling: touch;
+  margin-inline: calc(var(--gutter) * -1);
+  padding-inline: var(--gutter);
+}
 .mini-table { width: 100%; border-collapse: collapse; font-size: 12.5px; }
+.mini-table-wrap .mini-table { min-width: 460px; }
 .mini-table th {
   text-align: left;
   font-size: 11px;
@@ -497,4 +507,9 @@
   padding: 1px 5px;
   border-radius: 4px;
   background: var(--surface-2);
+}
+
+.dup-more {
+  display: block;
+  margin: 6px auto 0;
 }

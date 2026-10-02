@@ -204,3 +204,15 @@ img { display: block; max-width: 100%; }
     scroll-behavior: auto !important;
   }
 }
+
+/* Native checkboxes and radios render about 13px, below the 24px minimum pointer
+   target. Sizing them up is also simply easier to hit on a phone. */
+input[type="checkbox"],
+input[type="radio"] {
+  width: 17px;
+  height: 17px;
+  margin: 4px;            /* pads the hit area out to 25px without moving the label */
+  accent-color: var(--accent);
+  flex: none;
+  cursor: pointer;
+}

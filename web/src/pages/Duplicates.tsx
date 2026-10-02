@@ -1,5 +1,5 @@
 import { useState } from "react";
-import { useMutation, useQuery, useQueryClient } from "@tanstack/react-query";
+import { useInfiniteQuery, useMutation, useQueryClient } from "@tanstack/react-query";
 import { Check, Copy, EyeOff, Info, ShieldCheck, Star, Trash2 } from "lucide-react";
 import { TrashDialog, useAllowDelete } from "../components/TrashDialog";
 import { api, thumbUrl } from "../lib/api";
@@ -24,10 +24,21 @@ export default function Duplicates() {
   const [trashing, setTrashing] = useState<number[] | null>(null);
   const canDelete = useAllowDelete();
 
-  const { data, isLoading, isError, error, refetch } = useQuery({
-    queryKey: ["duplicates", kind, status],
-    queryFn: () => api.duplicates({ kind: kind || undefined, status, limit: 120 }),
-  });
+  // Paged rather than a fixed cap: a real library had 8,732 groups and the page
+  // asked for the first 120, so the rest could never be reviewed at all. A page is
+  // also small enough that the DOM stays light on a phone.
+  const PAGE = 40;
+  const { data, isLoading, isError, error, refetch, fetchNextPage, hasNextPage, isFetchingNextPage } =
+    useInfiniteQuery({
+      queryKey: ["duplicates", kind, status],
+      initialPageParam: 0,
+      queryFn: ({ pageParam }) =>
+        api.duplicates({ kind: kind || undefined, status, limit: PAGE, offset: pageParam as number }),
+      getNextPageParam: (last: any, pages) => {
+        const seen = pages.reduce((n: number, p: any) => n + (p.groups?.length ?? 0), 0);
+        return seen < (last?.total ?? 0) ? seen : undefined;
+      },
+    });
 
   const review = useMutation({
     mutationFn: ({ id, body }: { id: number; body: any }) => api.reviewDuplicate(id, body),
@@ -45,8 +56,10 @@ export default function Duplicates() {
   if (isError) return <ErrorState error={error} onRetry={() => refetch()} />;
   if (isLoading) return <Spinner full label="Finding duplicates" />;
 
-  const groups = data?.groups ?? [];
-  const counts = data?.counts ?? {};
+  const pages: any[] = (data as any)?.pages ?? [];
+  const groups = pages.flatMap((p: any) => p.groups ?? []);
+  const counts = pages[0]?.counts ?? {};
+  const totalGroups = pages[0]?.total ?? groups.length;
 
   return (
     <div className="page">
@@ -54,8 +67,9 @@ export default function Duplicates() {
         <div>
           <h1 className="display">Duplicates</h1>
           <p className="dim">
-            {(data?.total ?? 0).toLocaleString()} groups
-            {data?.reclaimable_bytes ? ` · ${formatBytes(data.reclaimable_bytes)} in redundant copies` : ""}
+            {totalGroups.toLocaleString()} groups
+            {pages[0]?.reclaimable_bytes ? ` · ${formatBytes(pages[0].reclaimable_bytes)} in redundant copies` : ""}
+            {groups.length < totalGroups ? ` · showing ${groups.length.toLocaleString()}` : ""}
           </p>
         </div>
         <div className="segmented" role="group" aria-label="Review status">
@@ -152,6 +166,14 @@ export default function Duplicates() {
               </div>
             </div>
           ))}
+          {hasNextPage && (
+            <button className="btn btn-quiet dup-more" onClick={() => fetchNextPage()}
+              disabled={isFetchingNextPage}>
+              {isFetchingNextPage
+                ? "Loading…"
+                : `Show more — ${(totalGroups - groups.length).toLocaleString()} groups left`}
+            </button>
+          )}
         </div>
       )}
     </div>

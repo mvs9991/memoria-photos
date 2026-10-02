@@ -24,14 +24,26 @@ def collections():
     arch = conn.execute("SELECT COUNT(*), MAX(id) FROM photos WHERE status = 'ok' AND hidden = 0 AND archived = 1 "
                         "AND live_component = 0").fetchone()
     out.append({"key": "archive", "title": "Archive", "group": "media", "count": arch[0], "cover_photo_id": arch[1]})
+    # Every collection shares the same base filter and differs only by its own clause,
+    # so all the counts come from one pass instead of one scan each. At 250k photos
+    # that was 14 scans and about five seconds.
+    base, base_args = photo_filter_sql(conn, collection=None)
+    cases = ", ".join(f"SUM(CASE WHEN {spec['where']} THEN 1 ELSE 0 END) AS c_{key}"
+                      for key, spec in COLLECTIONS.items())
+    counts = conn.execute(f"SELECT {cases} FROM photos p WHERE {base}", base_args).fetchone()
     for key, spec in COLLECTIONS.items():
-        where, args = photo_filter_sql(conn, collection=key)
-        row = conn.execute(
-            f"SELECT COUNT(*) n, (SELECT p2.id FROM photos p2 WHERE p2.id IN (SELECT p.id FROM photos p WHERE {where}) "
-            f"ORDER BY p2.rating DESC, COALESCE(p2.quality_score, 0) DESC LIMIT 1) cover FROM photos p WHERE {where}",
-            (*args, *args)).fetchone()
-        out.append({"key": key, "title": spec["title"], "group": spec["group"], "count": row["n"],
-                    "cover_photo_id": row["cover"]})
+        n = counts[f"c_{key}"] or 0
+        cover = None
+        if n:
+            # Only look for a cover when there is something to cover. Skipping the
+            # empty ones avoids a full scan that was always going to find nothing.
+            where, args = photo_filter_sql(conn, collection=key)
+            row = conn.execute(
+                f"SELECT p.id FROM photos p WHERE {where} "
+                f"ORDER BY p.rating DESC, COALESCE(p.quality_score, 0) DESC LIMIT 1", args).fetchone()
+            cover = row["id"] if row else None
+        out.append({"key": key, "title": spec["title"], "group": spec["group"], "count": n,
+                    "cover_photo_id": cover})
     recent = conn.execute("SELECT id FROM photos WHERE status = 'ok' AND hidden = 0 AND live_component = 0 "
                           "ORDER BY first_seen_at DESC, id DESC LIMIT 1").fetchone()
     dups = conn.execute("SELECT COUNT(*) FROM dup_groups WHERE kind != 'similar' AND review_status = 'pending'").fetchone()[0]
