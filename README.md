@@ -104,7 +104,31 @@ photos ──► scan ──► decode / EXIF / hash / thumbnail ──► faces
 - Optional: an NVIDIA GPU. Everything runs on CPU, just slower.
 - Optional: Node 20+ if you want to rebuild the web UI from source
 
-## Install
+## Run with Docker
+
+```bash
+git clone https://github.com/mvs9991/memoria-photos.git
+cd memoria-photos
+PHOTOS=/path/to/your/photos docker compose up -d
+# open http://127.0.0.1:8765
+```
+
+Your photos are mounted **read-only**, so never altering an original is enforced by the
+kernel rather than only promised by the code. The index, thumbnails, models and exports
+live in a named volume. Models (~1.1 GB) download on first use, which is why the image
+stays small.
+
+Indexing is deliberate rather than automatic — on a large library it takes a while and is
+worth watching:
+
+```bash
+docker exec memoria python -m photointel index
+```
+
+An NVIDIA GPU makes that several times faster; see the commented block in
+`docker-compose.yml`.
+
+## Install without Docker
 
 ```bash
 python -m venv .venv

@@ -15,3 +15,7 @@
 *.png   binary
 *.jpg   binary
 *.webp  binary
+
+*.sh   text eol=lf
+Dockerfile text eol=lf
+docker-entrypoint.sh text eol=lf

@@ -1,0 +1,15 @@
+# Keep the build context small and never bake a library into the image.
+data/
+*data/
+.venv/
+.git/
+.github/
+__pycache__/
+*.py[cod]
+.pytest_cache/
+web/node_modules/
+web/src/
+docs/screenshots/
+eval/
+tests/
+*.log

@@ -1,0 +1,34 @@
+# Memoria — run with:  docker compose up -d     then open http://127.0.0.1:8765
+#
+# Point PHOTOS at your library. It is mounted read-only: Memoria never writes to your
+# originals, and this makes the kernel enforce that regardless of any bug.
+
+services:
+  memoria:
+    build: .
+    # image: ghcr.io/mvs9991/memoria-photos:latest   # once releases are published
+    container_name: memoria
+    restart: unless-stopped
+    ports:
+      # Bound to localhost. Change to "8765:8765" to reach it from other devices on
+      # your network — do that only with a password set (Settings -> Access).
+      - "127.0.0.1:8765:8765"
+    volumes:
+      - ${PHOTOS:-./photos}:/photos:ro     # your photo library, READ-ONLY
+      - memoria-data:/data                 # index, thumbnails, models, exports
+    environment:
+      - PHOTOINTEL_DATA=/data
+      # - PHOTOINTEL_EXPORTS=/exports      # and mount somewhere to pick copies up from
+
+    # An NVIDIA GPU makes indexing several times faster. Build the image with
+    # --build-arg TORCH_INDEX=https://download.pytorch.org/whl/cu124 and uncomment:
+    # deploy:
+    #   resources:
+    #     reservations:
+    #       devices:
+    #         - driver: nvidia
+    #           count: all
+    #           capabilities: [gpu]
+
+volumes:
+  memoria-data:

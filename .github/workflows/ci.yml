@@ -1,0 +1,88 @@
+name: CI
+
+on:
+  push:
+    branches: [main]
+  pull_request:
+  workflow_dispatch:
+
+jobs:
+  tests:
+    # This project was written entirely on Windows. Running the suite on Linux too is
+    # the point: path handling, file locking and temp-file behaviour differ, and a
+    # Docker image or any non-Windows user would hit those first.
+    strategy:
+      fail-fast: false
+      matrix:
+        os: [ubuntu-latest, windows-latest]
+    runs-on: ${{ matrix.os }}
+    timeout-minutes: 45
+    steps:
+      - uses: actions/checkout@v4
+
+      - uses: actions/setup-python@v5
+        with:
+          python-version: "3.11"
+          cache: pip
+
+      - name: Install CPU PyTorch
+        # The tests stub the neural nets, so the small CPU build is enough and keeps
+        # the job minutes down.
+        run: pip install torch torchvision --index-url https://download.pytorch.org/whl/cpu
+
+      - name: Install dependencies
+        run: pip install -r requirements.txt
+
+      - name: Run tests
+        run: pytest -q
+
+  web:
+    runs-on: ubuntu-latest
+    timeout-minutes: 20
+    steps:
+      - uses: actions/checkout@v4
+      - uses: actions/setup-node@v4
+        with:
+          node-version: "20"
+          cache: npm
+          cache-dependency-path: web/package-lock.json
+      - run: npm ci
+        working-directory: web
+      - run: npm run build
+        working-directory: web
+      - name: Fail if the committed build is stale
+        # web/dist is committed so the app runs without Node. If a UI change was made
+        # without rebuilding, the shipped app silently lacks it.
+        run: |
+          if [ -n "$(git status --porcelain web/dist)" ]; then
+            echo "web/dist differs from a fresh build of web/src — run 'npm run build' in web/ and commit."
+            git status --porcelain web/dist
+            exit 1
+          fi
+
+  docker:
+    runs-on: ubuntu-latest
+    timeout-minutes: 45
+    steps:
+      - uses: actions/checkout@v4
+      - uses: docker/setup-buildx-action@v3
+      - name: Build the image
+        uses: docker/build-push-action@v6
+        with:
+          context: .
+          push: false
+          load: true
+          tags: memoria:ci
+          cache-from: type=gha
+          cache-to: type=gha,mode=max
+      - name: It should start and answer
+        run: |
+          docker run -d --name memoria -p 8765:8765 \
+            -v "$PWD/.ci-data:/data" -v "$PWD/docs:/photos:ro" memoria:ci
+          for i in $(seq 1 60); do
+            if curl -fsS http://127.0.0.1:8765/api/stats >/dev/null 2>&1; then
+              echo "server answered after ${i}s"; curl -s http://127.0.0.1:8765/api/stats; exit 0
+            fi
+            sleep 1
+          done
+          echo "server never came up"; docker logs memoria; exit 1
