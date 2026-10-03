@@ -67,6 +67,21 @@ def check(ctx, conn, now: float | None = None, disk_usage=shutil.disk_usage, isd
                           f"“{Path(r['path']).name or r['path']}” is missing. Its photos are hidden until it is back.",
                           "Plug the drive back in (or reconnect the network share); nothing is lost."))
 
+    # ---- place names. Without the offline place data the geocoding stage only logs a warning and
+    # skips, so a library can quietly stop getting places: 697 photos with GPS were added to a real
+    # library this way and nothing said so.
+    from .geo import ReverseGeocoder
+
+    if not ReverseGeocoder.available(ctx.paths.geo):
+        unplaced = conn.execute("SELECT COUNT(*) FROM photos WHERE status = 'ok' AND gps_lat IS NOT NULL "
+                                "AND place_id IS NULL").fetchone()[0]
+        if unplaced:
+            out.append(_p("geo:missing", "warn", "Place names are switched off",
+                          f"{unplaced:,} photos have a location but no place name, because the offline place "
+                          f"data was not found in {ctx.paths.geo}.",
+                          "Run `python -m photointel geo-setup` once (it downloads the data), or set PHOTOINTEL_GEO "
+                          "to a folder that already has it, then `index --post-only --stages geocode`."))
+
     # ---- disk space, once per drive, naming what lives there
     places = [(str(ctx.paths.data), "Memoria's data"), (str(upload_folder(ctx)), "phone uploads"), *reachable]
     if s.backup_folder and isdir(s.backup_folder):

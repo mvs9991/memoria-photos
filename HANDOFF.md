@@ -58,7 +58,7 @@ photointel/
   api/       app.py routes_*.py images.py
 web/         React + TypeScript UI (Vite)
 eval/        dataset builders, calibration, evaluation, library inspector
-tests/       452 tests, no GPU required
+tests/       460 tests, no GPU required
 ```
 
 **The indexing pipeline** is a feeder thread → N CPU worker threads (read, hash, decode, EXIF,
@@ -625,6 +625,25 @@ more defects, all invisible to a small test library:
    `meta.post_pending = 1`, so the next scheduled run finishes the job instead of trusting
    half-built people and events.
 
+5. **A library could silently stop getting place names.** When the offline place data is not found
+   the geocoding stage logs one warning and skips, so photos keep arriving with GPS and no place
+   and nothing in the app says so. 697 were added to the real library that way (the data was on
+   the machine in `data/geo`; the library's own `geo/` was empty and `PHOTOINTEL_GEO` was not set
+   for the run). `health.check` now raises `geo:missing` ("Place names are switched off", with the
+   count, the path it looked in, and the fix) when the data is absent *and* some photo has GPS but
+   no place; it stays quiet when nothing needs a place. **Anything that runs `index` or `serve`
+   must be started with the same `PHOTOINTEL_DATA`, `PHOTOINTEL_MODELS` and `PHOTOINTEL_GEO`**: a
+   scheduled job is a child process and inherits the server's environment, so a server started
+   without them silently runs every job without them. `geo-setup` downloads the data and is
+   opt-in, like every other download here.
+
+   Also added: `tests/test_no_lock_leaks.py` asserts that after *every* GET and every mutating
+   endpoint (including with hostile bodies) a second connection can take the write lock at once.
+   It matters because the API keeps one connection per worker thread for the life of the server,
+   so a handler that writes without committing would hold the lock until that thread next
+   commits, which could be much later. One test plants a deliberately leaky endpoint to prove the
+   audit can see a leak. None of the real endpoints leak.
+
 What was checked and found sound, so nobody re-checks it: every `exact` duplicate group is
 byte-identical (one distinct sha256 across 5,208 groups), no photo is in two exact groups, none
 is missed, every keeper is a member, and member counts match. Every read endpoint answers in
@@ -800,7 +819,7 @@ the future, everything collapsing into one event, fuzzy duplicate thresholds too
 
 ## 10. Working notes
 
-- Run the suite with `.venv/Scripts/python.exe -m pytest -q`. 452 tests, ~9 min, no GPU needed —
+- Run the suite with `.venv/Scripts/python.exe -m pytest -q`. 460 tests, ~9 min, no GPU needed —
   the neural nets are replaced by deterministic fakes.
 - Test fixtures seed randomness from `zlib.crc32` of the **file name**, not `hash()` (salted per
   process) and not the full path (contains pytest's per-run tmp counter). Both made failures
