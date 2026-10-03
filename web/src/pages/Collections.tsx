@@ -9,13 +9,13 @@ import { useMemo, useState } from "react";
 import { Link, useParams } from "react-router-dom";
 import { useMutation, useQuery, useQueryClient } from "@tanstack/react-query";
 import {
-  ArrowLeft, CalendarX, Camera, CheckSquare, Clock, Copy, Eye, EyeOff, FileText, Film, Focus, GalleryHorizontal,
+  ArrowLeft, CalendarX, Camera, Clock, Copy, Eye, EyeOff, FileText, Film, Focus, GalleryHorizontal,
   Archive, HardDrive, Layers, MapPinOff, MessageSquareText, Monitor, PawPrint, ScanFace, Sparkle,
 } from "lucide-react";
 import { api, thumbUrl, type Collection, gridItems } from "../lib/api";
 import { PhotoGrid } from "../components/PhotoGrid";
 import { EmptyState, ErrorState, Spinner } from "../components/States";
-import { SelectionBar, useSelectAllShortcut, useSelection } from "../components/SelectionBar";
+import { SelectionBar, SelectToggle, useGridSelect } from "../components/SelectionBar";
 import { useViewer } from "../components/ViewerContext";
 import { useTitle } from "../lib/hooks";
 
@@ -105,8 +105,6 @@ export function CollectionDetail() {
   const { key = "" } = useParams();
   const qc = useQueryClient();
   const viewer = useViewer();
-  const selection = useSelection();
-  const [selecting, setSelecting] = useState(false);
   const list = useQuery({ queryKey: ["collections"], queryFn: api.collections });
   const recent = key === "recent";
   const spec = list.data?.collections.find((c) => c.key === key);
@@ -119,12 +117,12 @@ export function CollectionDetail() {
   const query = useQuery({ queryKey: ["photos", params], queryFn: () => api.photos(params) });
   const items = useMemo(() => gridItems(query.data), [query.data]);
   const allIds = useMemo(() => items.map((i) => i.id), [items]);
-  useSelectAllShortcut(selecting, allIds, selection.setAll);
+  const sel = useGridSelect(allIds);
 
   const hide = useMutation({
     mutationFn: (ids: number[]) => api.hide(ids, !hiddenView),
     onSuccess: () => {
-      selection.clear();
+      sel.clear();
       qc.invalidateQueries({ queryKey: ["photos"] });
       qc.invalidateQueries({ queryKey: ["collections"] });
       qc.invalidateQueries({ queryKey: ["stats"] });
@@ -147,16 +145,13 @@ export function CollectionDetail() {
           {HINTS[key] && <p className="dim collection-hint">{HINTS[key]}</p>}
         </div>
         <div className="toolbar">
-          <button className={`btn btn-ghost btn-sm${selecting ? " is-on" : ""}`}
-            onClick={() => { setSelecting((v) => !v); selection.clear(); }} title="Shift-click a range, Ctrl+A for all">
-            <CheckSquare size={14} /> {selecting ? "Done" : "Select"}
-          </button>
+          <SelectToggle selecting={sel.selecting} onClick={sel.toggleMode} />
         </div>
       </div>
 
-      <SelectionBar selected={selection.selected} onClear={selection.clear} allIds={allIds} onSelectAll={selection.setAll}
+      <SelectionBar {...sel.barProps}
         extra={(cleanup || hiddenView) && (
-          <button className="btn btn-ghost btn-sm" onClick={() => hide.mutate([...selection.selected])}
+          <button className="btn btn-ghost btn-sm" onClick={() => hide.mutate([...sel.selected])}
             title={hiddenView ? "Back into every view" : "Out of every view — the files are not touched"}>
             {hiddenView ? <><Eye size={14} /> Show again</> : <><EyeOff size={14} /> Hide</>}
           </button>
@@ -164,8 +159,7 @@ export function CollectionDetail() {
 
       <PhotoGrid items={items} grouping={recent || key === "large" ? "none" : "month"} targetHeight={210}
         onOpen={(_, index) => viewer.open(allIds, index)}
-        selectable selectMode={selecting} selection={selection.selected} onToggleSelect={selection.toggle}
-        onSelectRange={selection.addMany}
+        {...sel.gridProps}
         emptyState={<EmptyState title={hiddenView ? "Nothing is hidden" : "Nothing here"}
           hint={cleanup ? "Nothing to review in this list right now." : undefined} />} />
     </div>

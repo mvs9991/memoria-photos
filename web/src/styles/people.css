@@ -319,3 +319,11 @@
 }
 .selection-note { font-size: 12px; }
 .name-suggestion { font-family: var(--font-display); font-size: 24px; color: var(--accent-text); }
+
+/* Press-and-hold then drag selects people, so a long press must not select text, open the
+   browser's link menu, or start a native drag of the link. */
+.people-grid .person-tile {
+  -webkit-user-select: none;
+  user-select: none;
+  -webkit-touch-callout: none;
+}

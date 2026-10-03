@@ -58,7 +58,7 @@ photointel/
   api/       app.py routes_*.py images.py
 web/         React + TypeScript UI (Vite)
 eval/        dataset builders, calibration, evaluation, library inspector
-tests/       406 tests, no GPU required
+tests/       420 tests, no GPU required
 ```
 
 **The indexing pipeline** is a feeder thread → N CPU worker threads (read, hash, decode, EXIF,
@@ -570,6 +570,60 @@ and the owner choosing an export folder is the whole point. What it may never do
 photo root, which `refuse_inside_roots` enforces and a test pins next to the unwritable-folder one,
 so a later change cannot trade one for the other.
 
+### "Clicking a person does nothing" was an 82-second query
+
+Found on the 29,514-photo library, reported by the user as a UI bug. The People page opened a
+person instantly and then showed a blank photo area for well over a minute, which reads as a click
+that did nothing. `/api/people/6` answered in 0.1 s; `/api/photos/index?person=6` took **82 s**.
+
+`photo_filter_sql` asks "does this photo contain person N?" with `EXISTS (SELECT 1 FROM faces ...
+WHERE photo_id = p.id AND person_id = ?)`. With only single-column indexes, SQLite chose
+`ix_faces_person` and, for every one of ~29,000 photos, walked all of that person's 6,729 faces
+looking for a match: around 100 million index steps. It prefers that index because without
+`ANALYZE` it assumes a person has few faces, which is wrong for exactly the people you open most.
+
+Fix: one composite index, `ix_faces_person_photo (person_id, photo_id)`, in `schema.sql`, which is
+re-run on every start so existing libraries pick it up on the next restart. 82 s became 0.2 s with
+byte-identical output. The same `EXISTS` pattern is used in six places (photo filter, events,
+export, search), so fixing the index fixed them all, where rewriting each query would have left the
+next one to be written wrong. `tests/test_person_filter_plan.py` pins the query *plan* rather than
+a timing, because a test library is far too small to be slow and a timing assertion would be flaky.
+
+The lesson, again: the unit tests and a 1,500-photo library cannot show this. Open the biggest
+person on the biggest library before believing a page is fast.
+
+### Selecting photos and people (press-and-hold, drag)
+
+`web/src/lib/dragSelect.ts` is shared by the photo grid and the People grid, and `useGridSelect` in
+`SelectionBar.tsx` is what a page uses to get all of it (Select button, hold, drag, Ctrl+A, Esc).
+Behaviour worth knowing before you change it:
+
+- **Touch:** holding still for 450 ms starts selection; moving before that is a scroll and the
+  gesture is dropped. After the hold, `touchmove` is blocked so the page does not scroll under the
+  finger. **Mouse:** the same hold, or, once already selecting, a few pixels of movement starts a
+  drag at once.
+- The range is by **index into the item list**, not by which tiles are mounted, because the grid is
+  virtualised and most tiles of a big library are not in the DOM. It is applied against a snapshot
+  of the selection taken when the drag began, so dragging back shrinks the range.
+- Starting a drag on an **already-selected** tile drags to *deselect*. That is deliberate (Apple
+  Photos does it) and it surprised the test written for it first.
+- A tile is only ever looked up **inside the grid the gesture started in**. The People page has two
+  grids (Named, Discovered) that each number tiles from 0; without that scoping, dragging over the
+  other grid applied its index to the wrong list. Found by a browser test, not by reading.
+- The click that follows a hold or drag is swallowed for ~80 ms so releasing does not also open the
+  photo or navigate to the person.
+- `.content` has `scroll-behavior: smooth`, so edge auto-scroll uses `behavior: "instant"`; smooth
+  scrolling turns every frame's nudge into an animation that fights the next.
+- Esc leaves selection **unless** a `[role="dialog"]` or the slideshow is open, so cancelling the
+  delete confirmation does not also discard the selection.
+- On the People page, **Hide** is one request (`POST /api/people/hide`) and reversible: it flips
+  `persons.hidden` only and the page offers Undo. It never deletes a photo, and people have no
+  delete action on purpose.
+
+`web/jkgesture.mjs` (gitignored scratch) drove all of this with real mouse and touch input through
+Playwright; 33 checks. It is worth recreating if you touch the gesture code, because none of it can
+be exercised by the Python tests.
+
 ---
 
 ## 8. Evaluation tooling
@@ -671,7 +725,7 @@ the future, everything collapsing into one event, fuzzy duplicate thresholds too
 
 ## 10. Working notes
 
-- Run the suite with `.venv/Scripts/python.exe -m pytest -q`. 406 tests, ~8 min, no GPU needed —
+- Run the suite with `.venv/Scripts/python.exe -m pytest -q`. 420 tests, ~6 min, no GPU needed —
   the neural nets are replaced by deterministic fakes.
 - Test fixtures seed randomness from `zlib.crc32` of the **file name**, not `hash()` (salted per
   process) and not the full path (contains pytest's per-run tmp counter). Both made failures

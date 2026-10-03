@@ -318,6 +318,34 @@ def set_person_flags(conn: sqlite3.Connection, person_id: int, hidden: bool | No
     conn.commit()
 
 
+def set_people_hidden(conn: sqlite3.Connection, person_ids: list[int], hidden: bool = True) -> int:
+    """Hide (or unhide) many people at once; returns how many actually changed.
+
+    A real library discovers thousands of one-off faces from crowds, so tidying them
+    one request at a time is not a workflow. This is one transaction and one audit
+    entry. Only the `hidden` flag moves: nothing is deleted and no photo is touched,
+    and hiding is undone from the People page's "show hidden" toggle.
+    """
+    ids = sorted({int(i) for i in person_ids})
+    if not ids:
+        return 0
+    now, changed = time.time(), 0
+    for start in range(0, len(ids), 500):            # stay far under SQLite's variable limit
+        chunk = ids[start:start + 500]
+        marks = ",".join("?" * len(chunk))
+        cur = conn.execute(
+            f"UPDATE persons SET hidden = ?, updated_at = ? "
+            f"WHERE merged_into IS NULL AND hidden != ? AND id IN ({marks})",
+            [int(hidden), now, int(hidden), *chunk])
+        changed += cur.rowcount
+    db.audit(conn, "people_hidden" if hidden else "people_unhidden", "person", None,
+             {"requested": len(ids), "changed": changed, "ids": ids[:200]})
+    if changed:
+        db.bump_generation(conn, "people")
+    conn.commit()
+    return changed
+
+
 def merge_persons(conn: sqlite3.Connection, target_id: int, source_ids: list[int]) -> dict:
     """Move every face of `source_ids` onto `target_id`. Reversible via the audit log."""
     source_ids = [int(s) for s in source_ids if int(s) != int(target_id)]

@@ -5,6 +5,7 @@ import { useQuery } from "@tanstack/react-query";
 import { ChevronRight, Folder, FolderOpen, HardDrive } from "lucide-react";
 import { api, thumbUrl, gridItems } from "../lib/api";
 import { PhotoGrid } from "../components/PhotoGrid";
+import { SelectionBar, SelectToggle, useGridSelect } from "../components/SelectionBar";
 import { EmptyState, ErrorState, SectionHeader, Spinner } from "../components/States";
 import { useViewer } from "../components/ViewerContext";
 import { useTitle } from "../lib/hooks";
@@ -29,6 +30,7 @@ export default function Folders() {
   useTitle(here || "Folders");
 
   const items = useMemo(() => gridItems(direct.data), [direct.data]);
+  const sel = useGridSelect(useMemo(() => items.map((i) => i.id), [items]));
 
   if (tree.isError) return <ErrorState error={tree.error} onRetry={() => tree.refetch()} />;
   if (tree.isLoading || !tree.data) return <Spinner full label="Loading folders" />;
@@ -77,10 +79,13 @@ export default function Folders() {
 
       {tree.data.direct_count > 0 && (
         <section style={{ marginTop: 28 }}>
-          <SectionHeader title="In this folder" count={tree.data.direct_count.toLocaleString()} />
+          <SectionHeader title="In this folder" count={tree.data.direct_count.toLocaleString()}
+            action={<SelectToggle selecting={sel.selecting} onClick={sel.toggleMode} />} />
+          <SelectionBar {...sel.barProps} />
           {direct.isLoading ? <Spinner /> : (
             <PhotoGrid items={items} grouping="none" targetHeight={200} scrubber={false}
-              onOpen={(_, index) => viewer.open(items.map((i) => i.id), index)} />
+              onOpen={(_, index) => viewer.open(items.map((i) => i.id), index)}
+              {...sel.gridProps} />
           )}
         </section>
       )}

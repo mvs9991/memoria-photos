@@ -10,6 +10,7 @@ import { useCallback, useEffect, useLayoutEffect, useMemo, useRef, useState } fr
 import { Check, Heart, Layers, Play, Star } from "lucide-react";
 import { FLAG, thumbUrl } from "../lib/api";
 import { clock, formatDay, formatMonth, toDate } from "../lib/format";
+import { useDragSelect } from "../lib/dragSelect";
 
 export interface GridItem {
   id: number;
@@ -56,6 +57,10 @@ interface Props {
   selectMode?: boolean;
   /** shift-click: select everything between the last clicked tile and this one */
   onSelectRange?: (ids: number[]) => void;
+  /** replace the whole selection; enables press-and-hold, then drag across tiles to select */
+  onSetSelection?: (ids: number[]) => void;
+  /** called when a press-and-hold starts selecting, so the page can switch select mode on */
+  onBeginSelect?: () => void;
   /** thumbnail URL override (the public share page uses token-scoped URLs) */
   thumbFor?: (id: number, size: "sm" | "m") => string;
   scrubber?: boolean;
@@ -64,6 +69,8 @@ interface Props {
 }
 
 const HEADER_H = 46;
+const NO_SELECTION: Set<number> = new Set();
+const noop = () => {};
 
 export function PhotoGrid({
   items,
@@ -76,6 +83,8 @@ export function PhotoGrid({
   selectable = false,
   selectMode = false,
   onSelectRange,
+  onSetSelection,
+  onBeginSelect,
   thumbFor,
   scrubber = true,
   emptyState,
@@ -95,6 +104,19 @@ export function PhotoGrid({
   const [scrollTop, setScrollTop] = useState(0);
   const [viewport, setViewport] = useState(800);
   const scrollerRef = useRef<HTMLElement | null>(null);
+
+  // Press and hold a tile, then drag across others. Works by index into `items`, so
+  // it stays correct although most tiles of a big library are not mounted.
+  const ids = useMemo(() => items.map((it) => it.id), [items]);
+  const drag = useDragSelect({
+    ids,
+    selection: selection ?? NO_SELECTION,
+    selectMode,
+    enabled: selectable && !!onSetSelection,
+    setSelection: onSetSelection ?? noop,
+    begin: onBeginSelect ?? noop,
+    getScroller: () => scrollerRef.current,
+  });
 
   // Measure the width of the grid and the height of its scroll container.
   useLayoutEffect(() => {
@@ -229,7 +251,8 @@ export function PhotoGrid({
   }
 
   return (
-    <div className="grid-host" ref={hostRef}>
+    <div className={`grid-host${selectable ? " is-selectable" : ""}${selectable && selectMode ? " is-selecting" : ""}`} ref={hostRef}
+      onPointerDown={drag.onPointerDown} onContextMenu={drag.onContextMenu}>
       <div className="grid-canvas" style={{ height: totalHeight }}>
         {visible.map((section) => (
           <div key={section.key} className="grid-section" style={{ top: section.top, height: section.height }}>
@@ -260,6 +283,7 @@ export function PhotoGrid({
                       selectMode={selectMode}
                       onOpen={onOpen}
                       onSelect={handleSelect}
+                      suppressClick={drag.shouldSuppressClick}
                       thumbFor={thumbFor}
                     />
                   ))}
@@ -276,11 +300,13 @@ export function PhotoGrid({
   );
 }
 
-function Tile({ id, w, h, flags, dur, rating, stack, rot, index, selected, selectable, selectMode, onOpen, onSelect, thumbFor }: {
+function Tile({ id, w, h, flags, dur, rating, stack, rot, index, selected, selectable, selectMode, onOpen, onSelect, suppressClick, thumbFor }: {
   id: number; w: number; h: number; flags: number; dur: number; rating: number; stack: number; rot: number; index: number;
   selected: boolean; selectable: boolean;
   selectMode: boolean;
   onOpen?: (id: number, index: number) => void; onSelect: (id: number, index: number, shift: boolean) => void;
+  /** true for a moment after a press-and-hold or drag, so its release does not also open the tile */
+  suppressClick: () => boolean;
   thumbFor?: (id: number, size: "sm" | "m") => string;
 }) {
   const [loaded, setLoaded] = useState(false);
@@ -289,11 +315,12 @@ function Tile({ id, w, h, flags, dur, rating, stack, rot, index, selected, selec
     // The select button is a SIBLING of the tile, not a child: a focusable control
     // nested inside a focusable control is invalid, and assistive technology can still
     // reach it however it is hidden. The wrapper positions them over one another.
-    <div className="tile-wrap" style={{ width: w, height: h }}>
+    <div className="tile-wrap" style={{ width: w, height: h }} data-sel-index={index}>
     <div
       className={`tile${selected ? " is-selected" : ""}`}
       style={{ width: w, height: h }}
       onClick={(e) => {
+        if (suppressClick()) return;
         if (selectable && (selectMode || e.metaKey || e.ctrlKey || e.shiftKey)) onSelect(id, index, e.shiftKey);
         else onOpen?.(id, index);
       }}
@@ -338,8 +365,10 @@ function Tile({ id, w, h, flags, dur, rating, stack, rot, index, selected, selec
       {selectable && (
         <button
           className={`tile-select${selected ? " on" : ""}`}
+          data-no-drag-select
           onClick={(e) => {
             e.stopPropagation();
+            if (suppressClick()) return;
             onSelect(id, index, e.shiftKey);
           }}
           aria-label={selected ? `Deselect photo ${id}` : `Select photo ${id}`}

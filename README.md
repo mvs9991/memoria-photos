@@ -65,6 +65,7 @@ photos ──► scan ──► decode / EXIF / hash / thumbnail ──► faces
 | **Ratings, culling & compare** | 1–5 stars (keys 1–5 in the viewer) that outrank computed quality in "best photos". Compare 2–4 photos side by side with synced zoom and keep the best — the rest are only hidden. |
 | **Smart albums** | Save any search ("Priya at the beach", "5 star photos from 2024") as an album that keeps itself up to date. |
 | **Birthdays & ages** | Add a birthday to a person: their past birthdays show up in Memories as the day approaches, faces show their age, and `Priya at age 5` searches that year of their life. |
+| **Select many** | On every photo list (library, albums, people, events, places, search, folders): press and hold a photo, then drag across others — or tap **Select**, Shift-click a range, Ctrl+A for all. Esc finishes. Dragging from a selected photo deselects. On a phone the same hold-then-drag works with a finger. On **People**, the same gesture picks people to hide (one click, with Undo), merge or export. |
 | **Fix dates & places** | Shift a wrong camera clock or set a date/place for a selection. Stored in Memoria and re-applied after re-indexing — the files are never written. |
 | **Export to other apps** | XMP sidecars (people with face regions, your tags, stars, descriptions, corrected dates/places) for digiKam, darktable and Lightroom — written to a folder you choose, never next to your photos. |
 | **Read other apps' XMP** | Stars, keywords, descriptions and people names that Lightroom, digiKam or darktable left in `.xmp` sidecars beside your photos are read in: stars and descriptions only where you have not set one, keywords as tags, names only as *suggestions* for the faces Memoria found. A changed sidecar is re-read; Memoria's own exports are not. |
@@ -594,7 +595,7 @@ photointel/
   api/        app.py routes_*.py images.py
 web/          React + TypeScript UI
 eval/         dataset builders, calibration, end-to-end evaluation
-tests/        406 tests, no GPU required
+tests/        420 tests, no GPU required
 ```
 
 The layering is deliberate: vision → features → database → relationship engines → search → UI.
@@ -607,7 +608,7 @@ face recogniser.
 python -m pytest tests/ -q
 ```
 
-They stub the neural nets, so all 406 tests run on CPU in about eight minutes and still cover
+They stub the neural nets, so all 420 tests run on CPU in about six minutes and still cover
 scanning, incremental re-indexing, moves, decoding, metadata, clustering, corrections, events,
 duplicates, search parsing and the HTTP API. The fixtures seed their randomness from stable
 hashes, so a failure reproduces on the next run instead of disappearing.

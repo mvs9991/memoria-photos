@@ -4,6 +4,7 @@ import { useMutation, useQuery, useQueryClient } from "@tanstack/react-query";
 import { BookImage, BookmarkPlus, CalendarRange, MapPin, ScanText, Search, Sparkles, Tag, User, Wand2 } from "lucide-react";
 import { api, faceUrl, thumbUrl } from "../lib/api";
 import { PhotoGrid } from "../components/PhotoGrid";
+import { SelectionBar, SelectToggle, useGridSelect } from "../components/SelectionBar";
 import { EmptyState, ErrorState, SectionHeader, Spinner } from "../components/States";
 import { useViewer } from "../components/ViewerContext";
 import { useTitle } from "../lib/hooks";
@@ -39,6 +40,7 @@ export default function SearchPage() {
     () => (data?.photos ?? []).map((p) => ({ id: p.id, ratio: p.ratio, ts: p.ts, score: p.score, rot: p.rot ?? 0 })),
     [data],
   );
+  const sel = useGridSelect(useMemo(() => items.map((i) => i.id), [items]));
 
   const submit = (text: string) => {
     if (!text.trim()) return;
@@ -140,9 +142,12 @@ export default function SearchPage() {
 
           {items.length > 0 ? (
             <section>
-              <SectionHeader title="Photos" count={items.length} />
+              <SectionHeader title="Photos" count={items.length}
+                action={<SelectToggle selecting={sel.selecting} onClick={sel.toggleMode} />} />
+              <SelectionBar {...sel.barProps} />
               <PhotoGrid items={items} grouping="none" targetHeight={240} scrubber={false}
-                onOpen={(_, index) => viewer.open(items.map((i) => i.id), index)} />
+                onOpen={(_, index) => viewer.open(items.map((i) => i.id), index)}
+                {...sel.gridProps} />
             </section>
           ) : (
             data.events.length === 0 && data.people.length === 0 && (

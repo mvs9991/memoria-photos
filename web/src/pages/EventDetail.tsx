@@ -6,6 +6,7 @@ import { api, faceUrl, FLAG, thumbUrl, gridItems } from "../lib/api";
 import { Slideshow } from "../components/Slideshow";
 import { ExportDialog } from "../components/ExportDialog";
 import { PhotoGrid } from "../components/PhotoGrid";
+import { SelectionBar, SelectToggle, useGridSelect } from "../components/SelectionBar";
 import { ErrorState, SectionHeader, Spinner } from "../components/States";
 import { useViewer } from "../components/ViewerContext";
 import { MiniMap } from "../components/MiniMap";
@@ -45,6 +46,7 @@ export default function EventDetail() {
   });
 
   const items = useMemo(() => gridItems(data?.photos), [data]);
+  const sel = useGridSelect(useMemo(() => items.map((i: any) => i.id), [items]));
 
   if (isError) return <ErrorState error={error} onRetry={() => refetch()} />;
   if (isLoading || !data) return <Spinner full label="Loading event" />;
@@ -165,6 +167,7 @@ export default function EventDetail() {
       <section>
         <SectionHeader title="All photos" count={items.length} action={
           <div className="toolbar">
+            <SelectToggle selecting={sel.selecting} onClick={sel.toggleMode} />
             <button className="btn btn-ghost btn-sm" onClick={() => setExporting(true)} disabled={!items.length}>
               <FolderOutput size={14} /> Export
             </button>
@@ -176,8 +179,10 @@ export default function EventDetail() {
           onClose={() => setExporting(false)} />}
         {slideshow && <Slideshow items={items.map((i: any) => ({ id: i.id, video: (i.flags & FLAG.video) > 0 }))}
           onClose={() => setSlideshow(false)} />}
+        <SelectionBar {...sel.barProps} />
         <PhotoGrid items={items} grouping="day" targetHeight={220}
-          onOpen={(_, index) => viewer.open(items.map((i: any) => i.id), index)} />
+          onOpen={(_, index) => viewer.open(items.map((i: any) => i.id), index)}
+          {...sel.gridProps} />
       </section>
     </div>
   );

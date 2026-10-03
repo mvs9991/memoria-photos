@@ -1,11 +1,11 @@
 import { useMemo, useState } from "react";
 import { Link, useNavigate, useParams } from "react-router-dom";
 import { useMutation, useQuery, useQueryClient } from "@tanstack/react-query";
-import { ArrowLeft, Check, CheckSquare, FolderOutput, ImageMinus, Link2, Lock, MonitorPlay, Users, Pencil, Search, Star, Trash2, X } from "lucide-react";
+import { ArrowLeft, Check, FolderOutput, ImageMinus, Link2, Lock, MonitorPlay, Users, Pencil, Search, Star, Trash2, X } from "lucide-react";
 import { api, FLAG, gridItems } from "../lib/api";
 import { PhotoGrid } from "../components/PhotoGrid";
 import { EmptyState, ErrorState, Spinner } from "../components/States";
-import { SelectionBar, useSelectAllShortcut, useSelection } from "../components/SelectionBar";
+import { SelectionBar, SelectToggle, useGridSelect } from "../components/SelectionBar";
 import { Slideshow } from "../components/Slideshow";
 import { HtmlExportDialog, ShareDialog } from "../components/ShareDialog";
 import { ExportDialog } from "../components/ExportDialog";
@@ -20,8 +20,6 @@ export default function AlbumDetail() {
   const viewer = useViewer();
   const [renaming, setRenaming] = useState(false);
   const [name, setName] = useState("");
-  const [selecting, setSelecting] = useState(false);
-  const selection = useSelection();
   const role = useRole();
   const [dialog, setDialog] = useState<"share" | "export" | "web" | "slideshow" | null>(null);
 
@@ -40,11 +38,11 @@ export default function AlbumDetail() {
   });
   const remove = useMutation({
     mutationFn: (ids: number[]) => api.removeFromAlbum(albumId, ids),
-    onSuccess: () => { selection.clear(); refresh(); },
+    onSuccess: () => { sel.clear(); refresh(); },
   });
   const cover = useMutation({
     mutationFn: (pid: number) => api.updateAlbum(albumId, { cover_photo_id: pid }),
-    onSuccess: () => { selection.clear(); refresh(); },
+    onSuccess: () => { sel.clear(); refresh(); },
   });
   const del = useMutation({
     mutationFn: () => api.deleteAlbum(albumId),
@@ -54,7 +52,7 @@ export default function AlbumDetail() {
   const items = useMemo(() => gridItems(data?.photos), [data]);
 
   const allIds = useMemo(() => items.map((i) => i.id), [items]);
-  useSelectAllShortcut(selecting, allIds, selection.setAll);
+  const sel = useGridSelect(allIds);
 
   if (isError) return <ErrorState error={error} onRetry={() => refetch()} />;
   if (isLoading || !data) return <Spinner full label="Loading album" />;
@@ -103,10 +101,7 @@ export default function AlbumDetail() {
           )}
           <button className="btn btn-ghost btn-sm" onClick={() => setDialog("export")} disabled={!items.length}
             title="Copy the original files, or make a web gallery"><FolderOutput size={14} /> Export</button>
-          <button className={`btn btn-ghost btn-sm${selecting ? " is-on" : ""}`}
-            onClick={() => { setSelecting((v) => !v); selection.clear(); }}>
-            <CheckSquare size={14} /> {selecting ? "Done" : "Select"}
-          </button>
+          <SelectToggle selecting={sel.selecting} onClick={sel.toggleMode} />
           <button className="btn btn-quiet btn-sm" onClick={() => {
             if (confirm(`Delete the album “${data.name}”?\n\nOnly the album goes — every photo stays in your library.`))
               del.mutate();
@@ -124,15 +119,15 @@ export default function AlbumDetail() {
       {dialog === "slideshow" && <Slideshow items={items.map((i) => ({ id: i.id, video: (i.flags & FLAG.video) > 0 }))}
         onClose={() => setDialog(null)} />}
 
-      <SelectionBar selected={selection.selected} onClear={selection.clear} allIds={allIds} onSelectAll={selection.setAll}
+      <SelectionBar {...sel.barProps}
         extra={<>
-        {selection.selected.size === 1 && (
-          <button className="btn btn-ghost btn-sm" onClick={() => cover.mutate([...selection.selected][0])}>
+        {sel.selected.size === 1 && (
+          <button className="btn btn-ghost btn-sm" onClick={() => cover.mutate([...sel.selected][0])}>
             <Star size={14} /> Use as cover
           </button>
         )}
         {data.kind !== "smart" && (
-          <button className="btn btn-ghost btn-sm" onClick={() => remove.mutate([...selection.selected])}>
+          <button className="btn btn-ghost btn-sm" onClick={() => remove.mutate([...sel.selected])}>
             <ImageMinus size={14} /> Remove from album
           </button>
         )}
@@ -140,8 +135,7 @@ export default function AlbumDetail() {
 
       <PhotoGrid items={items} grouping="day" targetHeight={220}
         onOpen={(_, index) => viewer.open(items.map((i) => i.id), index)}
-        selectable selectMode={selecting} selection={selection.selected} onToggleSelect={selection.toggle}
-        onSelectRange={selection.addMany}
+        {...sel.gridProps}
         emptyState={<EmptyState title="This album is empty"
           hint="Select photos anywhere in your library and choose “Add to album”." />} />
     </div>

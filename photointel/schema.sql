@@ -165,6 +165,12 @@ CREATE TABLE IF NOT EXISTS faces (
 );
 CREATE INDEX IF NOT EXISTS ix_faces_photo  ON faces(photo_id);
 CREATE INDEX IF NOT EXISTS ix_faces_person ON faces(person_id);
+-- "Does this photo contain this person?" is asked once per photo by every person filter
+-- (the person page, events, export, search). With only the two single-column indexes SQLite
+-- chose ix_faces_person and walked all of a person's faces for each photo: a person with
+-- 6,700 faces in a 29,500-photo library took 82 seconds to open, which looked exactly like
+-- clicking a person doing nothing. This pair makes each of those lookups one index seek.
+CREATE INDEX IF NOT EXISTS ix_faces_person_photo ON faces(person_id, photo_id);
 CREATE INDEX IF NOT EXISTS ix_faces_model  ON faces(model_id);
 
 -- "This face is NOT this person" — a hard constraint for clustering.

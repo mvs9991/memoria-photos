@@ -431,6 +431,9 @@ export const api = {
     request(`/people/${id}/flags`, { method: "POST", body: JSON.stringify(body) }),
   mergePeople: (target_id: number, source_ids: number[]) =>
     request(`/people/merge`, { method: "POST", body: JSON.stringify({ target_id, source_ids }) }),
+  /** Hide (or unhide) many people in one request; nothing is deleted. */
+  hidePeople: (ids: number[], hidden = true) =>
+    request<{ changed: number }>(`/people/hide`, { method: "POST", body: JSON.stringify({ ids, hidden }) }),
   splitPerson: (id: number, face_ids: number[], name?: string) =>
     request(`/people/${id}/split`, { method: "POST", body: JSON.stringify({ face_ids, name }) }),
   assignFaces: (face_ids: number[], person_id?: number, name?: string) =>

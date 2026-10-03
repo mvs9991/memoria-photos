@@ -7,6 +7,7 @@ import {
 import { api, faceUrl, thumbUrl, gridItems } from "../lib/api";
 import { ExportDialog } from "../components/ExportDialog";
 import { PhotoGrid } from "../components/PhotoGrid";
+import { SelectionBar, SelectToggle, useGridSelect } from "../components/SelectionBar";
 import { EmptyState, ErrorState, SectionHeader, Spinner } from "../components/States";
 import { useViewer } from "../components/ViewerContext";
 import { formatDate } from "../lib/format";
@@ -75,6 +76,7 @@ export default function PersonDetail() {
   });
 
   const items = useMemo(() => gridItems(photos.data), [photos.data]);
+  const sel = useGridSelect(useMemo(() => items.map((i) => i.id), [items]));
 
   if (person.isError) return <ErrorState error={person.error} onRetry={() => person.refetch()} />;
   if (person.isLoading || !person.data) return <Spinner full label="Loading person" />;
@@ -123,6 +125,7 @@ export default function PersonDetail() {
             </p>
           )}
           <div className="person-actions">
+            {tab === "photos" && <SelectToggle selecting={sel.selecting} onClick={sel.toggleMode} />}
             <button className="btn btn-ghost btn-sm" onClick={() => setExporting(true)}
               title="Copy every photo of this person somewhere">
               <FolderOutput size={14} /> Export photos
@@ -220,11 +223,13 @@ export default function PersonDetail() {
       </div>
 
       {tab === "photos" ? (
-        photos.isLoading ? <Spinner label="Loading photos" /> : (
+        photos.isLoading ? <Spinner label="Loading photos" /> : (<>
+          <SelectionBar {...sel.barProps} />
           <PhotoGrid items={items} grouping="month" targetHeight={210}
             onOpen={(_, index) => viewer.open(items.map((i) => i.id), index)}
+            {...sel.gridProps}
             emptyState={<EmptyState title="No photos" hint="This person has no photos yet." />} />
-        )
+        </>)
       ) : (
         <div className="review">
           <p className="dim review-hint">

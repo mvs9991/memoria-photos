@@ -1,7 +1,7 @@
 /** Actions for photos selected in a grid: add to album, tag, plus page-specific extras. */
 import { useCallback, useEffect, useState } from "react";
 import { useMutation, useQuery, useQueryClient } from "@tanstack/react-query";
-import { Archive, Sparkles, BookImage, CalendarClock, Columns2, EyeOff, FolderOutput, Lock, MapPin, RotateCw, Tag, Trash2, X } from "lucide-react";
+import { Archive, Sparkles, BookImage, CalendarClock, CheckSquare, Columns2, EyeOff, FolderOutput, Lock, MapPin, RotateCw, Tag, Trash2, X } from "lucide-react";
 import { useRole } from "../lib/hooks";
 import { api } from "../lib/api";
 import { AlbumPicker } from "./AlbumPicker";
@@ -188,4 +188,61 @@ export function useSelectAllShortcut(active: boolean, ids: number[], setAll: (id
     window.addEventListener("keydown", onKey);
     return () => window.removeEventListener("keydown", onKey);
   }, [active, ids, setAll]);
+}
+
+
+/**
+ * Everything a page needs to make its photo grid selectable, in one place so every page
+ * behaves the same: a Select button, press-and-hold then drag across photos, Ctrl+A for
+ * all, and Esc to leave. Spread `gridProps` onto <PhotoGrid> and `barProps` onto
+ * <SelectionBar>.
+ */
+export function useGridSelect(allIds: number[]) {
+  const { selected, toggle, addMany, setAll, clear } = useSelection();
+  const [selecting, setSelecting] = useState(false);
+  useSelectAllShortcut(selecting, allIds, setAll);
+
+  const begin = useCallback(() => setSelecting(true), []);
+  const exit = useCallback(() => { setSelecting(false); clear(); }, [clear]);
+  const toggleMode = useCallback(() => { setSelecting((v) => !v); clear(); }, [clear]);
+
+  // Esc leaves selection — unless something on top of the page owns Esc (a confirmation
+  // dialog, the viewer, a slideshow), in which case cancelling that must not also
+  // throw away what was selected.
+  useEffect(() => {
+    if (!selecting) return;
+    const onKey = (e: KeyboardEvent) => {
+      if (e.key !== "Escape" || e.defaultPrevented) return;
+      const t = e.target as HTMLElement | null;
+      if (t && (t.tagName === "INPUT" || t.tagName === "TEXTAREA" || t.isContentEditable)) return;
+      if (document.querySelector('[role="dialog"], .slideshow')) return;
+      exit();
+    };
+    window.addEventListener("keydown", onKey);
+    return () => window.removeEventListener("keydown", onKey);
+  }, [selecting, exit]);
+
+  return {
+    selecting, toggleMode, exit, selected, clear,
+    gridProps: {
+      selectable: true as const,
+      selectMode: selecting,
+      selection: selected,
+      onToggleSelect: toggle,
+      onSelectRange: addMany,
+      onSetSelection: setAll,
+      onBeginSelect: begin,
+    },
+    barProps: { selected, onClear: clear, allIds, onSelectAll: setAll },
+  };
+}
+
+/** The "Select" / "Done" button every selectable page shows. */
+export function SelectToggle({ selecting, onClick }: { selecting: boolean; onClick: () => void }) {
+  return (
+    <button className={`btn btn-ghost btn-sm${selecting ? " is-on" : ""}`} onClick={onClick}
+      title="Select photos — or press and hold one, then drag across others. Esc to finish.">
+      <CheckSquare size={14} /> {selecting ? "Done" : "Select"}
+    </button>
+  );
 }

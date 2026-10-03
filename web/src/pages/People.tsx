@@ -1,11 +1,12 @@
-import { useState } from "react";
+import { useEffect, useRef, useState } from "react";
 import { Link } from "react-router-dom";
 import { useMutation, useQuery, useQueryClient } from "@tanstack/react-query";
-import { Check, Eye, EyeOff, FolderOutput, Merge, Search, UserPlus, Users, X } from "lucide-react";
+import { Check, CheckSquare, Eye, EyeOff, FolderOutput, Merge, Search, UserPlus, Users, X } from "lucide-react";
 import { ExportDialog } from "../components/ExportDialog";
 import { api, faceUrl, thumbUrl } from "../lib/api";
 import { EmptyState, ErrorState, SectionHeader, Spinner } from "../components/States";
 import { useTitle } from "../lib/hooks";
+import { useDragSelect } from "../lib/dragSelect";
 
 export default function People() {
   useTitle("People");
@@ -13,10 +14,12 @@ export default function People() {
   const [showHidden, setShowHidden] = useState(false);
   const [filter, setFilter] = useState("");
   const [sort, setSort] = useState<"photos" | "name" | "recent">("photos");
-  const [mergeMode, setMergeMode] = useState(false);
-  const [exportMode, setExportMode] = useState(false);
+  // One select mode for everything: tap, or press and hold then drag across people, and
+  // then choose what to do with them (hide, merge, export).
+  const [selecting, setSelecting] = useState(false);
   const [exporting, setExporting] = useState(false);
   const [picked, setPicked] = useState<number[]>([]);
+  const [note, setNote] = useState<{ text: string; undo: number[] } | null>(null);
 
   const { data, isLoading, isError, error, refetch } = useQuery({
     queryKey: ["people", { showHidden, sort }],
@@ -40,7 +43,17 @@ export default function People() {
     mutationFn: ({ target, sources }: { target: number; sources: number[] }) => api.mergePeople(target, sources),
     onSuccess: () => {
       setPicked([]);
-      setMergeMode(false);
+      setSelecting(false);
+      qc.invalidateQueries({ queryKey: ["people"] });
+      qc.invalidateQueries({ queryKey: ["merge-suggestions"] });
+      qc.invalidateQueries({ queryKey: ["stats"] });
+    },
+  });
+  const hide = useMutation({
+    mutationFn: ({ ids, hidden }: { ids: number[]; hidden: boolean }) => api.hidePeople(ids, hidden),
+    onSuccess: (r, { ids, hidden }) => {
+      setPicked([]);
+      setNote(hidden ? { text: `Hid ${r.changed.toLocaleString()} ${r.changed === 1 ? "person" : "people"}`, undo: ids } : null);
       qc.invalidateQueries({ queryKey: ["people"] });
       qc.invalidateQueries({ queryKey: ["merge-suggestions"] });
       qc.invalidateQueries({ queryKey: ["stats"] });
@@ -51,6 +64,20 @@ export default function People() {
     onSuccess: () => qc.invalidateQueries({ queryKey: ["merge-suggestions"] }),
   });
 
+  useEffect(() => {
+    if (!selecting) return;
+    const onKey = (e: KeyboardEvent) => {
+      if (e.key !== "Escape" || e.defaultPrevented) return;
+      const t = e.target as HTMLElement | null;
+      if (t && (t.tagName === "INPUT" || t.tagName === "TEXTAREA" || t.isContentEditable)) return;
+      if (document.querySelector('[role="dialog"]')) return;
+      setSelecting(false);
+      setPicked([]);
+    };
+    window.addEventListener("keydown", onKey);
+    return () => window.removeEventListener("keydown", onKey);
+  }, [selecting]);
+
   if (isError) return <ErrorState error={error} onRetry={() => refetch()} />;
   if (isLoading) return <Spinner full label="Loading people" />;
 
@@ -59,6 +86,7 @@ export default function People() {
   const named = people.filter((p) => p.named);
   const unnamed = people.filter((p) => !p.named);
 
+  const begin = () => setSelecting(true);
   const toggle = (id: number) =>
     setPicked((cur) => (cur.includes(id) ? cur.filter((x) => x !== id) : [...cur, id]));
 
@@ -91,14 +119,10 @@ export default function People() {
             <option value="name">Name</option>
             <option value="recent">Recently seen</option>
           </select>
-          <button className={`btn btn-ghost btn-sm${exportMode ? " is-on" : ""}`}
-            onClick={() => { setExportMode((v) => !v); setMergeMode(false); setPicked([]); }}
-            title="Pick people and copy all their photos somewhere">
-            <FolderOutput size={14} /> {exportMode ? "Cancel" : "Export"}
-          </button>
-          <button className={`btn btn-ghost btn-sm${mergeMode ? " is-on" : ""}`}
-            onClick={() => { setMergeMode((v) => !v); setExportMode(false); setPicked([]); }}>
-            <Merge size={14} /> {mergeMode ? "Cancel" : "Merge"}
+          <button className={`btn btn-ghost btn-sm${selecting ? " is-on" : ""}`}
+            onClick={() => { setSelecting((v) => !v); setPicked([]); setNote(null); }}
+            title="Pick people to hide, merge or export — or press and hold one, then drag across others. Esc to finish.">
+            <CheckSquare size={14} /> {selecting ? "Done" : "Select"}
           </button>
           <button className="btn btn-quiet btn-icon btn-sm" onClick={() => setShowHidden((v) => !v)}
             title={showHidden ? "Hide hidden people" : "Show hidden people"}>
@@ -107,47 +131,50 @@ export default function People() {
         </div>
       </div>
 
-      {exportMode && (
-        <div className="merge-bar">
-          <span>{picked.length === 0 ? "Pick the people whose photos you want to export" :
-            `${picked.length} ${picked.length === 1 ? "person" : "people"} picked`}</span>
-          <div className="merge-bar-actions">
-            {picked.length > 0 && (
-              <button className="btn btn-primary btn-sm" onClick={() => setExporting(true)}>
-                <FolderOutput size={14} /> Export their photos
-              </button>
-            )}
-            <button className="btn btn-quiet btn-sm" onClick={() => { setPicked([]); setExportMode(false); }}>
-              Cancel
-            </button>
-          </div>
-        </div>
-      )}
       {exporting && (
         <ExportDialog spec={{ person_ids: picked }} onClose={() => setExporting(false)}
           title={picked.length === 1 ? `Export the photos of ${people.find((p) => p.id === picked[0])?.label}`
             : `Export the photos of ${picked.length} people`} />
       )}
 
-      {mergeMode && (
-        <div className="merge-bar">
-          <span>{picked.length === 0 ? "Pick the people who are the same person" :
-            `${picked.length} selected — the first one keeps its name`}</span>
+      {selecting && (
+        <div className="merge-bar" role="toolbar" aria-label="Selected people">
+          <span className="tnum">
+            {picked.length === 0
+              ? (note
+                  ? <>{note.text}. <button className="link-button" onClick={() => hide.mutate({ ids: note.undo, hidden: false })}>Undo</button></>
+                  : "Tap people to pick them — or press and hold one and drag across others")
+              : <><strong>{picked.length.toLocaleString()}</strong> selected</>}
+          </span>
           <div className="merge-bar-actions">
+            {picked.length > 0 && (
+              <button className="btn btn-ghost btn-sm" disabled={hide.isPending}
+                onClick={() => hide.mutate({ ids: picked, hidden: true })}
+                title="Take them off this page. Nothing is deleted; the eye icon shows hidden people again.">
+                <EyeOff size={14} /> Hide {picked.length.toLocaleString()}
+              </button>
+            )}
             {picked.length > 1 && (
               <button className="btn btn-primary btn-sm"
-                onClick={() => merge.mutate({ target: picked[0], sources: picked.slice(1) })}>
+                onClick={() => merge.mutate({ target: picked[0], sources: picked.slice(1) })}
+                title="They are the same person. The first one picked keeps its name.">
                 <Check size={14} /> Merge into {people.find((p) => p.id === picked[0])?.label}
               </button>
             )}
-            <button className="btn btn-quiet btn-sm" onClick={() => { setPicked([]); setMergeMode(false); }}>
-              Cancel
+            {picked.length > 0 && (
+              <button className="btn btn-ghost btn-sm" onClick={() => setExporting(true)}
+                title="Copy all their photos somewhere">
+                <FolderOutput size={14} /> Export
+              </button>
+            )}
+            <button className="btn btn-quiet btn-sm" onClick={() => { setPicked([]); setNote(null); setSelecting(false); }}>
+              Done
             </button>
           </div>
         </div>
       )}
 
-      {!mergeMode && !exportMode && (suggestions.data?.suggestions?.length ?? 0) > 0 && (
+      {!selecting && (suggestions.data?.suggestions?.length ?? 0) > 0 && (
         <section className="suggest-merges">
           <SectionHeader title="Possible same person" sub="Memoria thinks these two groups might be one person." />
           <div className="merge-cards">
@@ -174,7 +201,7 @@ export default function People() {
         </section>
       )}
 
-      {!mergeMode && !exportMode && (names.data?.suggestions?.length ?? 0) > 0 && (
+      {!selecting && (names.data?.suggestions?.length ?? 0) > 0 && (
         <section className="suggest-merges">
           <SectionHeader title="Names from Google Photos"
             sub="Your Takeout export named people in these photos. Memoria never applies a name on its own — check the face, then accept or dismiss." />
@@ -213,14 +240,14 @@ export default function People() {
           {named.length > 0 && (
             <section>
               <SectionHeader title="Named" count={named.length} />
-              <PeopleGrid people={named} mergeMode={mergeMode || exportMode} picked={picked} onPick={toggle} />
+              <PeopleGrid people={named} selecting={selecting} picked={picked} onPick={toggle} onSet={setPicked} onBegin={begin} />
             </section>
           )}
           {unnamed.length > 0 && (
             <section>
               <SectionHeader title="Discovered" count={unnamed.length}
                 sub="Groups of the same face. Give them a name to search by person." />
-              <PeopleGrid people={unnamed} mergeMode={mergeMode || exportMode} picked={picked} onPick={toggle} />
+              <PeopleGrid people={unnamed} selecting={selecting} picked={picked} onPick={toggle} onSet={setPicked} onBegin={begin} />
             </section>
           )}
         </>
@@ -234,24 +261,36 @@ export default function People() {
 // 9,229 DOM nodes and a 7s load, so the tail is revealed on request.
 const PEOPLE_PAGE = 300;
 
-function PeopleGrid({ people, mergeMode, picked, onPick }: {
-  people: any[]; mergeMode: boolean; picked: number[]; onPick: (id: number) => void;
+function PeopleGrid({ people, selecting, picked, onPick, onSet, onBegin }: {
+  people: any[]; selecting: boolean; picked: number[]; onPick: (id: number) => void;
+  onSet: (ids: number[]) => void; onBegin: () => void;
 }) {
   const [shown, setShown] = useState(PEOPLE_PAGE);
   const visible = people.length > shown ? people.slice(0, shown) : people;
+  const hostRef = useRef<HTMLDivElement>(null);
+  const drag = useDragSelect({
+    ids: visible.map((p) => p.id),
+    selection: new Set(picked),
+    selectMode: selecting,
+    enabled: true,
+    setSelection: onSet,
+    begin: onBegin,
+    getScroller: () => hostRef.current?.closest<HTMLElement>("[data-scroll-root]") ?? null,
+  });
   return (
     <>
-    <div className="people-grid">
-      {visible.map((p) => {
+    <div className={`people-grid${selecting ? " is-selecting" : ""}`} ref={hostRef}
+      onPointerDown={drag.onPointerDown} onContextMenu={drag.onContextMenu}>
+      {visible.map((p, i) => {
         const inner = (
           <>
             <span className={`person-face${picked.includes(p.id) ? " is-picked" : ""}`}>
               {p.cover_face_id ? (
-                <img src={faceUrl(p.cover_face_id, 240)} alt="" loading="lazy" />
+                <img src={faceUrl(p.cover_face_id, 240)} alt="" loading="lazy" draggable={false} />
               ) : (
                 <span className="person-face-blank"><Users size={22} /></span>
               )}
-              {mergeMode && picked.includes(p.id) && (
+              {selecting && picked.includes(p.id) && (
                 <span className="person-pick-badge tnum">{picked.indexOf(p.id) + 1}</span>
               )}
               {p.hidden && <span className="person-hidden-badge"><EyeOff size={12} /></span>}
@@ -260,10 +299,13 @@ function PeopleGrid({ people, mergeMode, picked, onPick }: {
             <span className="person-count dim tnum">{p.photo_count.toLocaleString()}</span>
           </>
         );
-        return mergeMode ? (
-          <button key={p.id} className="person-tile" onClick={() => onPick(p.id)}>{inner}</button>
+        return selecting ? (
+          <button key={p.id} className="person-tile" data-sel-index={i} aria-pressed={picked.includes(p.id)}
+            onClick={() => { if (!drag.shouldSuppressClick()) onPick(p.id); }}>{inner}</button>
         ) : (
-          <Link key={p.id} to={`/people/${p.id}`} className="person-tile">{inner}</Link>
+          <Link key={p.id} to={`/people/${p.id}`} className="person-tile" data-sel-index={i} draggable={false}
+            // The release that ends a press-and-hold must not also open the person.
+            onClick={(e) => { if (drag.shouldSuppressClick()) e.preventDefault(); }}>{inner}</Link>
         );
       })}
     </div>

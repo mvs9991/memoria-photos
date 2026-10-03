@@ -284,6 +284,13 @@ a.month-col:hover .month-bar { opacity: 1; }
   .review-bar.selection-bar::-webkit-scrollbar { display: none; }
   .review-bar.selection-bar > * { flex: none; }
   .review-bar.selection-bar .input-inline { width: 150px; }
+  /* Nothing said this row scrolls, so Delete and Archive sat unseen past the right edge. The fade
+     is the cue; the extra right padding lets the last button scroll clear of it. */
+  .review-bar.selection-bar {
+    padding-right: 38px;
+    -webkit-mask-image: linear-gradient(to right, #000 calc(100% - 34px), transparent);
+    mask-image: linear-gradient(to right, #000 calc(100% - 34px), transparent);
+  }
 }
 
 /* ---------------- upload ---------------- */

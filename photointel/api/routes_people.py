@@ -4,7 +4,7 @@ from __future__ import annotations
 import logging
 
 from fastapi import APIRouter, Body, HTTPException, Query
-from pydantic import BaseModel
+from pydantic import BaseModel, Field
 
 from .. import db
 from ..engine import people as people_mod
@@ -166,6 +166,17 @@ def flags(person_id: int, body: FlagsBody):
     db.bump_generation(conn, "people")
     conn.commit()
     return {"ok": True}
+
+
+class HideManyBody(BaseModel):
+    ids: list[int] = Field(max_length=20000)
+    hidden: bool = True
+
+
+@router.post("/people/hide")
+def hide_many(body: HideManyBody):
+    """Hide or unhide a selection of people in one go (the People page's bulk action)."""
+    return {"changed": people_mod.set_people_hidden(get_state().conn(), body.ids, body.hidden)}
 
 
 class MergeBody(BaseModel):

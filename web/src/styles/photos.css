@@ -104,6 +104,16 @@
 }
 .tile:hover .tile-select, .tile-select.on { opacity: 1; }
 .tile-select.on { background: var(--accent); border-color: var(--accent); color: #17130a; }
+/* While selecting, every tile shows its circle (as Apple Photos does) — a hover-only control
+   is invisible on a phone, where there is no hover. */
+.grid-host.is-selecting .tile-select { opacity: 1; }
+/* Press-and-hold must not select text or raise the browser's image menu on a long press. */
+.grid-host.is-selectable .tile-wrap,
+.grid-host.is-selectable .tile {
+  -webkit-user-select: none;
+  user-select: none;
+  -webkit-touch-callout: none;
+}
 
 /* ---------------- scrubber ---------------- */
 .scrubber {

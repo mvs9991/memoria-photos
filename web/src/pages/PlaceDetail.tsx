@@ -4,6 +4,7 @@ import { useQuery } from "@tanstack/react-query";
 import { ArrowLeft, MapPin, Users } from "lucide-react";
 import { api, faceUrl, gridItems } from "../lib/api";
 import { PhotoGrid } from "../components/PhotoGrid";
+import { SelectionBar, SelectToggle, useGridSelect } from "../components/SelectionBar";
 import { ErrorState, SectionHeader, Spinner } from "../components/States";
 import { MiniMap } from "../components/MiniMap";
 import { useViewer } from "../components/ViewerContext";
@@ -22,6 +23,7 @@ export default function PlaceDetail() {
   useTitle(place.data?.name);
 
   const items = useMemo(() => gridItems(photos.data), [photos.data]);
+  const sel = useGridSelect(useMemo(() => items.map((i) => i.id), [items]));
 
   if (place.isError) return <ErrorState error={place.error} onRetry={() => place.refetch()} />;
   if (place.isLoading || !place.data) return <Spinner full label="Loading place" />;
@@ -71,10 +73,13 @@ export default function PlaceDetail() {
       )}
 
       <section>
-        <SectionHeader title="Photos" count={items.length} />
+        <SectionHeader title="Photos" count={items.length}
+          action={<SelectToggle selecting={sel.selecting} onClick={sel.toggleMode} />} />
+        <SelectionBar {...sel.barProps} />
         {photos.isLoading ? <Spinner label="Loading photos" /> : (
           <PhotoGrid items={items} grouping="month" targetHeight={210}
-            onOpen={(_, index) => viewer.open(items.map((i) => i.id), index)} />
+            onOpen={(_, index) => viewer.open(items.map((i) => i.id), index)}
+            {...sel.gridProps} />
         )}
       </section>
     </div>
