@@ -358,7 +358,14 @@ def _zip_stream(p: Plan, xmps: dict[int, str]) -> Iterator[bytes]:
                 continue
             info.compress_type = zipfile.ZIP_STORED      # photos and videos are already compressed
             info.date_time = _zip_date(it.stamp)         # date taken, to match the folder export
-            with open(it.src, "rb") as src, zf.open(info, "w") as w:
+            try:
+                src = open(it.src, "rb")
+            except OSError:
+                # gone or locked between the stat and the open: skip it, don't cut the download short
+                log.warning("Skipping unreadable %s", it.src)
+                used.discard(name.lower())
+                continue
+            with src, zf.open(info, "w") as w:
                 for block in iter(lambda: src.read(CHUNK), b""):
                     w.write(block)
                     if len(sink.buf) >= CHUNK:
