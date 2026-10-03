@@ -1,7 +1,7 @@
 # Memoria — local photo intelligence
 
 [![CI](https://github.com/mvs9991/memoria-photos/actions/workflows/ci.yml/badge.svg)](https://github.com/mvs9991/memoria-photos/actions/workflows/ci.yml)
-[![Tests](https://img.shields.io/badge/tests-301-brightgreen)](https://github.com/mvs9991/memoria-photos/actions/workflows/ci.yml)
+[![Tests](https://img.shields.io/badge/tests-470-brightgreen)](https://github.com/mvs9991/memoria-photos/actions/workflows/ci.yml)
 [![Licence](https://img.shields.io/badge/licence-MIT%20(code)-blue)](LICENSE)
 [![Docker](https://img.shields.io/badge/docker-compose%20up-2496ED?logo=docker&logoColor=white)](#run-with-docker)
 
@@ -69,7 +69,7 @@ photos ──► scan ──► decode / EXIF / hash / thumbnail ──► faces
 | **Fix dates & places** | Shift a wrong camera clock or set a date/place for a selection. Stored in Memoria and re-applied after re-indexing — the files are never written. |
 | **Export to other apps** | XMP sidecars (people with face regions, your tags, stars, descriptions, corrected dates/places) for digiKam, darktable and Lightroom — written to a folder you choose, never next to your photos. |
 | **Read other apps' XMP** | Stars, keywords, descriptions and people names that Lightroom, digiKam or darktable left in `.xmp` sidecars beside your photos are read in: stars and descriptions only where you have not set one, keywords as tags, names only as *suggestions* for the faces Memoria found. A changed sidecar is re-read; Memoria's own exports are not. |
-| **Collections & clean-up** | Videos, Live photos, panoramas, selfies, RAW and stacks in one place, plus review lists — screenshots, documents, memes, possibly blurry, large files, no location, unsure date — where the only action is *hide*. A Hidden list brings anything back. |
+| **Collections & clean-up** | Videos, Live photos, panoramas, selfies, RAW and stacks in one place, plus review lists — screenshots, documents, memes, possibly blurry, large files, no location, unsure date — where the only action is *hide*. A Hidden list brings anything back. Hidden photos are left out of events, people and duplicates, and an Android phone's own trash (`.trashed-…` files in a backup of `DCIM`) arrives already hidden. |
 | **Folders** | Browse the library the way it sits on disk, with counts and a cover per folder. |
 | **Insights & year in review** | Photos per month, busiest day, who appears most and who appears together, new faces, places, furthest from home, trips, cameras, and the best photos of the year — all counted, nothing estimated. |
 | **Slideshow & photo frame** | Full-screen slideshow of any grid (crossfade, shuffle, speed, videos play). `/frame` turns a tablet or TV into a frame with a clock; `/api/random/image` feeds dashboards such as Home Assistant. |
@@ -81,7 +81,7 @@ photos ──► scan ──► decode / EXIF / hash / thumbnail ──► faces
 | **Automatic phone backup** | A WebDAV folder (`/dav/`) for backup apps such as FolderSync (Android) or PhotoSync (iPhone): each person signs in with their own name and password and new photos arrive by themselves, filed like uploads, duplicates skipped. The backup app can add but never delete — a deletion is refused. |
 | **Offline on the phone** | Pages and photos you've looked at stay on the phone (the last ~2,000 thumbnails and previews), so the app opens and shows them away from home. Locked photos, originals and videos are never kept; signing out wipes the copy. Needs HTTPS. |
 | **Upload from your phone** | An Upload page (and "Add to Home Screen") for picking photos and videos from a phone's camera roll. Filed by the date each was taken; a photo whose bytes are already in the library is skipped, so uploading a whole camera roll twice is safe. |
-| **Automatic** | While it runs, Memoria looks for new photos every hour (configurable) and backs up to another drive weekly once a backup folder is set. |
+| **Automatic** | While it runs, Memoria looks for new photos every hour (configurable) and backs up to another drive weekly once a backup folder is set. An hourly run that finds nothing new skips rebuilding people, events and duplicates (unless something was hidden, trashed or corrected since). |
 | **Backup** | Copies every photo folder and Memoria's own database to another drive, checking each copy against its fingerprint. Copy-only: nothing in the backup is ever deleted, so a photo you delete is still there. |
 | **Off-site copy** | An encrypted copy somewhere other than your house — a drive kept at work or with family, a relative's computer over SSH, or (your choice) a cloud bucket — made with [restic](https://restic.net), which can also restore without Memoria. Never pruned; restores go into an empty folder, verified. |
 | **Keeps itself running** | Starts with the computer, starts again if it stops, can keep Windows from sleeping, and restarts itself for a new certificate. |
@@ -127,7 +127,7 @@ PHOTOS=/path/to/your/photos docker compose up -d
 
 Your photos are mounted **read-only**, so never altering an original is enforced by the
 kernel rather than only promised by the code. The index, thumbnails, models and exports
-live in a named volume. Models (~1.1 GB) download on first use, which is why the image
+live in a named volume. Models (~1.8 GB: face models plus SigLIP2) download on first use, which is why the image
 stays small.
 
 Indexing is deliberate rather than automatic — on a large library it takes a while and is
@@ -137,7 +137,7 @@ worth watching:
 docker exec memoria python -m photointel index
 ```
 
-An NVIDIA GPU makes that several times faster; see the commented block in
+An NVIDIA GPU makes that faster (not measured in the container); see the commented block in
 `docker-compose.yml`.
 
 ## Install without Docker
@@ -157,7 +157,9 @@ python -m photointel models download     # face models (~280 MB)
 python -m photointel geo-setup           # offline place names (~30 MB)
 ```
 
-The semantic model (SigLIP2, ~800 MB) downloads automatically the first time it is used.
+The semantic model (SigLIP2, ~1.5 GB) downloads automatically the first time it is used
+(`python -m photointel models warm` loads both models once, which fetches it ahead of the first index).
+The captioner (Florence-2, ~450 MB) is fetched only when you run `caption`.
 
 ### Optional: richer place names
 
@@ -184,18 +186,23 @@ Re-running `index` only processes what is new or changed.
 | `index` | Scan roots and analyse new/changed photos, then rebuild people, events and duplicates |
 | `index --post-only` | Just rebuild people/events/duplicates from existing analysis |
 | `index --retry-errors` | Retry photos that previously failed |
-| `caption --limit 500` | Describe photos with a local vision model (~2/s) |
-| `export-xmp <folder> [--auto-tags]` | Write XMP sidecars to a folder outside your library |
+| `index --if-changed` | Skip rebuilding people/events/duplicates when the scan found nothing new — what the hourly scheduled run uses. Manual and `--post-only` runs are never skipped |
+| `index --full-recluster` | Rebuild every auto-discovered person from scratch (named people and corrections are kept); use after changing clustering settings |
+| `index --no-faces` / `--no-semantic` / `--workers N` | Skip the face stage / the semantic stage; set the decode threads |
+| `models download` / `models warm` | Fetch the face models / load both models once (fetches SigLIP2) |
+| `geo-setup [--countries IN,US] [--auto] [--force]` | Download the offline place data (see above) |
+| `caption --limit 500 [--detailed]` | Describe photos with a local vision model |
+| `export-xmp <folder> [--auto-tags] [--all]` | Write XMP sidecars to a folder outside your library (`--all`: one for every photo, not only annotated ones) |
 | `ocr [--all]` | Read text in photos. After each index only likely-text photos (screenshots, documents, receipts…) are read; `--all` reads everything |
 | `import-gpx <files…>` | Add GPS tracks (copied into the data directory); then `index --post-only --stages gpx,geocode,events,search-index` |
 | `set-password` | Require a password to open the web app (empty input removes it) |
-| `export <folder> --person NAME [--person NAME2] [--people-mode each\|together\|any]` | Copy originals of people (or `--album`, `--event`, `--year [--month]`) to a folder; `--layout date\|flat\|original`, `--xmp` |
+| `export <folder> --person NAME [--person NAME2] [--people-mode each\|together\|any]` | Copy originals of people (or `--album`, `--event`, `--year [--month]`) to a folder; `--layout date\|flat\|original`, `--xmp`, `--all-frames` (every file of RAW+JPEG pairs and bursts) |
 | `trash list` / `trash restore <ids>` / `trash purge-expired` | Look at or restore the Trash (deleting itself is only done in the app) |
 | `backup [<folder>]` | Copy every photo folder and the database to another drive (copy-only) |
 | `accounts list` / `accounts reset-password <name>` / `accounts reset-pin` | At the computer: see accounts, recover a forgotten password or Locked-folder PIN |
 | `status` | Library summary |
 | `health` | What needs attention: drives, disk space, backups, phones, HTTPS, the off-site copy |
-| `offsite setup <where>` / `run` / `status` / `snapshots` / `check` / `restore <empty folder>` | The encrypted off-site copy (needs restic) |
+| `offsite setup <where>` / `run` / `status` / `snapshots` / `check` / `restore <empty folder>` | The encrypted off-site copy (needs restic); `restore --snapshot <id>`, `check --subset 5%` |
 | `run` | Serve, and start the server again whenever it stops — what auto-start runs |
 | `autostart on [--host 0.0.0.0]` / `off` / `status` | Start Memoria when you sign in (Windows Startup, systemd user unit, launchd); `--at-boot` (Windows, admin terminal) starts it before anyone signs in |
 | `serve --port 8765` | Run the web app |
@@ -209,10 +216,14 @@ share them instead of downloading another copy:
 | Variable | |
 |---|---|
 | `PHOTOINTEL_DATA` | the library's data directory |
-| `PHOTOINTEL_MODELS` | model weights (~1 GB) — share across libraries |
-| `PHOTOINTEL_GEO` | offline place-name data — share across libraries |
+| `PHOTOINTEL_MODELS` | model weights (~2 GB) — share across libraries |
+| `PHOTOINTEL_GEO` | offline place-name data — share across libraries. Anything that runs `index` or `serve` needs the same value, or place names silently stop (Health says so) |
 | `PHOTOINTEL_DEVICE` | `cuda` / `cpu` / `auto` for one run, without editing settings |
 | `PHOTOINTEL_DEV=1` | allow the Vite dev server to call the API cross-origin (off by default) |
+| `PHOTOINTEL_EXPORTS` | where exports land (default `<data>/exports`) |
+| `PHOTOINTEL_TAILSCALE` / `PHOTOINTEL_RESTIC` | full path to `tailscale` / `restic` when it is not on PATH |
+| `ANTHROPIC_API_KEY` | key for the optional Claude layer, used when none is saved in settings |
+| `PI_DATASETS` | only for the `eval/` scripts: folder holding the COCO and LFW datasets |
 
 ---
 
@@ -574,8 +585,9 @@ rewritten — `/api/collections` 4.3 s -> 1.4 s and `/api/insights` 6.8 s -> 2.2
 per-item scans with a single pass, and Duplicates, which had asked for a fixed 120 groups and so
 made the other 8,612 in a real library unreachable, now pages.
 
-At 13 photos/s a 100k-photo library takes about 2.1 hours of analysis, resumable at any point.
-A modern GPU is several times faster. On CPU only, expect roughly 1–2 photos/s.
+At 13 photos/s a 100k-photo library of small images would take about 2.1 hours of analysis; at the
+~6 photos/s of the real library above, about 4.6 hours. Both are arithmetic from those two runs, and
+analysis is resumable at any point. Speed on other GPUs and on CPU only has not been measured.
 
 ---
 
@@ -586,7 +598,7 @@ photointel/
   config.py context.py db.py schema.sql     settings, app context, database
   imaging.py metadata.py hashing.py quality.py   decode, EXIF, hashes, quality
   geo.py geodata.py                         offline reverse geocoding
-  vision/     faces.py semantic.py captioner.py vocab.py
+  vision/     faces.py semantic.py captioner.py vocab.py device.py
   pipeline/   scanner.py indexer.py post.py jobs.py
   video.py                                  video metadata, frames, motion photos, transcoding
   engine/     clustering.py people.py events.py places.py duplicates.py tags.py
