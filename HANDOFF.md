@@ -58,7 +58,7 @@ photointel/
   api/       app.py routes_*.py images.py
 web/         React + TypeScript UI (Vite)
 eval/        dataset builders, calibration, evaluation, library inspector
-tests/       470 tests, no GPU required
+tests/       633 tests, no GPU required
 ```
 
 **The indexing pipeline** is a feeder thread → N CPU worker threads (read, hash, decode, EXIF,
@@ -123,7 +123,7 @@ python -m photointel index               # SigLIP2 (~1.5 GB) downloads here, on 
 python -m photointel serve               # http://127.0.0.1:8765
 ```
 
-Verified at an early commit (when the suite had 126 tests; it now has 470): a fresh clone ran the
+Verified at an early commit (when the suite had 126 tests; it now has 633): a fresh clone ran the
 full test suite and booted the CLI against a new empty library using only committed files. On
 Linux/macOS activate with `source .venv/bin/activate`; `"D:/Photos"` is only this machine's example
 path. `add-root` must come before `index`.
@@ -875,7 +875,7 @@ the future, everything collapsing into one event, fuzzy duplicate thresholds too
 
 ## 10. Working notes
 
-- Run the suite with `.venv/Scripts/python.exe -m pytest -q`. 470 tests, ~9 min, no GPU needed —
+- Run the suite with `.venv/Scripts/python.exe -m pytest -q`. 633 tests, ~9 min, no GPU needed —
   the neural nets are replaced by deterministic fakes.
 - Test fixtures seed randomness from `zlib.crc32` of the **file name**, not `hash()` (salted per
   process) and not the full path (contains pytest's per-run tmp counter). Both made failures
