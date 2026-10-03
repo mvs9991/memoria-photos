@@ -700,12 +700,18 @@ def stats():
     state = get_state()
     conn = state.conn()
     one = lambda sql, *a: conn.execute(sql, a).fetchone()[0]  # noqa: E731
-    total = one("SELECT COUNT(*) FROM photos WHERE status='ok' AND live_component = 0")
+    # The headline numbers describe what you can see, so they leave out hidden photos (a phone's or
+    # Google's trash, copies hidden from Duplicates). They used to count them, which is why the sidebar
+    # said 29,500 photos while every page showed fewer. Disk usage (`bytes`) deliberately still counts
+    # them: the files are on the disk whether or not they are shown.
+    total = one("SELECT COUNT(*) FROM photos WHERE status='ok' AND hidden = 0 AND live_component = 0")
     date_row = conn.execute(
-        "SELECT MIN(taken_ts), MAX(taken_ts) FROM photos WHERE status='ok' AND taken_ts IS NOT NULL").fetchone()
+        "SELECT MIN(taken_ts), MAX(taken_ts) FROM photos "
+        "WHERE status='ok' AND hidden = 0 AND live_component = 0 AND taken_ts IS NOT NULL").fetchone()
     top_places = [dict(r) for r in conn.execute(
         """SELECT pl.id, pl.name, pl.city, pl.admin1, pl.country, COUNT(p.id) n FROM places pl
-           JOIN photos p ON p.place_id = pl.id WHERE p.status='ok' GROUP BY pl.id ORDER BY n DESC LIMIT 8""")]
+           JOIN photos p ON p.place_id = pl.id WHERE p.status='ok' AND p.hidden = 0 AND p.live_component = 0
+           GROUP BY pl.id ORDER BY n DESC LIMIT 8""")]
     return {
         "photos": total,
         "photos_by_status": {r[0]: r[1] for r in conn.execute("SELECT status, COUNT(*) FROM photos GROUP BY status")},
@@ -716,12 +722,15 @@ def stats():
         "trips": one("SELECT COUNT(*) FROM events WHERE kind='trip'"),
         "albums": one(f"SELECT COUNT(*) FROM albums a WHERE a.hidden = 0 AND "
                       f"{albums_mod.visible_sql('a', current_user_id())}"),
-        "videos": one("SELECT COUNT(*) FROM photos WHERE status='ok' AND media_type='video' AND live_component=0"),
-        "places": one("SELECT COUNT(DISTINCT place_id) FROM photos WHERE place_id IS NOT NULL"),
+        "videos": one("SELECT COUNT(*) FROM photos WHERE status='ok' AND hidden = 0 AND media_type='video' "
+                      "AND live_component=0"),
+        "places": one("SELECT COUNT(DISTINCT place_id) FROM photos WHERE place_id IS NOT NULL AND status='ok' "
+                      "AND hidden = 0 AND live_component = 0"),
         "duplicate_groups": one("SELECT COUNT(*) FROM dup_groups WHERE kind != 'similar'"),
         "duplicate_photos": one("SELECT COUNT(DISTINCT photo_id) FROM dup_members m JOIN dup_groups g "
                                 "ON g.id=m.group_id WHERE g.kind != 'similar'"),
-        "with_gps": one("SELECT COUNT(*) FROM photos WHERE gps_lat IS NOT NULL AND status='ok'"),
+        "with_gps": one("SELECT COUNT(*) FROM photos WHERE gps_lat IS NOT NULL AND status='ok' AND hidden = 0 "
+                        "AND live_component = 0"),
         "favorites": favorites.count(conn, current_user_id()),
         "errors": one("SELECT COUNT(*) FROM photos WHERE status='error'"),
         "missing": one("SELECT COUNT(*) FROM photos WHERE status='missing'"),
