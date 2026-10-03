@@ -110,7 +110,7 @@ export default function Photos() {
             title="Slideshow of these photos">
             <MonitorPlay size={14} /> Slideshow
           </button>
-          <SelectToggle selecting={sel.selecting} onClick={sel.toggleMode} />
+          <SelectToggle sel={sel} />
           <button className={`btn btn-ghost btn-icon${showFilters ? " is-on" : ""}`}
             onClick={() => setShowFilters((v) => !v)} aria-label="Filters" title="Filters">
             <SlidersHorizontal size={15} />

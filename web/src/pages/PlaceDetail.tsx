@@ -74,7 +74,7 @@ export default function PlaceDetail() {
 
       <section>
         <SectionHeader title="Photos" count={items.length}
-          action={<SelectToggle selecting={sel.selecting} onClick={sel.toggleMode} />} />
+          action={<SelectToggle sel={sel} />} />
         <SelectionBar {...sel.barProps} />
         {photos.isLoading ? <Spinner label="Loading photos" /> : (
           <PhotoGrid items={items} grouping="month" targetHeight={210}

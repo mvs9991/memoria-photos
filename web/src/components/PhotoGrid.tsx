@@ -42,6 +42,8 @@ interface Section {
   headerHeight: number;
   rows: Row[];
   count: number;
+  /** every photo in the section, for its select-all control */
+  ids: number[];
 }
 
 interface Props {
@@ -89,6 +91,10 @@ export function PhotoGrid({
   scrubber = true,
   emptyState,
 }: Props) {
+  // Selecting is "the page's Select mode is on" OR "something is already selected". Without the
+  // second half, picking a photo with its check circle (or Ctrl-click) left select mode off, so the
+  // next plain click on another photo opened the preview instead of adding it to the selection.
+  const selecting = selectMode || (selection?.size ?? 0) > 0;
   const anchorRef = useRef<number | null>(null);
   const handleSelect = useCallback((id: number, index: number, shift: boolean) => {
     if (shift && onSelectRange && anchorRef.current !== null) {
@@ -98,7 +104,23 @@ export function PhotoGrid({
       onToggleSelect?.(id);
     }
     anchorRef.current = index;
-  }, [items, onSelectRange, onToggleSelect]);
+    onBeginSelect?.();           // keep the page's own select mode (its Done button) in step
+  }, [items, onSelectRange, onToggleSelect, onBeginSelect]);
+
+  // Select, or deselect, every photo in one day/month section.
+  const toggleSection = useCallback((sectionIds: number[]) => {
+    const cur = selection ?? NO_SELECTION;
+    const allIn = sectionIds.length > 0 && sectionIds.every((id) => cur.has(id));
+    onBeginSelect?.();
+    if (allIn) {
+      const drop = new Set(sectionIds);
+      onSetSelection?.([...cur].filter((id) => !drop.has(id)));
+    } else if (onSetSelection) {
+      onSetSelection([...new Set([...cur, ...sectionIds])]);
+    } else {
+      onSelectRange?.(sectionIds);
+    }
+  }, [selection, onSetSelection, onSelectRange, onBeginSelect]);
   const hostRef = useRef<HTMLDivElement>(null);
   const [width, setWidth] = useState(0);
   const [scrollTop, setScrollTop] = useState(0);
@@ -111,7 +133,7 @@ export function PhotoGrid({
   const drag = useDragSelect({
     ids,
     selection: selection ?? NO_SELECTION,
-    selectMode,
+    selectMode: selecting,
     enabled: selectable && !!onSetSelection,
     setSelection: onSetSelection ?? noop,
     begin: onBeginSelect ?? noop,
@@ -225,7 +247,7 @@ export function PhotoGrid({
       flush(true);
       const height = (rowTop - top) - (rows.length ? gap : 0);
       out.push({ key: grp.key, label: grp.label, top, height: height + 22, headerHeight, rows,
-        count: grp.items.length });
+        count: grp.items.length, ids: grp.items.map((i) => i.id) });
       top += height + 22;
     }
     return out;
@@ -251,7 +273,7 @@ export function PhotoGrid({
   }
 
   return (
-    <div className={`grid-host${selectable ? " is-selectable" : ""}${selectable && selectMode ? " is-selecting" : ""}`} ref={hostRef}
+    <div className={`grid-host${selectable ? " is-selectable" : ""}${selectable && selecting ? " is-selecting" : ""}`} ref={hostRef}
       onPointerDown={drag.onPointerDown} onContextMenu={drag.onContextMenu}>
       <div className="grid-canvas" style={{ height: totalHeight }}>
         {visible.map((section) => (
@@ -260,6 +282,21 @@ export function PhotoGrid({
               <div className="grid-section-head" style={{ height: section.headerHeight }}>
                 <span className="grid-section-title">{section.label}</span>
                 <span className="grid-section-count tnum">{section.count}</span>
+                {selectable && (onSetSelection || onSelectRange) && (() => {
+                  const chosen = section.ids.filter((id) => selection?.has(id)).length;
+                  const all = chosen === section.ids.length && chosen > 0;
+                  return (
+                    <button className={`section-select${all ? " on" : chosen ? " some" : ""}`} data-no-drag-select
+                      aria-pressed={all}
+                      aria-label={`${all ? "Deselect" : "Select"} all ${section.count} from ${section.label || "this section"}`}
+                      onClick={() => toggleSection(section.ids)}>
+                      <span className="section-select-dot"><Check size={11} strokeWidth={3} /></span>
+                      <span className="section-select-label">
+                        {all ? "Deselect all" : chosen ? `Select all (${chosen} of ${section.count})` : "Select all"}
+                      </span>
+                    </button>
+                  );
+                })()}
               </div>
             )}
             {section.rows
@@ -280,7 +317,7 @@ export function PhotoGrid({
                       index={cell.index}
                       selected={selection?.has(cell.id) ?? false}
                       selectable={selectable}
-                      selectMode={selectMode}
+                      selectMode={selecting}
                       onOpen={onOpen}
                       onSelect={handleSelect}
                       suppressClick={drag.shouldSuppressClick}

@@ -87,6 +87,15 @@ export default function People() {
   const unnamed = people.filter((p) => !p.named);
 
   const begin = () => setSelecting(true);
+  const allPicked = (list: any[]) => list.length > 0 && list.every((p) => picked.includes(p.id));
+  // Select, or deselect, a whole list at once (a section, or everyone).
+  const toggleList = (list: any[]) => {
+    setSelecting(true);
+    setNote(null);
+    setPicked((cur) => allPicked(list)
+      ? cur.filter((id) => !list.some((p) => p.id === id))
+      : [...cur, ...list.filter((p) => !cur.includes(p.id)).map((p) => p.id)]);
+  };
   const toggle = (id: number) =>
     setPicked((cur) => (cur.includes(id) ? cur.filter((x) => x !== id) : [...cur, id]));
 
@@ -147,6 +156,12 @@ export default function People() {
               : <><strong>{picked.length.toLocaleString()}</strong> selected</>}
           </span>
           <div className="merge-bar-actions">
+            {people.length > 0 && (
+              <button className="btn btn-ghost btn-sm" onClick={() => toggleList(people)}
+                title="Pick everyone on this page">
+                {allPicked(people) ? "Deselect all" : `Select all ${people.length.toLocaleString()}`}
+              </button>
+            )}
             {picked.length > 0 && (
               <button className="btn btn-ghost btn-sm" disabled={hide.isPending}
                 onClick={() => hide.mutate({ ids: picked, hidden: true })}
@@ -156,7 +171,14 @@ export default function People() {
             )}
             {picked.length > 1 && (
               <button className="btn btn-primary btn-sm"
-                onClick={() => merge.mutate({ target: picked[0], sources: picked.slice(1) })}
+                onClick={() => {
+                  const first = people.find((p) => p.id === picked[0])?.label ?? "the first one";
+                  // Two is an ordinary merge. More than that is almost always a stray click after
+                  // "Select all", and it would fold many different people into one.
+                  if (picked.length > 2 && !window.confirm(
+                    `Merge ${picked.length.toLocaleString()} people into ${first}?\n\nUse this only if they are all the same person.`)) return;
+                  merge.mutate({ target: picked[0], sources: picked.slice(1) });
+                }}
                 title="They are the same person. The first one picked keeps its name.">
                 <Check size={14} /> Merge into {people.find((p) => p.id === picked[0])?.label}
               </button>
@@ -239,14 +261,21 @@ export default function People() {
         <>
           {named.length > 0 && (
             <section>
-              <SectionHeader title="Named" count={named.length} />
+              <SectionHeader title="Named" count={named.length} action={
+                <button className="btn btn-quiet btn-sm" onClick={() => toggleList(named)}>
+                  {allPicked(named) ? "Deselect all" : "Select all"}
+                </button>} />
               <PeopleGrid people={named} selecting={selecting} picked={picked} onPick={toggle} onSet={setPicked} onBegin={begin} />
             </section>
           )}
           {unnamed.length > 0 && (
             <section>
               <SectionHeader title="Discovered" count={unnamed.length}
-                sub="Groups of the same face. Give them a name to search by person." />
+                sub="Groups of the same face. Give them a name to search by person."
+                action={
+                  <button className="btn btn-quiet btn-sm" onClick={() => toggleList(unnamed)}>
+                    {allPicked(unnamed) ? "Deselect all" : "Select all"}
+                  </button>} />
               <PeopleGrid people={unnamed} selecting={selecting} picked={picked} onPick={toggle} onSet={setPicked} onBegin={begin} />
             </section>
           )}

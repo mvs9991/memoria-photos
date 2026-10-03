@@ -167,7 +167,7 @@ export default function EventDetail() {
       <section>
         <SectionHeader title="All photos" count={items.length} action={
           <div className="toolbar">
-            <SelectToggle selecting={sel.selecting} onClick={sel.toggleMode} />
+            <SelectToggle sel={sel} />
             <button className="btn btn-ghost btn-sm" onClick={() => setExporting(true)} disabled={!items.length}>
               <FolderOutput size={14} /> Export
             </button>

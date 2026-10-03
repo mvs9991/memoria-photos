@@ -125,7 +125,7 @@ export default function PersonDetail() {
             </p>
           )}
           <div className="person-actions">
-            {tab === "photos" && <SelectToggle selecting={sel.selecting} onClick={sel.toggleMode} />}
+            {tab === "photos" && <SelectToggle sel={sel} />}
             <button className="btn btn-ghost btn-sm" onClick={() => setExporting(true)}
               title="Copy every photo of this person somewhere">
               <FolderOutput size={14} /> Export photos

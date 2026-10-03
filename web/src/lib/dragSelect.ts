@@ -75,6 +75,7 @@ export function useDragSelect(options: DragSelectOptions) {
     let timer = 0;
     let raf = 0;
     let lastHover = startIndex;
+    let settling = false;             // true while we are holding the pressed tile still under the finger
     let mode: "add" | "remove" = "add";
     let base = new Set<number>();
 
@@ -117,12 +118,36 @@ export function useDragSelect(options: DragSelectOptions) {
       raf = requestAnimationFrame(loop);
     };
 
+    // The selection bar appears the moment selection starts and pushes the grid down by its own
+    // height, so the tile under the finger slid away mid-gesture and the drag started from the wrong
+    // place. For the first few frames, scroll by however far that tile has moved, so it stays put.
+    const tileTop = () => {
+      const el = host.querySelector<HTMLElement>(`[data-sel-index="${startIndex}"]`);
+      return el ? el.getBoundingClientRect().top : null;
+    };
+    const keepTileUnderFinger = (top0: number) => {
+      let frames = 0;
+      const tick = () => {
+        if (!active || !settling || frames++ > 10) return;
+        const now = tileTop();
+        const sc = opts.current.getScroller();
+        if (now !== null && sc && Math.abs(now - top0) > 1) {
+          // "instant": the content area has scroll-behavior: smooth, which would lag a frame behind.
+          sc.scrollBy({ top: now - top0, behavior: "instant" as ScrollBehavior });
+        }
+        requestAnimationFrame(tick);
+      };
+      requestAnimationFrame(tick);
+    };
+
     const activate = () => {
       if (active) return;
       active = true;
       running.current = true;
       suppress.current = true;          // the click that follows the release must not open the tile
       const cur = opts.current;
+      const top0 = tileTop();
+      settling = top0 !== null;
       cur.begin();
       base = new Set(cur.selection);
       mode = base.has(cur.ids[startIndex]) ? "remove" : "add";
@@ -130,6 +155,7 @@ export function useDragSelect(options: DragSelectOptions) {
       try { navigator.vibrate?.(12); } catch { /* not every browser has it */ }
       document.addEventListener("touchmove", block, { passive: false });
       raf = requestAnimationFrame(loop);
+      if (top0 !== null) keepTileUnderFinger(top0);
     };
 
     const end = () => {
@@ -163,6 +189,7 @@ export function useDragSelect(options: DragSelectOptions) {
         return;
       }
       ev.preventDefault();
+      if (settling && Math.hypot(x - sx, y - sy) > TOUCH_SLOP) settling = false;
       const h = hoverAt(x, y);
       if (h !== null && h !== lastHover) apply(h);
     }

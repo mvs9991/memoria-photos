@@ -98,6 +98,17 @@ def run_post_stages(ctx, conn: sqlite3.Connection, stages: list[str] | None = No
         except Exception as exc:
             log.exception("Post stage %s failed", stage)
             out[stage] = {"error": str(exc)}
+            try:                       # a failed stage's half-done writes must not ride along into the next
+                conn.rollback()
+            except sqlite3.Error:
+                pass
+        else:
+            conn.commit()
+        # Every stage ends with this connection idle. The progress report that opens the next stage
+        # goes through a *different* connection; if this one still held an uncommitted write, that
+        # report waited out the full 60 s busy timeout for a lock held by the very thread waiting on
+        # it. Four stages that did almost no work (0.1-0.2 s on their own) each took 100-260 s inside
+        # a job, and the database was write-locked for a fifth of every hour a server was running.
         log.info("Stage %s finished in %.1fs", stage, time.time() - t0)
     report(total, "done", "Post-processing complete")
     return out

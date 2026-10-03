@@ -186,6 +186,7 @@ def import_takeout(ctx, conn: sqlite3.Connection) -> dict:
     conn.commit()
     if stats["sidecars"]:
         db.bump_generation(conn, "people")   # descriptions/locations feed search vocabulary
+        conn.commit()                        # this write was left uncommitted, which stalled the next stage
     out = dict(stats)
     out["seconds"] = round(time.time() - t0, 2)
     log.info("Takeout import: %s", out)

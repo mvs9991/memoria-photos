@@ -58,7 +58,7 @@ photointel/
   api/       app.py routes_*.py images.py
 web/         React + TypeScript UI (Vite)
 eval/        dataset builders, calibration, evaluation, library inspector
-tests/       446 tests, no GPU required
+tests/       452 tests, no GPU required
 ```
 
 **The indexing pipeline** is a feeder thread → N CPU worker threads (read, hash, decode, EXIF,
@@ -630,8 +630,25 @@ byte-identical (one distinct sha256 across 5,208 groups), no photo is in two exa
 is missed, every keeper is a member, and member counts match. Every read endpoint answers in
 under 3 s on the real library (slowest: `/api/health`, 2.8 s).
 
-Still open from this audit: the four slow stages are slow in a *manual* run too, and should be
-profiled on a copy of the database.
+4. **Four post-processing stages that do almost nothing took 100-260 s each inside a job.** Profiled
+   on a copy of the database, the stages cost 20 s (`takeout`), 0.2 s (`icloud`), 0.1 s (`xmp`) and
+   0.1 s (`gpx`) on their own, yet 135, 99, 129 and 129 s in a real run. The cause was a
+   self-deadlock, not work: a job runs its stages on one connection and reports progress through a
+   second one (`JobReporter`). `import_takeout` ended with `db.bump_generation(...)` *after* its
+   final `commit()`, so the connection finished the stage holding an uncommitted write; the next
+   progress report, made by the same thread, then waited the full 60 s busy timeout for a lock that
+   thread was holding (twice, because the heartbeat thread was queued on the same lock). Three other
+   stages did the same. It also explains the hourly "database is locked" errors from the scheduler.
+   Fixes, each with a test that fails without it: `run_post_stages` now commits after every stage
+   and **rolls back** a stage that raised (its half-done writes used to be swept into the next
+   stage's commit), `import_takeout` commits its last write, and the reporter's connection uses a
+   5 s busy timeout, because progress and heartbeats are best-effort and must never be able to stall
+   the caller for a minute. `tests/test_post_transactions.py` asserts the connection is idle at
+   every progress report, which is the invariant that matters. Reproduced with
+   `conn.in_transaction` after each stage, which is the quickest way to find the next leaker.
+
+   **Method note.** Time a stage on its own and then inside the real job. A stage that is fast
+   alone and slow in the job is waiting on something, not computing.
 
 ### Selecting photos and people (press-and-hold, drag)
 
@@ -657,6 +674,23 @@ Behaviour worth knowing before you change it:
   scrolling turns every frame's nudge into an animation that fights the next.
 - Esc leaves selection **unless** a `[role="dialog"]` or the slideshow is open, so cancelling the
   delete confirmation does not also discard the selection.
+- **"Selecting" means the page's Select mode is on OR anything is selected.** `PhotoGrid` derives it
+  (`selectMode || selection.size > 0`) rather than trusting the page's flag. Picking a photo with
+  its check circle or Ctrl-click used to leave select mode off, so the *next plain click opened
+  the preview* instead of adding to the selection. Those paths also call `onBeginSelect` so the
+  page's own Select/Done button stays in step.
+- **Select all, three levels:** a **Select all N** button beside Select on every page
+  (`SelectToggle`, Ctrl+A too), a **Select all** control on every day/month section header
+  (toggles that section, shows "Select all (3 of 25)" when partly picked, adds to what is already
+  selected), and on People a Select all in the bar plus one per Named/Discovered section.
+- **Merging more than two people asks first** (`window.confirm`). Select all makes it one click
+  from "fold two thousand different people into one"; two is an ordinary merge.
+- **The grid must not jump when the selection bar appears.** The bar is in flow, so the first
+  pick pushed everything down ~110 px and the photo under the finger slid away mid-drag. Two
+  guards: select mode shows a slim bar immediately (`active` prop, so there is usually nothing
+  left to appear), and `dragSelect.ts` scrolls by however far the pressed tile moved for the
+  first few frames after the hold (`keepTileUnderFinger`). A browser check asserts the pressed
+  tile's top is unchanged.
 - On the People page, **Hide** is one request (`POST /api/people/hide`) and reversible: it flips
   `persons.hidden` only and the page offers Undo. It never deletes a photo, and people have no
   delete action on purpose.
@@ -766,7 +800,7 @@ the future, everything collapsing into one event, fuzzy duplicate thresholds too
 
 ## 10. Working notes
 
-- Run the suite with `.venv/Scripts/python.exe -m pytest -q`. 446 tests, ~6 min, no GPU needed —
+- Run the suite with `.venv/Scripts/python.exe -m pytest -q`. 452 tests, ~9 min, no GPU needed —
   the neural nets are replaced by deterministic fakes.
 - Test fixtures seed randomness from `zlib.crc32` of the **file name**, not `hash()` (salted per
   process) and not the full path (contains pytest's per-run tmp counter). Both made failures

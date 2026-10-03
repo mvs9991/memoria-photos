@@ -12,8 +12,11 @@ import { ExportDialog } from "./ExportDialog";
 import { CreateDialog } from "./CreateDialog";
 import { TrashDialog, useAllowDelete } from "./TrashDialog";
 
-export function SelectionBar({ selected, onClear, extra, allIds, onSelectAll }: {
+export function SelectionBar({ selected, onClear, extra, allIds, onSelectAll, active = false }: {
   selected: Set<number>;
+  /** select mode is on: show a slim bar even before anything is picked, so the first pick does not
+   *  push the whole grid down by the bar's height */
+  active?: boolean;
   onClear: () => void;
   extra?: React.ReactNode;
   /** every photo in the grid, for "Select all" */
@@ -83,7 +86,19 @@ export function SelectionBar({ selected, onClear, extra, allIds, onSelectAll }: 
     },
   });
 
-  if (selected.size === 0) return null;
+  if (selected.size === 0) {
+    if (!active) return null;
+    return (
+      <div className="review-bar selection-bar selection-bar-empty" role="toolbar" aria-label="Select photos">
+        <span className="dim">Tap photos to select them — or press and hold one, then drag across others</span>
+        {allIds && onSelectAll && allIds.length > 0 && (
+          <button className="btn btn-quiet btn-sm" onClick={() => onSelectAll(allIds)} title="Ctrl+A">
+            Select all {allIds.length.toLocaleString()}
+          </button>
+        )}
+      </div>
+    );
+  }
   return (
     <div className="review-bar selection-bar" role="toolbar" aria-label="Selected photos">
       <span className="tnum"><strong>{selected.size.toLocaleString()}</strong> selected</span>
@@ -204,6 +219,7 @@ export function useGridSelect(allIds: number[]) {
 
   const begin = useCallback(() => setSelecting(true), []);
   const exit = useCallback(() => { setSelecting(false); clear(); }, [clear]);
+  const selectAll = useCallback(() => { setSelecting(true); setAll(allIds); }, [setAll, allIds]);
   const toggleMode = useCallback(() => { setSelecting((v) => !v); clear(); }, [clear]);
 
   // Esc leaves selection — unless something on top of the page owns Esc (a confirmation
@@ -223,7 +239,7 @@ export function useGridSelect(allIds: number[]) {
   }, [selecting, exit]);
 
   return {
-    selecting, toggleMode, exit, selected, clear,
+    selecting, toggleMode, exit, selected, clear, selectAll, total: allIds.length,
     gridProps: {
       selectable: true as const,
       selectMode: selecting,
@@ -233,16 +249,24 @@ export function useGridSelect(allIds: number[]) {
       onSetSelection: setAll,
       onBeginSelect: begin,
     },
-    barProps: { selected, onClear: clear, allIds, onSelectAll: setAll },
+    barProps: { selected, onClear: clear, allIds, onSelectAll: setAll, active: selecting },
   };
 }
 
-/** The "Select" / "Done" button every selectable page shows. */
-export function SelectToggle({ selecting, onClick }: { selecting: boolean; onClick: () => void }) {
+/** The "Select" / "Done" button every selectable page shows, with "Select all" beside it. */
+export function SelectToggle({ sel }: { sel: ReturnType<typeof useGridSelect> }) {
   return (
-    <button className={`btn btn-ghost btn-sm${selecting ? " is-on" : ""}`} onClick={onClick}
-      title="Select photos — or press and hold one, then drag across others. Esc to finish.">
-      <CheckSquare size={14} /> {selecting ? "Done" : "Select"}
-    </button>
+    <>
+      <button className={`btn btn-ghost btn-sm${sel.selecting ? " is-on" : ""}`} onClick={sel.toggleMode}
+        title="Select photos — or press and hold one, then drag across others. Esc to finish.">
+        <CheckSquare size={14} /> {sel.selecting ? "Done" : "Select"}
+      </button>
+      {sel.total > 0 && sel.selected.size < sel.total && (
+        <button className="btn btn-ghost btn-sm" onClick={sel.selectAll}
+          title="Select every photo on this page (Ctrl+A)">
+          Select all {sel.total.toLocaleString()}
+        </button>
+      )}
+    </>
   );
 }

@@ -145,7 +145,7 @@ export function CollectionDetail() {
           {HINTS[key] && <p className="dim collection-hint">{HINTS[key]}</p>}
         </div>
         <div className="toolbar">
-          <SelectToggle selecting={sel.selecting} onClick={sel.toggleMode} />
+          <SelectToggle sel={sel} />
         </div>
       </div>
 

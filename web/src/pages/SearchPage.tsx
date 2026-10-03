@@ -143,7 +143,7 @@ export default function SearchPage() {
           {items.length > 0 ? (
             <section>
               <SectionHeader title="Photos" count={items.length}
-                action={<SelectToggle selecting={sel.selecting} onClick={sel.toggleMode} />} />
+                action={<SelectToggle sel={sel} />} />
               <SelectionBar {...sel.barProps} />
               <PhotoGrid items={items} grouping="none" targetHeight={240} scrubber={false}
                 onOpen={(_, index) => viewer.open(items.map((i) => i.id), index)}

@@ -101,7 +101,7 @@ export default function AlbumDetail() {
           )}
           <button className="btn btn-ghost btn-sm" onClick={() => setDialog("export")} disabled={!items.length}
             title="Copy the original files, or make a web gallery"><FolderOutput size={14} /> Export</button>
-          <SelectToggle selecting={sel.selecting} onClick={sel.toggleMode} />
+          <SelectToggle sel={sel} />
           <button className="btn btn-quiet btn-sm" onClick={() => {
             if (confirm(`Delete the album “${data.name}”?\n\nOnly the album goes — every photo stays in your library.`))
               del.mutate();

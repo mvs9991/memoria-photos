@@ -291,6 +291,18 @@ a.month-col:hover .month-bar { opacity: 1; }
     -webkit-mask-image: linear-gradient(to right, #000 calc(100% - 34px), transparent);
     mask-image: linear-gradient(to right, #000 calc(100% - 34px), transparent);
   }
+  /* The bar that only holds a hint (select mode on, nothing picked yet) has nothing to swipe to:
+     let it wrap instead of fading out its own sentence. */
+  .review-bar.selection-bar.selection-bar-empty {
+    flex-wrap: wrap;
+    overflow: visible;
+    padding-right: 14px;
+    -webkit-mask-image: none;
+    mask-image: none;
+  }
+  /* ...and the sentence inside must be allowed to shrink and wrap (the row rule above makes every
+     child flex: none, which is what let it run past the box). */
+  .review-bar.selection-bar.selection-bar-empty > * { flex: 1 1 auto; min-width: 0; }
 }
 
 /* ---------------- upload ---------------- */

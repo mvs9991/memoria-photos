@@ -80,7 +80,7 @@ export default function Folders() {
       {tree.data.direct_count > 0 && (
         <section style={{ marginTop: 28 }}>
           <SectionHeader title="In this folder" count={tree.data.direct_count.toLocaleString()}
-            action={<SelectToggle selecting={sel.selecting} onClick={sel.toggleMode} />} />
+            action={<SelectToggle sel={sel} />} />
           <SelectionBar {...sel.barProps} />
           {direct.isLoading ? <Spinner /> : (
             <PhotoGrid items={items} grouping="none" targetHeight={200} scrubber={false}

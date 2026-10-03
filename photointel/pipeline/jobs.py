@@ -134,6 +134,10 @@ class JobReporter:
         self.job_id = job_id
         self.ctx = ctx
         self.conn = ctx.connect() if job_id else None
+        if self.conn is not None:
+            # Progress and heartbeats are best-effort. With the default 60 s timeout, one write
+            # that lost the race for the lock stalled whichever thread made it for a full minute.
+            self.conn.execute("PRAGMA busy_timeout = 5000")
         self._stop = threading.Event()
         self._lock = threading.Lock()
         self._thread: threading.Thread | None = None
