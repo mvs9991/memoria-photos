@@ -88,9 +88,11 @@ def test_windows_device_names_are_not_used_as_file_names(ctx, client, name):
 
 @pytest.mark.skipif(sys.platform != "win32", reason="reserved device names are a Windows rule")
 def test_account_or_album_named_like_a_device_gets_a_real_folder(ctx):
-    for who in ("CON", "nul", "Aux"):
+    # Distinct, fixed colours. hash() is salted per process, so deriving them from it collided about
+    # one run in a hundred, and identical bytes are (correctly) reported as a duplicate, not "added".
+    for i, who in enumerate(("CON", "nul", "Aux")):
         conn = ctx.connect()
-        s = uploads_mod.save_upload(ctx, conn, io.BytesIO(jpeg((who.__hash__() % 255, 1, 2))), "a.jpg", who=who,
+        s = uploads_mod.save_upload(ctx, conn, io.BytesIO(jpeg((20 + 70 * i, 1, 2))), "a.jpg", who=who,
                                     subfolder="PRN")
         conn.close()
         assert s.status == "added", s
