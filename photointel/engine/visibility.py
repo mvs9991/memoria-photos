@@ -40,6 +40,11 @@ def refresh(conn: sqlite3.Connection, photo_ids: list[int]) -> None:
         if people:
             update_person_stats(conn, sorted(people))
         db.bump_generation(conn, "embeddings")      # the search matrix holds only 'ok' photos
+        # Events, duplicates and stacks are derived from the visible photos and are only rebuilt by
+        # post-processing. Mark them stale so the next *scheduled* run does not skip it as "nothing
+        # changed": hiding, trashing, locking and making photos private change no file on disk, so
+        # the scan alone cannot tell. (Date and place corrections start their own rebuild.)
+        db.set_meta(conn, "post_pending", "1")
         conn.commit()
     except sqlite3.Error:
         conn.rollback()

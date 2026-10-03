@@ -233,6 +233,10 @@ def _map_clusters_to_persons(conn, ids, mat, result, person_of_row, user_locked,
 
 
 def update_person_stats(conn: sqlite3.Connection, person_ids: list[int] | None = None) -> None:
+    # Counts, first/last seen and the cover face all ignore hidden photos. visibility.refresh calls
+    # this after a hide precisely so the counts follow, but it only ever filtered on status, so
+    # hiding a photo changed nobody's count: 5 people were listed with no visible photo and 5 used a
+    # hidden photo's face as their cover on a real library.
     where = ""
     args: tuple = ()
     if person_ids:
@@ -243,11 +247,11 @@ def update_person_stats(conn: sqlite3.Connection, person_ids: list[int] | None =
               face_count = COALESCE((SELECT COUNT(*) FROM faces f WHERE f.person_id = persons.id), 0),
               photo_count = COALESCE((SELECT COUNT(DISTINCT f.photo_id) FROM faces f
                                       JOIN photos ph ON ph.id = f.photo_id
-                                      WHERE f.person_id = persons.id AND ph.status='ok'), 0),
+                                      WHERE f.person_id = persons.id AND ph.status='ok' AND ph.hidden = 0), 0),
               first_seen_ts = (SELECT MIN(ph.taken_ts) FROM faces f JOIN photos ph ON ph.id = f.photo_id
-                               WHERE f.person_id = persons.id AND ph.status='ok'),
+                               WHERE f.person_id = persons.id AND ph.status='ok' AND ph.hidden = 0),
               last_seen_ts = (SELECT MAX(ph.taken_ts) FROM faces f JOIN photos ph ON ph.id = f.photo_id
-                              WHERE f.person_id = persons.id AND ph.status='ok'),
+                              WHERE f.person_id = persons.id AND ph.status='ok' AND ph.hidden = 0),
               cluster_confidence = (SELECT AVG(f.assign_confidence) FROM faces f WHERE f.person_id = persons.id),
               updated_at = ?
             WHERE merged_into IS NULL{where}""",
@@ -257,7 +261,7 @@ def update_person_stats(conn: sqlite3.Connection, person_ids: list[int] | None =
     conn.execute(
         f"""UPDATE persons SET cover_face_id = (
               SELECT f.id FROM faces f JOIN photos ph ON ph.id = f.photo_id
-              WHERE f.person_id = persons.id AND ph.status = 'ok'
+              WHERE f.person_id = persons.id AND ph.status = 'ok' AND ph.hidden = 0
               ORDER BY (CASE WHEN f.assign_source='user' THEN 1 ELSE 0 END) DESC,
                        (f.quality * MIN(f.size_px, 400)) DESC LIMIT 1)
             WHERE merged_into IS NULL{where}""",

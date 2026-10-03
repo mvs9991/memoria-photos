@@ -74,9 +74,15 @@ class Segment:
 def detect_events(ctx, conn: sqlite3.Connection, params: EventParams | None = None, progress=None) -> dict:
     p = params or EventParams()
     t0 = time.time()
+    # Hidden photos are out of every view on purpose (a phone's or Google's trash, copies hidden from
+    # the Duplicates page, anything hidden by hand). Left in, they kept events alive that had no
+    # visible photo (24 empty events on a real library), served as event covers (10), and made
+    # photo counts wrong (36). _persist_events clears every photo's event first, so leaving them
+    # out here is all it takes for them to drop out.
     rows = conn.execute(
         """SELECT id, taken_ts, date_confidence, gps_lat, gps_lon, place_id, folder, source_kind
            FROM photos WHERE status='ok' AND taken_ts IS NOT NULL AND live_component = 0
+             AND hidden = 0
              AND COALESCE(source_kind,'unknown') != 'screenshot'
            ORDER BY taken_ts"""
     ).fetchall()

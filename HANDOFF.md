@@ -58,7 +58,7 @@ photointel/
   api/       app.py routes_*.py images.py
 web/         React + TypeScript UI (Vite)
 eval/        dataset builders, calibration, evaluation, library inspector
-tests/       460 tests, no GPU required
+tests/       470 tests, no GPU required
 ```
 
 **The indexing pipeline** is a feeder thread → N CPU worker threads (read, hash, decode, EXIF,
@@ -644,6 +644,27 @@ more defects, all invisible to a small test library:
    commits, which could be much later. One test plants a deliberately leaky endpoint to prove the
    audit can see a leak. None of the real endpoints leak.
 
+6. **Hidden photos leaked into everything derived from photos.** After 124 photos were hidden
+   (a phone's and Google's trash) the real library had 24 events with no visible photo (empty
+   ghosts in the Events list), 10 events using a hidden photo as their cover, 36 with a wrong
+   count, 5 people listed with a count but no visible photo and 5 whose cover face came from a
+   hidden photo. `detect_events` and `update_person_stats` filtered on `status` and never on
+   `hidden`; and `visibility.refresh`, which the Hide button calls precisely to refresh counts,
+   therefore changed nothing. Both now exclude hidden photos (`_persist_events` clears every
+   photo's event first, so leaving them out of the load is all it takes). After rebuilding the
+   real library: 0 ghost events, 0 wrong counts, 0 hidden covers, 0 ghost people.
+
+   `visibility.refresh` now also sets `meta.post_pending = 1`. **That matters because of fix 3:**
+   hiding, trashing, locking or making photos private changes no file on disk, so the scheduled
+   run's scan cannot see it, and a "nothing changed" skip would never rebuild events, duplicates
+   or stacks. The flag makes the next scheduled run do the full pass. Date and place corrections
+   already start their own rebuild job.
+
+   Method note for audits like this one: derived tables are checked against a *definition of
+   visible* (`status='ok' AND hidden=0 AND live_component=0`). Trips link photos through
+   `trip_photos`, not `photos.event_id`, so a naive "events with no photos" query reports every
+   trip as a ghost; check `kind` separately.
+
 What was checked and found sound, so nobody re-checks it: every `exact` duplicate group is
 byte-identical (one distinct sha256 across 5,208 groups), no photo is in two exact groups, none
 is missed, every keeper is a member, and member counts match. Every read endpoint answers in
@@ -819,7 +840,7 @@ the future, everything collapsing into one event, fuzzy duplicate thresholds too
 
 ## 10. Working notes
 
-- Run the suite with `.venv/Scripts/python.exe -m pytest -q`. 460 tests, ~9 min, no GPU needed —
+- Run the suite with `.venv/Scripts/python.exe -m pytest -q`. 470 tests, ~9 min, no GPU needed —
   the neural nets are replaced by deterministic fakes.
 - Test fixtures seed randomness from `zlib.crc32` of the **file name**, not `hash()` (salted per
   process) and not the full path (contains pytest's per-run tmp counter). Both made failures
