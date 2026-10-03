@@ -57,6 +57,12 @@ class SearchEngine:
         for pid in q.persons_all:
             where.append("EXISTS (SELECT 1 FROM faces f WHERE f.photo_id = p.id AND f.person_id = ?)")
             args.append(pid)
+        for pid in q.persons_exclude:
+            where.append("NOT EXISTS (SELECT 1 FROM faces f WHERE f.photo_id = p.id AND f.person_id = ?)")
+            args.append(pid)
+        if q.no_people:
+            where.append("NOT EXISTS (SELECT 1 FROM faces f WHERE f.photo_id = p.id AND f.person_id IS NOT NULL) "
+                         "AND COALESCE(p.face_count, 0) = 0")
         if q.persons_any:
             marks = ",".join("?" * len(q.persons_any))
             where.append(f"EXISTS (SELECT 1 FROM faces f WHERE f.photo_id = p.id AND f.person_id IN ({marks}))")
@@ -73,12 +79,19 @@ class SearchEngine:
                          f"WHERE tp.photo_id = p.id AND tp.trip_id IN ({marks})))")
             args.extend(q.event_ids)
             args.extend(q.event_ids)
-        if q.date.start is not None:
-            where.append("p.taken_ts >= ?")
-            args.append(q.date.start)
-        if q.date.end is not None:
-            where.append("p.taken_ts <= ?")
-            args.append(q.date.end)
+        windows = [(q.date.start, q.date.end), *q.date.alts]
+        if q.date.start is not None or q.date.end is not None:
+            parts = []
+            for lo, hi in windows:
+                bits = []
+                if lo is not None:
+                    bits.append("p.taken_ts >= ?")
+                    args.append(lo)
+                if hi is not None:
+                    bits.append("p.taken_ts <= ?")
+                    args.append(hi)
+                parts.append("(" + " AND ".join(bits) + ")")
+            where.append("(" + " OR ".join(parts) + ")")
         if q.date.month_only:
             where.append("CAST(strftime('%m', p.taken_ts, 'unixepoch') AS INT) = ?")
             args.append(q.date.month_only)
@@ -104,6 +117,12 @@ class SearchEngine:
             args.append('"' + phrase.replace('"', '""') + '"')
         if q.only_videos:
             where.append("p.media_type = 'video'")
+        if q.exclude_videos:
+            where.append("COALESCE(p.media_type, 'image') != 'video'")
+        if q.source_kinds:
+            marks = ",".join("?" * len(q.source_kinds))
+            where.append(f"p.source_kind IN ({marks})")
+            args.extend(q.source_kinds)
         if q.only_live:
             where.append("(p.live_video_id IS NOT NULL OR COALESCE(p.motion_offset, 0) > 0)")
         if q.min_rating:
@@ -119,6 +138,8 @@ class SearchEngine:
             where.append(f"{fav_expr('p', current_user_id())} = 1")
         if q.only_screenshots:
             where.append("p.source_kind = 'screenshot'")
+        elif q.force_no_screenshots:
+            where.append("COALESCE(p.source_kind,'') != 'screenshot'")
         elif q.exclude_screenshots and (q.semantic_text or q.sort == "quality") and not q.text_phrases:
             # (Searching for words in a photo is exactly when a screenshot is wanted.)
             where.append("COALESCE(p.source_kind,'') != 'screenshot'")
@@ -176,6 +197,8 @@ class SearchEngine:
 
         res = SearchResult(interpretation=q.interpretation, result_type=q.result_type, query=query)
         structured = bool(q.persons_all or q.persons_any or q.place_ids or q.event_ids
+                          or q.persons_exclude or q.no_people or q.exclude_videos or q.source_kinds
+                          or q.force_no_screenshots
                           or q.date.start or q.date.end or q.date.month_only or q.only_favorites
                           or q.only_screenshots or q.only_selfies or q.only_videos or q.only_live
                           or q.album_ids or q.user_tags or q.text_phrases or q.min_rating or q.colors)
@@ -239,28 +262,34 @@ class SearchEngine:
     def _order(self, conn: sqlite3.Connection, candidates: list[int], q: ParsedQuery, limit: int) -> list[int]:
         if not candidates:
             return []
-        marks = ",".join("?" * len(candidates)) if len(candidates) <= 5000 else None
-        if q.sort == "quality":
-            if marks:
-                rows = conn.execute(
-                    f"SELECT id FROM photos WHERE id IN ({marks}) ORDER BY rating DESC, COALESCE(quality_score,0) DESC, taken_ts DESC"
-                    f" LIMIT ?", (*candidates, limit * 3)).fetchall()
-            else:
-                rows = conn.execute(
-                    "SELECT id FROM photos WHERE status='ok' AND hidden=0 AND live_component=0 ORDER BY COALESCE(quality_score,0) DESC LIMIT ?",
-                    (limit * 3,)).fetchall()
-            ids = [int(r[0]) for r in rows]
-            return self._diversify(conn, ids, limit)
-        order = "ASC" if q.sort == "date_asc" else "DESC"
-        if marks:
-            rows = conn.execute(
-                f"SELECT id FROM photos WHERE id IN ({marks}) ORDER BY taken_ts {order} LIMIT ?",
-                (*candidates, limit)).fetchall()
+        if q.sort in ("quality", "worst"):
+            order = ("rating DESC, COALESCE(quality_score,0) DESC, taken_ts DESC" if q.sort == "quality"
+                     else "COALESCE(quality_score, 1e9) ASC, taken_ts DESC")
+            take = limit * 3 if q.sort == "quality" else limit
         else:
-            cand = set(candidates)
-            rows = [r for r in conn.execute(f"SELECT id FROM photos WHERE status='ok' AND live_component=0 ORDER BY taken_ts {order}")
-                    if int(r[0]) in cand][:limit]
-        return [int(r[0]) for r in rows]
+            order = f"taken_ts {'ASC' if q.sort == 'date_asc' else 'DESC'}"
+            take = limit
+        ids = self._ordered_subset(conn, candidates, order, take)
+        return self._diversify(conn, ids, limit) if q.sort == "quality" else ids[:limit]
+
+    @staticmethod
+    def _ordered_subset(conn: sqlite3.Connection, candidates: list[int], order: str, take: int) -> list[int]:
+        """The first `take` of `candidates` in `order`. (Past a few thousand candidates this used to
+        fall back to ordering the *whole library* and ignore them: "best photos of Jhansi" then
+        returned other people's photos.)"""
+        if len(candidates) <= 5000:
+            marks = ",".join("?" * len(candidates))
+            rows = conn.execute(f"SELECT id FROM photos WHERE id IN ({marks}) ORDER BY {order} LIMIT ?",
+                                (*candidates, take)).fetchall()
+            return [int(r[0]) for r in rows]
+        cand = set(candidates)
+        out: list[int] = []
+        for r in conn.execute(f"SELECT id FROM photos WHERE status='ok' AND live_component=0 ORDER BY {order}"):
+            if int(r[0]) in cand:
+                out.append(int(r[0]))
+                if len(out) >= take:
+                    break
+        return out
 
     def _diversify(self, conn: sqlite3.Connection, ids: list[int], limit: int, sim_cut: float = 0.93) -> list[int]:
         """Drop near-identical shots so 'best photos' isn't ten frames of one burst."""
@@ -346,9 +375,12 @@ class SearchEngine:
     def _aggregate_entities(self, conn: sqlite3.Connection, q: ParsedQuery, res: SearchResult) -> None:
         from ..engine.events import event_title
 
+        # With no visual part the answer is defined by the filters alone: aggregate over every
+        # matching photo, not the page of them that fits `limit` ("trips" listed 6 of 18).
+        whole = None if q.semantic_text else self._candidate_sql(conn, q)
         if q.result_type == "events":
             ids = res.photo_ids
-            if ids:
+            if ids and whole is None:
                 marks = ",".join("?" * min(len(ids), 900))
                 rows = conn.execute(
                     f"""SELECT e.*, COUNT(p.id) AS matched FROM events e JOIN photos p ON p.event_id = e.id
@@ -386,20 +418,20 @@ class SearchEngine:
 
             ids = res.photo_ids[:900]
             if ids:
-                marks = ",".join("?" * len(ids))
+                scope, sargs = (whole if whole is not None else (",".join("?" * len(ids)), ids))
                 rows = conn.execute(
                     f"""SELECT pr.*, COUNT(DISTINCT f.photo_id) n FROM persons pr JOIN faces f ON f.person_id = pr.id
-                        WHERE f.photo_id IN ({marks}) AND pr.merged_into IS NULL AND pr.ignored = 0
-                        GROUP BY pr.id ORDER BY n DESC""", ids).fetchall()
+                        WHERE f.photo_id IN ({scope}) AND pr.merged_into IS NULL AND pr.ignored = 0
+                        GROUP BY pr.id ORDER BY n DESC""", sargs).fetchall()
                 res.people = [{"id": r["id"], "label": person_label(r), "cover_face_id": r["cover_face_id"],
                                "photo_count": r["photo_count"], "matched": r["n"]} for r in rows]
         elif q.result_type == "places":
             ids = res.photo_ids[:900]
             if ids:
-                marks = ",".join("?" * len(ids))
+                scope, sargs = (whole if whole is not None else (",".join("?" * len(ids)), ids))
                 rows = conn.execute(
                     f"""SELECT pl.*, COUNT(p.id) n FROM places pl JOIN photos p ON p.place_id = pl.id
-                        WHERE p.id IN ({marks}) GROUP BY pl.id ORDER BY n DESC""", ids).fetchall()
+                        WHERE p.id IN ({scope}) GROUP BY pl.id ORDER BY n DESC""", sargs).fetchall()
                 res.places = [{"id": r["id"], "name": r["name"], "city": r["city"], "admin1": r["admin1"],
                                "country": r["country"], "lat": r["lat"], "lon": r["lon"], "matched": r["n"]}
                               for r in rows]
