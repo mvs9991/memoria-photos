@@ -56,9 +56,22 @@ def ensure_upload_root(ctx, conn: sqlite3.Connection) -> tuple[int, Path]:
     return ensure_root(conn, root), root
 
 
-def _safe(name: str) -> str:
+# Names Windows reserves for devices: "CON.jpg", "nul.tar.jpg" and a folder called "Aux" all open the
+# device (or fail) instead of making a file, so an upload named that way vanished or became a 500.
+_DEVICE_NAMES = {"CON", "PRN", "AUX", "NUL", *(f"COM{i}" for i in range(10)), *(f"LPT{i}" for i in range(10))}
+NAME_LIMIT = 100              # one file name; a long one overflows Windows' 260-character path limit
+FOLDER_LIMIT = 60             # one folder name (a user, or a shared album's name)
+
+
+def _safe(name: str, limit: int = NAME_LIMIT) -> str:
     bad = '<>:"/\\|?*'
-    out = "".join("_" if c in bad or ord(c) < 32 else c for c in name).strip().rstrip(".")
+    out = "".join("_" if c in bad or ord(c) < 32 else c for c in name).strip(" .")
+    if len(out) > limit:                   # keep the extension: it is what makes it a photo
+        stem, ext = os.path.splitext(out)
+        out = (stem[:max(1, limit - len(ext))] + ext) if len(ext) < limit else out[:limit]
+    out = out.strip(" .")
+    if out.split(".", 1)[0].rstrip(" ").upper() in _DEVICE_NAMES:
+        out = "_" + out
     return out or "upload"
 
 
@@ -142,7 +155,7 @@ def save_upload(ctx, conn: sqlite3.Connection, stream: BinaryIO, filename: str, 
                 conn.commit()
             return Saved("duplicate", name, reason="already uploaded", path=earlier[0])
         when = _capture_date(tmp, name)
-        parts = [_safe(who), *(([_safe(subfolder)]) if subfolder else []),
+        parts = [_safe(who, FOLDER_LIMIT), *(([_safe(subfolder, FOLDER_LIMIT)]) if subfolder else []),
                  *((when.strftime("%Y"), when.strftime("%m")) if when else ("Undated",))]
         dest_dir = root.joinpath(*parts)
         dest_dir.mkdir(parents=True, exist_ok=True)

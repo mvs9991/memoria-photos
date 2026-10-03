@@ -198,7 +198,7 @@ ALLOWED_REMOVALS = {
     "engine/uploads.py": 1,             # an upload's own temp file in <upload folder>/.incoming
     "engine/editor.py": 1,              # a trim's own .part file when nothing was copied
     "api/images.py": 1,                 # a rotated thumbnail's temp file that lost a race
-    "api/dav.py": 3,                    # a backup app's own temp uploads (too large / stored / moved)
+    "api/dav.py": 1,                    # _discard(): a backup app's own temp upload in .incoming (too large / dropped / stored / moved / replaced)
     "autostart.py": 3,                  # its own start-up entries (Startup .cmd, launchd plist, systemd unit)
     "tls.py": 1,                        # a half-fetched certificate in <data>/tls
 }
