@@ -141,7 +141,8 @@ def run(ctx, stop: threading.Event) -> None:
                     if action == "index":
                         db.set_meta(conn, "last_auto_index", now)
                         conn.commit()
-                        jobs.spawn_index_job(ctx, {"kind": "index"})
+                        # "scheduled": skip the heavy post-processing when nothing changed.
+                        jobs.spawn_index_job(ctx, {"kind": "index", "scheduled": True})
                         log.info("Scheduled index started")
                     elif action == "backup":
                         db.set_meta(conn, "last_backup_attempt", now)

@@ -25,6 +25,14 @@ VIDEO_EXTENSIONS = {
 }
 SUPPORTED_EXTENSIONS = IMAGE_EXTENSIONS | RAW_EXTENSIONS | VIDEO_EXTENSIONS
 
+# Android moves a photo deleted in its gallery to a hidden file named ".trashed-<expiry>-<name>"
+# and keeps it for about 30 days. Someone deleted it on purpose, so it must not turn up in the
+# library as an ordinary photo. It is indexed but *hidden*, not skipped: nothing flips to
+# "missing", and anything a person still wants back is one "Show again" away in
+# Collections -> Hidden. (".pending-" is deliberately not treated this way: that can be the only
+# copy of a capture that never finished renaming.)
+PHONE_TRASH_PREFIX = ".trashed-"
+
 # Folders that are never photo content (OS / NAS / app metadata).
 SKIP_DIR_NAMES = {
     "$recycle.bin", "system volume information", "@eadir", ".thumbnails", ".thumbs",

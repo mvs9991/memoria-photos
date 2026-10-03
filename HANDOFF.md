@@ -58,7 +58,7 @@ photointel/
   api/       app.py routes_*.py images.py
 web/         React + TypeScript UI (Vite)
 eval/        dataset builders, calibration, evaluation, library inspector
-tests/       420 tests, no GPU required
+tests/       446 tests, no GPU required
 ```
 
 **The indexing pipeline** is a feeder thread → N CPU worker threads (read, hash, decode, EXIF,
@@ -592,6 +592,47 @@ a timing, because a test library is far too small to be slow and a timing assert
 The lesson, again: the unit tests and a 1,500-photo library cannot show this. Open the biggest
 person on the biggest library before believing a page is fast.
 
+### Auditing the library's *data*, not just its speed
+
+After the 82-second query, the next sweep checked whether what the library says is true. Three
+more defects, all invisible to a small test library:
+
+1. **An Android phone's own trash was indexed as ordinary photos.** Deleting in Android's gallery
+   renames a file `.trashed-<expiry>-<name>` and keeps it ~30 days; a backup of `DCIM` carries
+   them along. 94 of them (75 photos, 19 videos, none present under a normal name) were among the
+   newest items in the timeline. They are now **hidden, not skipped**: the scanner inserts them
+   with `hidden = 1` (`config.PHONE_TRASH_PREFIX`) and a one-time step in `db.migrate` hides the
+   ones an earlier version had indexed. Skipping was rejected on purpose, because an unseen file
+   flips to `missing` (which the app reads as an unplugged drive) and anything still wanted would
+   be lost; hidden ones are one "Show again" away in Collections → Hidden, and the step is
+   recorded in `meta` (`phone_trash_hidden`) so showing one again is never undone. `.pending-` is
+   deliberately *not* treated this way: it can be the only copy of a capture that never finished
+   renaming. Google Takeout's `Bin/` was already hidden by the Takeout import (the other 30
+   hidden items on that library).
+2. **Duplicate groups could keep a hidden photo and mark the visible one redundant.** Detection
+   looked at every photo, hidden or not: 16 groups had a hidden keeper and 11 had no visible
+   member at all. It now considers only visible photos (`hidden = 0`). An empty result still
+   leaves earlier groups alone, because that is also what an unplugged drive looks like and it
+   must not erase review decisions.
+3. **Every scheduled index ran all 17 post-processing stages, about 11 minutes, even when nothing
+   had changed** (`takeout` 135–185 s, `icloud` ~100 s, `xmp` ~130 s, `gpx` ~129 s). The scheduler
+   runs one hourly, and one a minute after the server starts if it is overdue. During it the
+   database write lock was held for stretches longer than the 60 s busy timeout, so the
+   scheduler's own check failed with "database is locked" (and an edit in the web app would have
+   too). A scheduled run now passes `--if-changed` and skips post-processing when the scan found
+   nothing new/changed/missing/restored and no photo needed analysis. Manual runs and explicit
+   `--post-only` runs are never skipped. A run killed *during* post-processing leaves
+   `meta.post_pending = 1`, so the next scheduled run finishes the job instead of trusting
+   half-built people and events.
+
+What was checked and found sound, so nobody re-checks it: every `exact` duplicate group is
+byte-identical (one distinct sha256 across 5,208 groups), no photo is in two exact groups, none
+is missed, every keeper is a member, and member counts match. Every read endpoint answers in
+under 3 s on the real library (slowest: `/api/health`, 2.8 s).
+
+Still open from this audit: the four slow stages are slow in a *manual* run too, and should be
+profiled on a copy of the database.
+
 ### Selecting photos and people (press-and-hold, drag)
 
 `web/src/lib/dragSelect.ts` is shared by the photo grid and the People grid, and `useGridSelect` in
@@ -725,7 +766,7 @@ the future, everything collapsing into one event, fuzzy duplicate thresholds too
 
 ## 10. Working notes
 
-- Run the suite with `.venv/Scripts/python.exe -m pytest -q`. 420 tests, ~6 min, no GPU needed —
+- Run the suite with `.venv/Scripts/python.exe -m pytest -q`. 446 tests, ~6 min, no GPU needed —
   the neural nets are replaced by deterministic fakes.
 - Test fixtures seed randomness from `zlib.crc32` of the **file name**, not `hash()` (salted per
   process) and not the full path (contains pytest's per-run tmp counter). Both made failures

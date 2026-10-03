@@ -10,7 +10,7 @@ from pathlib import Path
 from typing import Callable, Iterator
 
 from .. import db
-from ..config import SKIP_DIR_NAMES, SUPPORTED_EXTENSIONS
+from ..config import PHONE_TRASH_PREFIX, SKIP_DIR_NAMES, SUPPORTED_EXTENSIONS
 
 log = logging.getLogger(__name__)
 
@@ -125,7 +125,7 @@ def scan_root(conn: sqlite3.Connection, root_id: int, root_path: Path, exclude: 
         if inserts:
             conn.executemany(
                 "INSERT INTO photos(root_id, rel_path, folder, filename, ext, size, mtime, ctime, status, "
-                "first_seen_at, last_seen_at) VALUES (?,?,?,?,?,?,?,?, 'pending', ?, ?)",
+                "first_seen_at, last_seen_at, hidden) VALUES (?,?,?,?,?,?,?,?, 'pending', ?, ?, ?)",
                 inserts,
             )
             inserts.clear()
@@ -152,7 +152,9 @@ def scan_root(conn: sqlite3.Connection, root_id: int, root_path: Path, exclude: 
         if prev is None:
             folder, _, filename = rel.rpartition("/")
             ext = os.path.splitext(filename)[1].lower()
-            inserts.append((root_id, rel, folder, filename, ext, size, mtime, ctime, now, now))
+            # A phone's own trash (see config.PHONE_TRASH_PREFIX) arrives already hidden.
+            inserts.append((root_id, rel, folder, filename, ext, size, mtime, ctime, now, now,
+                            1 if filename.startswith(PHONE_TRASH_PREFIX) else 0))
             stats.new += 1
         else:
             pid, psize, pmtime, pstatus = prev

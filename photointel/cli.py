@@ -34,7 +34,8 @@ def cmd_index(ctx: AppContext, args) -> None:
     stats = run_index_job(ctx, job_id=args.job_id, roots=args.roots or None, retry_errors=args.retry_errors,
                           skip_faces=args.no_faces, skip_semantic=args.no_semantic, post_only=args.post_only,
                           workers=args.workers, full_recluster=args.full_recluster,
-                          post_stages=[s.strip() for s in args.stages.split(",")] if args.stages else None)
+                          post_stages=[s.strip() for s in args.stages.split(",")] if args.stages else None,
+                          only_if_changed=args.if_changed)
     print(json.dumps(stats, indent=2, default=str))
 
 
@@ -464,6 +465,8 @@ def main(argv: list[str] | None = None) -> None:
                         "corrections are kept); needed after changing clustering settings")
     p.add_argument("--workers", type=int)
     p.add_argument("--stages", help="with --post-only: comma-separated post stages to run (default: all)")
+    p.add_argument("--if-changed", action="store_true",
+                   help="skip post-processing when the scan found nothing new (what the scheduler uses)")
 
     p = sub.add_parser("serve", help="run the web application")
     p.add_argument("--host", help="default: the saved one (127.0.0.1 = this computer only; 0.0.0.0 = the network)")

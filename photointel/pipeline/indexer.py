@@ -163,7 +163,11 @@ class Indexer:
     def run(self, roots: list[str] | None = None, retry_errors: bool = False) -> dict:
         t_start = time.time()
         if roots:
-            self.scan(roots)
+            found = self.scan(roots)
+            # Kept so a caller can tell "nothing changed" from "something to process" (the
+            # scheduled run skips its heavy post-processing when it is the former).
+            self.stats["scan"] = {k: sum(getattr(s, k, 0) for s in found)
+                                  for k in ("new", "changed", "missing", "restored")}
         conn = self.ctx.connect()
         try:
             tasks = self.pending_tasks(conn, retry_errors=retry_errors)

@@ -82,9 +82,15 @@ def find_duplicates(ctx, conn: sqlite3.Connection, params: DupParams | None = No
     rows = conn.execute(
         "SELECT id, sha256, phash, dhash, width, height, size, taken_ts, date_source, source_kind, "
         "camera_model, quality_score, blur, first_seen_at, folder, media_type "
-        "FROM photos WHERE status = 'ok' AND live_component = 0"
+        # Hidden photos are out of every view on purpose (hand-hidden, a phone's or Google's
+        # trash, copies already hidden from this very page), so they are neither duplicates of
+        # something visible nor eligible to be the copy that is kept. Without this, a group could
+        # keep a hidden photo and mark the one you can see as the redundant copy.
+        "FROM photos WHERE status = 'ok' AND live_component = 0 AND hidden = 0"
     ).fetchall()
     if not rows:
+        # Deliberately leaves earlier groups alone: an empty result is also what an unplugged
+        # drive looks like (every photo "missing"), and that must not erase review decisions.
         return {"groups": 0, "new_groups": 0}
     n = len(rows)
     ids = np.array([r["id"] for r in rows], dtype=np.int64)

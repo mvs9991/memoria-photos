@@ -131,6 +131,37 @@ def migrate(conn: sqlite3.Connection, from_version: int) -> None:
     # it is idempotent, and a fresh database needs them too.
     _ensure_columns(conn)
     set_meta(conn, "schema_version", SCHEMA_VERSION)
+    _hide_phone_trash_once(conn)
+
+
+def _hide_phone_trash_once(conn: sqlite3.Connection) -> None:
+    """Hide the phone-trash files an earlier version indexed as ordinary photos.
+
+    Once only, recorded in meta even when there was nothing to do: a person who later chooses
+    "Show again" on one of them must not have it hidden again by the next start. New files are
+    hidden as the scanner inserts them, so this only ever covers libraries indexed before.
+    """
+    if get_meta(conn, "phone_trash_hidden") is not None:
+        return
+    from .config import PHONE_TRASH_PREFIX
+
+    ids = [int(r[0]) for r in conn.execute(
+        "SELECT id FROM photos WHERE substr(filename, 1, ?) = ? AND hidden = 0",
+        (len(PHONE_TRASH_PREFIX), PHONE_TRASH_PREFIX))]
+    for i in range(0, len(ids), 900):
+        chunk = ids[i:i + 900]
+        conn.execute(f"UPDATE photos SET hidden = 1 WHERE id IN ({','.join('?' * len(chunk))})", chunk)
+    if ids:
+        audit(conn, "phone_trash_hidden", "photo", None, {"photos": len(ids)}, actor="system")
+    set_meta(conn, "phone_trash_hidden", len(ids))
+    conn.commit()
+    if ids:
+        try:                                    # person counts and covers; stale counts are not fatal
+            from .engine import visibility
+
+            visibility.refresh(conn, ids)
+        except Exception:                       # never let this stop a library from opening
+            pass
 
 
 @contextmanager

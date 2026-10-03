@@ -189,7 +189,16 @@ class JobReporter:
 def run_index_job(ctx, job_id: int | None = None, roots: list[str] | None = None, retry_errors: bool = False,
                   skip_faces: bool = False, skip_semantic: bool = False, post_only: bool = False,
                   workers: int | None = None, full_recluster: bool = False,
-                  post_stages: list[str] | None = None) -> dict:
+                  post_stages: list[str] | None = None, only_if_changed: bool = False) -> dict:
+    """Index, then run the post-processing stages.
+
+    `only_if_changed` is for unattended runs: when the scan found nothing new, changed, missing
+    or restored and no photo needed analysis, the post-processing is skipped. Left alone, the
+    hourly scheduled run spent about 11 minutes re-deriving results that could not have changed
+    (and held the database write lock for much of it, so edits in the web app timed out).
+    A run that was cut off partway through post-processing is not trusted: `post_pending` stays
+    set until one finishes, and the next run does it all.
+    """
     from .indexer import CancelledError, Indexer
     from .post import run_post_stages
 
@@ -217,8 +226,19 @@ def run_index_job(ctx, job_id: int | None = None, roots: list[str] | None = None
             indexer = Indexer(ctx, job_id=job_id, progress_cb=reporter.progress,
                               enable_faces=not skip_faces, enable_semantic=not skip_semantic, workers=workers)
             stats["index"] = indexer.run(roots=roots, retry_errors=retry_errors)
+        if only_if_changed and not post_only and _nothing_changed(conn, stats.get("index", {})):
+            stats["post"] = {"skipped": "nothing changed"}
+            reporter.finish("done", "Nothing new")
+            return stats
+        full_post = post_stages is None
+        if full_post:
+            db.set_meta(conn, "post_pending", "1")
+            conn.commit()
         stats["post"] = run_post_stages(ctx, conn, stages=post_stages, progress=reporter.progress,
                                         full_recluster=full_recluster)
+        if full_post:
+            db.set_meta(conn, "post_pending", "0")
+            conn.commit()
         reporter.finish("done", "Finished")
     except CancelledError:
         log.warning("Job cancelled")
@@ -236,6 +256,16 @@ def run_index_job(ctx, job_id: int | None = None, roots: list[str] | None = None
         conn.close()
         lock.release()
     return stats
+
+
+def _nothing_changed(conn, index_stats: dict) -> bool:
+    """True when a run found no work AND the last post-processing is known to have finished."""
+    scan = index_stats.get("scan")
+    if scan is None:                       # no scan happened, so there is nothing to compare
+        return False
+    if any(scan.values()) or index_stats.get("total", 1) or index_stats.get("processed", 0):
+        return False
+    return db.get_meta(conn, "post_pending") != "1"
 
 
 def run_caption_job(ctx, job_id: int | None = None, limit: int = 200, detailed: bool = False) -> dict:
@@ -323,6 +353,8 @@ def spawn_index_job(ctx, params: dict) -> int:
     args = [sys.executable, "-m", "photointel", "--data", str(ctx.paths.data), "index", "--job-id", str(job_id)]
     if params.get("retry_errors"):
         args.append("--retry-errors")
+    if params.get("scheduled"):
+        args.append("--if-changed")
     if params.get("post_only"):
         args.append("--post-only")
         if params.get("stages"):
