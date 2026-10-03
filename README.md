@@ -364,6 +364,11 @@ A folder-sync app such as [Syncthing](https://syncthing.net) into a folder Memor
 
 Numbers from `eval/` on this machine. They describe these datasets, not your library.
 
+**The interface** is audited with axe across 15 screens in both themes: **0 WCAG 2 A/AA
+violations**, and at 320px — the narrowest phone still in use — nothing is clipped beyond the
+reach of a scroll. `tests/test_theme_contrast.py` computes the contrast ratios straight from
+`tokens.css`, so a colour that drops below AA fails an ordinary test run with no browser needed.
+
 **Faces — LFW** (13,185 detected faces, 5,749 identities):
 
 | | |
@@ -550,6 +555,24 @@ image files — this measures everything that happens *after* analysis):
 | Grid / timeline / person SQL queries | 0.01–0.30 s |
 | Database size | 740 MB (7.4 kB per photo) |
 
+**A 250,000-photo / 400,000-face library** (same builder, to find where things stop being
+usable rather than merely slow):
+
+| | |
+|---|---|
+| Face clustering + assignment | 553 s |
+| Duplicate detection | 571 s |
+| Event detection | 69 s |
+| Vector search, one query over all photos | 0.04 s |
+| Grid / timeline / person SQL queries | 0.02–0.80 s |
+| Database size | 1,904 MB (7.6 kB per photo) |
+
+Browsing stays interactive while the heavy stages do not: the one-off passes grow with the
+library, the per-page queries barely do. Three endpoints did degrade badly at this size and were
+rewritten — `/api/collections` 4.3 s -> 1.4 s and `/api/insights` 6.8 s -> 2.2 s by replacing
+per-item scans with a single pass, and Duplicates, which had asked for a fixed 120 groups and so
+made the other 8,612 in a real library unreachable, now pages.
+
 At 13 photos/s a 100k-photo library takes about 2.1 hours of analysis, resumable at any point.
 A modern GPU is several times faster. On CPU only, expect roughly 1–2 photos/s.
 
@@ -571,7 +594,7 @@ photointel/
   api/        app.py routes_*.py images.py
 web/          React + TypeScript UI
 eval/         dataset builders, calibration, end-to-end evaluation
-tests/        254 tests, no GPU required
+tests/        327 tests, no GPU required
 ```
 
 The layering is deliberate: vision → features → database → relationship engines → search → UI.
@@ -584,7 +607,7 @@ face recogniser.
 python -m pytest tests/ -q
 ```
 
-They stub the neural nets, so all 300 tests run on CPU in about 90 seconds and still cover
+They stub the neural nets, so all 327 tests run on CPU in about three minutes and still cover
 scanning, incremental re-indexing, moves, decoding, metadata, clustering, corrections, events,
 duplicates, search parsing and the HTTP API. The fixtures seed their randomness from stable
 hashes, so a failure reproduces on the next run instead of disappearing.
