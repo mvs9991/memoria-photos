@@ -12,6 +12,7 @@ Layout:  <target>/Memoria Backup/photos/<folder name>/...   (every file in each 
 """
 from __future__ import annotations
 
+import errno
 import hashlib
 import json
 import logging
@@ -29,6 +30,8 @@ from .xmp import ExportError, _check_destination
 log = logging.getLogger(__name__)
 CHUNK = 4 << 20
 SKIP_DIRS = {TRASH_DIR_NAME, ".incoming"}
+FATAL_DEST_ERRNOS = {errno.ENOSPC, errno.EROFS, getattr(errno, "EDQUOT", errno.ENOSPC)}
+MAX_FAILURES_IN_A_ROW = 25
 
 
 def _root_names(conn: sqlite3.Connection) -> dict[int, tuple[Path, str]]:
@@ -48,10 +51,15 @@ def _copy_hashed(src: Path, dest: Path) -> str:
     tmp = dest.with_name(dest.name + ".part")
     h = hashlib.sha256()
     with open(src, "rb") as fi, open(tmp, "wb") as fo:
+        before = os.fstat(fi.fileno())      # what the source looked like when we started reading
         for block in iter(lambda: fi.read(CHUNK), b""):
             h.update(block)
             fo.write(block)
     shutil.copystat(src, tmp)
+    # Stamp the copy with the mtime the source had BEFORE it was read. If the source changed while
+    # we copied, the copy may mix old and new bytes; with the new mtime it would look up to date for
+    # ever. With the old one the next run sees a difference and copies it again.
+    os.utime(tmp, ns=(before.st_atime_ns, before.st_mtime_ns))
     os.replace(tmp, dest)
     return h.hexdigest()
 
@@ -89,6 +97,7 @@ def run_backup(ctx, conn: sqlite3.Connection, target: str | Path, progress: Call
     mismatched: list[str] = []
     errors: list[dict] = []
     written = 0
+    in_a_row = 0
     for n, (rid, src, rel, dest) in enumerate(files):
         if should_stop and should_stop():
             break
@@ -108,10 +117,20 @@ def run_backup(ctx, conn: sqlite3.Connection, target: str | Path, progress: Call
             if expected and expected != digest:
                 mismatched.append(str(src))
             copied += 1
+            in_a_row = 0
             written += st.st_size
         except OSError as exc:
             failed += 1
+            in_a_row += 1
             errors.append({"file": str(src), "error": str(exc.strerror or exc)})
+            # A full or vanished backup drive fails every file; do not grind through the library, and
+            # do not record the run as a finished backup.
+            if exc.errno in FATAL_DEST_ERRNOS:
+                raise ExportError(f"the backup drive cannot take more: {exc.strerror or exc} "
+                                  f"({copied:,} copied before it stopped)") from exc
+            if in_a_row >= MAX_FAILURES_IN_A_ROW:
+                raise ExportError(f"{in_a_row} files in a row could not be backed up (last: {src.name}: "
+                                  f"{exc.strerror or exc}); is the drive still connected?") from exc
         if progress and (n % 50 == 0 or n == len(files) - 1):
             progress(n + 1, len(files))
 
