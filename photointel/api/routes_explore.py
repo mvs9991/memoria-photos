@@ -90,7 +90,9 @@ def browse_folders(root_id: int | None = None, path: str = ""):
 
 
 @router.get("/insights")
-def insights(year: int | None = None):
+# Bounded because the year reaches datetime(), which raises for anything outside
+# 1-9999 — a 500 for a mistyped URL. 1826 is the year of the first photograph.
+def insights(year: int | None = Query(None, ge=1826, le=2200)):
     return insights_mod.compute(get_state().conn(), year)
 
 

@@ -68,6 +68,13 @@ def photo_filter_sql(conn, person: list[int] | None = None, place: int | None = 
     if year:
         from ..metadata import naive_to_ts
 
+        # Validated here rather than on each route: seven endpoints share this
+        # filter, and datetime() raises for a year outside 1-9999 or a month outside
+        # 1-12 — which reached the caller as a 500 for a merely mistyped URL.
+        if not 1826 <= year <= 2200:
+            raise HTTPException(422, "year must be between 1826 and 2200")
+        if month is not None and not 1 <= month <= 12:
+            raise HTTPException(422, "month must be between 1 and 12")
         start = datetime(year, month or 1, 1)
         if month:
             end = datetime(year + 1, 1, 1) if month == 12 else datetime(year, month + 1, 1)

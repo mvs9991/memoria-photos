@@ -109,6 +109,18 @@ def create_app(ctx: AppContext) -> FastAPI:
                 for k, v in response.raw_headers]
         return response
 
+    @app.exception_handler(OverflowError)
+    async def too_big(request: Request, exc: OverflowError):
+        """A number past what SQLite (or C) can hold is a bad request, not a crash.
+
+        FastAPI validates `int` with Python's arbitrary-precision ints, so a 21-digit
+        id sails through the signature and only fails when SQLite is asked to bind it.
+        That turned roughly thirty-five read endpoints into a 500 and a stack trace for
+        anyone who mistyped a URL. Handled centrally so endpoints added later inherit it.
+        """
+        return JSONResponse({"detail": "a number in this request is out of range"},
+                            status_code=422)
+
     @app.exception_handler(Exception)
     async def unhandled(request: Request, exc: Exception):  # pragma: no cover - safety net
         log.exception("Unhandled error on %s", request.url.path)
@@ -119,6 +131,11 @@ def create_app(ctx: AppContext) -> FastAPI:
 
         @app.get("/{full_path:path}")
         def spa(full_path: str):
+            # An unknown /api/ path is a mistake, not a client-side route. Falling
+            # through to index.html answered 200 with HTML, so a caller expecting
+            # JSON got "Unexpected token <" instead of a plain 404.
+            if full_path == "api" or full_path.startswith("api/"):
+                return JSONResponse({"detail": "no such endpoint"}, status_code=404)
             candidate = WEB_DIST / full_path
             if full_path and candidate.is_file():
                 # The service worker and the page must be re-checked on every visit, or a
