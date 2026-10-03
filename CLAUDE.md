@@ -30,6 +30,8 @@ tried and rejected, and what is still unverified. `README.md` documents the prod
 python -m photointel add-root "D:/Photos"
 python -m photointel index                     # resumable; only processes what changed
 python -m photointel index --post-only --full-recluster   # after changing clustering settings
+python -m photointel index --if-changed        # skip post-processing if nothing changed (what the hourly scheduler runs; meta.post_pending forces a full pass)
+python -m photointel geo-setup [--countries IN,US|--auto]   # download offline place names (opt-in; health warns if absent)
 python -m photointel ocr [--all]               # read text in photos (post-index reads likely-text ones)
 python -m photointel export-xmp <folder>       # XMP sidecars for other apps (refuses folders in a root)
 python -m photointel import-gpx <files>        # GPS tracks, then --post-only --stages gpx,geocode,events,search-index
@@ -55,6 +57,9 @@ requests, and a non-virtualising photo grid.
 Nothing is assumed to be on PATH. `PHOTOINTEL_DATA` picks the library; `PHOTOINTEL_MODELS` and
 `PHOTOINTEL_GEO` let several libraries share one copy of the weights and place data;
 `PHOTOINTEL_DEVICE` forces `cuda`/`cpu` for one run; `PHOTOINTEL_DEV=1` enables dev-server CORS.
+`PHOTOINTEL_EXPORTS` moves the exports folder; `PHOTOINTEL_TAILSCALE` / `PHOTOINTEL_RESTIC` give the path
+to those programs. Start `index`/`serve` with the same `PHOTOINTEL_DATA`/`_MODELS`/`_GEO` every time
+(scheduled jobs inherit the server's environment).
 
 `PI_DATASETS` points the `eval/` scripts at the COCO/LFW datasets (default `D:/pi_cache/datasets`).
 Nothing under `photointel/` or `web/src/` hardcodes a path.
