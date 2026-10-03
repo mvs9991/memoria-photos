@@ -44,6 +44,15 @@ def _check_destination(conn: sqlite3.Connection, out: Path) -> Path:
         r = Path(root).resolve()
         if out == r or r in out.parents:
             raise ExportError(f"{out} is inside the photo folder {r}; choose a folder outside your library")
+    # Create the destination up front so an impossible one is reported before any
+    # work starts. Deliberately no write-probe file: a probe would have to be
+    # deleted afterwards, and this package may not contain removal calls outside
+    # the Trash (test_only_the_trash_can_remove_a_file). Unwritable-but-existing
+    # folders are caught by the OSError handlers on the export entry points.
+    try:
+        out.mkdir(parents=True, exist_ok=True)
+    except OSError as exc:
+        raise ExportError(f"cannot create {out}: {exc.strerror or exc}") from exc
     return out
 
 

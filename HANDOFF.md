@@ -58,7 +58,7 @@ photointel/
   api/       app.py routes_*.py images.py
 web/         React + TypeScript UI (Vite)
 eval/        dataset builders, calibration, evaluation, library inspector
-tests/       387 tests, no GPU required
+tests/       393 tests, no GPU required
 ```
 
 **The indexing pipeline** is a feeder thread → N CPU worker threads (read, hash, decode, EXIF,
@@ -505,6 +505,45 @@ found seven defects. This is the argument for repeating the exercise after signi
 Plus the People page rendering all 1,790 discovered people at once (9,229 DOM nodes, ~7 s load);
 it now shows 300 with a reveal control.
 
+### Bugs found by sweeping the API rather than by using it
+
+`tests/test_api_fuzz.py` and `tests/test_api_fuzz_writes.py` read every endpoint out of the
+OpenAPI schema and push hostile values through the parameters each one declares, so an endpoint
+added later is covered without anyone extending a list. Four defects, none of which any amount of
+clicking around would have found:
+
+1. **An integer beyond 64 bits was a 500 on about thirty-five read endpoints.** FastAPI validates
+   `int` with Python's arbitrary-precision ints, so a 21-digit id passes the signature and only
+   fails when SQLite is asked to bind it. Handled centrally as a 422.
+2. **A year or month outside what `datetime()` accepts did the same.** Seven endpoints share
+   `photo_filter_sql`, so the bounds live there. `year=0` deliberately stays a 200 — it is falsy,
+   so it means "no filter", and that is pinned by its own test.
+3. **The SPA catch-all answered unknown `/api/` paths with 200 and `index.html`**, so a caller
+   expecting JSON got `Unexpected token <` instead of a 404.
+4. **An unwritable export folder was a 500 and a stack trace** — `{"folder": "C:/Windows"}` got as
+   far as trying to write `C:\Windows\memoria-export.json`. `_check_destination` now creates the
+   destination up front so an impossible one is refused before any work starts, and the five
+   export entry points turn an `OSError` into a 400 that names the reason.
+
+   Worth knowing why it is not done with a write-probe file, which would be the obvious fix: a
+   probe has to be deleted afterwards, and `test_only_the_trash_can_remove_a_file` scans the whole
+   package for removal calls and fails on any that is not registered. That gate caught the probe
+   on the first full run. It is a static source scan, so it is cheap and absolute — if you need a
+   new `unlink`/`rmtree`/`rename` anywhere in `photointel/`, you must add it to `ALLOWED_REMOVALS`
+   with a justification, which is the review step it exists to force.
+
+The write sweep also asserts the project's hardest guarantee across the whole write surface at
+once: after roughly 1,300 malformed requests to every mutating endpoint, every file under the
+library root is still present and byte-for-byte identical.
+
+Two notes on reading these tests. A 5xx is not automatically a bug — asking for off-site snapshots
+when restic is not installed is a 502 with a sentence explaining why, which is a correct answer.
+The sweep tells them apart by the `"error"` key that only the unhandled-exception handler adds.
+And `/api/export/xmp` writing wherever it is pointed is the feature, not a hole: it is owner-only,
+and the owner choosing an export folder is the whole point. What it may never do is write inside a
+photo root, which `refuse_inside_roots` enforces and a test pins next to the unwritable-folder one,
+so a later change cannot trade one for the other.
+
 ---
 
 ## 8. Evaluation tooling
@@ -606,7 +645,7 @@ the future, everything collapsing into one event, fuzzy duplicate thresholds too
 
 ## 10. Working notes
 
-- Run the suite with `.venv/Scripts/python.exe -m pytest -q`. 387 tests, ~10 min, no GPU needed —
+- Run the suite with `.venv/Scripts/python.exe -m pytest -q`. 393 tests, ~12 min, no GPU needed —
   the neural nets are replaced by deterministic fakes.
 - Test fixtures seed randomness from `zlib.crc32` of the **file name**, not `hash()` (salted per
   process) and not the full path (contains pytest's per-run tmp counter). Both made failures

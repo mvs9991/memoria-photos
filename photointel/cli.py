@@ -260,11 +260,19 @@ def cmd_ocr(ctx: AppContext, args) -> None:
 
 
 def cmd_export_xmp(ctx: AppContext, args) -> None:
-    from .engine.xmp import export_xmp
+    from .engine.xmp import ExportError, export_xmp
 
     conn = ctx.connect()
     try:
         print(json.dumps(export_xmp(conn, args.out, include_auto_tags=args.auto_tags, everything=args.all), indent=2))
+    except ExportError as exc:
+        # Refusing a folder inside a photo root is expected behaviour, so it reads
+        # as a refusal rather than the traceback it used to print.
+        print(f"Export refused: {exc}", file=sys.stderr)
+        sys.exit(1)
+    except OSError as exc:
+        print(f"Export failed: cannot write to {args.out}: {exc.strerror or exc}", file=sys.stderr)
+        sys.exit(1)
     finally:
         conn.close()
 
@@ -330,6 +338,11 @@ def cmd_export(ctx: AppContext, args) -> None:
     except ExportError as exc:
         print(f"Export refused: {exc}", file=sys.stderr)
         sys.exit(1)
+    except OSError as exc:
+        # An unwritable destination is the user's to fix, so say so plainly
+        # rather than printing a traceback at them.
+        print(f"Export failed: cannot write to {args.out}: {exc.strerror or exc}", file=sys.stderr)
+        sys.exit(1)
     finally:
         conn.close()
 
@@ -366,6 +379,9 @@ def cmd_backup(ctx: AppContext, args) -> None:
                          indent=2, default=str))
     except ExportError as exc:
         print(f"Backup refused: {exc}", file=sys.stderr)
+        sys.exit(1)
+    except OSError as exc:
+        print(f"Backup failed: cannot write to {target}: {exc.strerror or exc}", file=sys.stderr)
         sys.exit(1)
     finally:
         conn.close()

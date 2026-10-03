@@ -91,6 +91,11 @@ def start_export(body: SpecBody):
         _check_destination(conn, Path(spec.folder))
     except ExportError as exc:
         raise HTTPException(400, str(exc))
+    except OSError as exc:
+        # A folder that exists but cannot be written to: a system directory, a
+        # read-only drive, a network share that has gone away. The caller's
+        # problem to fix, not a server fault, so it is a 400 and not a 500.
+        raise HTTPException(400, f"cannot write to that folder: {exc.strerror or exc}")
     job_id = create_job(conn, "export", {k: v for k, v in body.model_dump().items() if k != "photo_ids"}
                         | {"photos": len(body.photo_ids or [])})
     threading.Thread(target=_run, args=(state.ctx, job_id, spec), daemon=True, name=f"export-{job_id}").start()
@@ -116,6 +121,11 @@ def export_zip(spec: str = Form(...)):
         stream = export_mod.iter_zip(get_state().conn(), s)
     except ExportError as exc:
         raise HTTPException(400, str(exc))
+    except OSError as exc:
+        # A folder that exists but cannot be written to: a system directory, a
+        # read-only drive, a network share that has gone away. The caller's
+        # problem to fix, not a server fault, so it is a 400 and not a 500.
+        raise HTTPException(400, f"cannot write to that folder: {exc.strerror or exc}")
     name = f"memoria-{time.strftime('%Y%m%d-%H%M')}.zip"
     return StreamingResponse(stream, media_type="application/zip",
                              headers={"Content-Disposition": f'attachment; filename="{name}"'})

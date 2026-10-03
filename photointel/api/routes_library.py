@@ -561,6 +561,11 @@ def export_xmp(body: ExportBody):
         return run_export(get_state().conn(), body.folder, body.include_auto_tags, body.everything)
     except ExportError as exc:
         raise HTTPException(400, str(exc))
+    except OSError as exc:
+        # A folder that exists but cannot be written to: a system directory, a
+        # read-only drive, a network share that has gone away. The caller's
+        # problem to fix, not a server fault, so it is a 400 and not a 500.
+        raise HTTPException(400, f"cannot write to that folder: {exc.strerror or exc}")
 
 
 class DescriptionBody(BaseModel):

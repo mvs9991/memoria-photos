@@ -180,3 +180,8 @@ def export_album_html(album_id: int, body: HtmlExportBody):
         return export_album(conn, ids, a["name"], body.folder, a["description"])
     except ExportError as exc:
         raise HTTPException(400, str(exc))
+    except OSError as exc:
+        # A folder that exists but cannot be written to: a system directory, a
+        # read-only drive, a network share that has gone away. The caller's
+        # problem to fix, not a server fault, so it is a 400 and not a 500.
+        raise HTTPException(400, f"cannot write to that folder: {exc.strerror or exc}")
