@@ -100,8 +100,12 @@ class RootBody(BaseModel):
 def add_root(body: RootBody):
     state = get_state()
     p = Path(body.path).expanduser()
-    if not p.is_dir():
-        raise HTTPException(400, f"Not a folder: {p}")
+    try:
+        # As in /browse: an impossible path raises here rather than answering False.
+        if not p.is_dir():
+            raise HTTPException(400, f"Not a folder: {p}")
+    except OSError as exc:
+        raise HTTPException(400, f"Not a folder: {exc.strerror or exc}")
     try:
         if state.ctx.paths.data.resolve() in p.resolve().parents or p.resolve() == state.ctx.paths.data.resolve():
             raise HTTPException(400, "Choose a folder outside the Memoria data directory")
@@ -138,7 +142,13 @@ def browse(path: str | None = None):
                     "entries": [{"name": "Home", "path": home, "is_dir": True}] + drives}
         path = str(Path.home())
     p = Path(path)
-    if not p.is_dir():
+    try:
+        # is_dir() does not merely answer False for an impossible path: a name past
+        # the filesystem's limit raises ENAMETOOLONG, which reached the caller as a
+        # 500. Linux raises where Windows does not, so only CI caught it.
+        if not p.is_dir():
+            raise HTTPException(400, "not a folder")
+    except OSError:
         raise HTTPException(400, "not a folder")
     entries = []
     try:
@@ -152,6 +162,9 @@ def browse(path: str | None = None):
                 continue
     except PermissionError:
         raise HTTPException(403, "permission denied")
+    except OSError as exc:
+        # A symlink loop, a folder that vanished mid-listing, a disconnected share.
+        raise HTTPException(400, f"cannot list that folder: {exc.strerror or exc}")
     return {"path": str(p), "parent": str(p.parent) if p.parent != p else None, "entries": entries[:500]}
 
 

@@ -58,7 +58,7 @@ photointel/
   api/       app.py routes_*.py images.py
 web/         React + TypeScript UI (Vite)
 eval/        dataset builders, calibration, evaluation, library inspector
-tests/       393 tests, no GPU required
+tests/       406 tests, no GPU required
 ```
 
 **The indexing pipeline** is a feeder thread → N CPU worker threads (read, hash, decode, EXIF,
@@ -536,6 +536,32 @@ The write sweep also asserts the project's hardest guarantee across the whole wr
 once: after roughly 1,300 malformed requests to every mutating endpoint, every file under the
 library root is still present and byte-for-byte identical.
 
+Two more were found on the Linux CI job that Windows could not reproduce. A path longer than the
+filesystem allows makes `is_dir()`/`is_file()` **raise** `ENAMETOOLONG` rather than answer False,
+so a long URL was a 500 from `/api/browse`, from `/api/roots`, and from the SPA catch-all. Windows
+does not raise, so all three looked fine locally. They are now simulated with a monkeypatched
+`Path.is_dir` so either platform catches a regression, and the awkward-filename list gained the
+names that are legal on Linux but impossible on Windows (`con.jpg`, `star*.jpg`, a trailing space)
+which skip here and run there. **If you only ever run the suite on one OS, you are testing half of
+it** — and a Windows run will not tell you the Docker image is broken.
+
+### The leaked job subprocess, which looks exactly like flaky tests
+
+Worth knowing before you chase a phantom. Two consecutive full runs failed on two different,
+innocent tests: one with a numpy allocation failure, one with `fork: Resource temporarily
+unavailable`. Both passed in isolation, which is the classic shape of a flaky test.
+
+Neither was flaky. `jobs._spawn` starts a `DETACHED_PROCESS` on Windows so a production index run
+outlives the server that started it — correct for production. In a test it leaves a real python
+process pointed at a pytest tmp directory, which nothing reaps. One had been left behind by each
+full suite run, and three of them were holding about 3 GB; the memory pressure then broke whatever
+test happened to run next. Several tests already monkeypatched `_spawn`, so the hazard was known,
+but the upload path did not. There is now an autouse `_no_detached_jobs` fixture in `conftest.py`
+so no test can leak one, whatever it calls.
+
+The lesson generalises: when a long suite fails on a different test each run and each passes alone,
+suspect the host before the tests. `Get-Process python` is the first thing to look at.
+
 Two notes on reading these tests. A 5xx is not automatically a bug — asking for off-site snapshots
 when restic is not installed is a 502 with a sentence explaining why, which is a correct answer.
 The sweep tells them apart by the `"error"` key that only the unhandled-exception handler adds.
@@ -645,7 +671,7 @@ the future, everything collapsing into one event, fuzzy duplicate thresholds too
 
 ## 10. Working notes
 
-- Run the suite with `.venv/Scripts/python.exe -m pytest -q`. 393 tests, ~12 min, no GPU needed —
+- Run the suite with `.venv/Scripts/python.exe -m pytest -q`. 406 tests, ~8 min, no GPU needed —
   the neural nets are replaced by deterministic fakes.
 - Test fixtures seed randomness from `zlib.crc32` of the **file name**, not `hash()` (salted per
   process) and not the full path (contains pytest's per-run tmp counter). Both made failures

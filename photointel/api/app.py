@@ -137,7 +137,14 @@ def create_app(ctx: AppContext) -> FastAPI:
             if full_path == "api" or full_path.startswith("api/"):
                 return JSONResponse({"detail": "no such endpoint"}, status_code=404)
             candidate = WEB_DIST / full_path
-            if full_path and candidate.is_file():
+            try:
+                is_file = bool(full_path) and candidate.is_file()
+            except OSError:
+                # A path longer than the filesystem allows raises rather than
+                # answering False (ENAMETOOLONG on Linux, where it 500'd; Windows
+                # happened not to). It is simply not a file we serve.
+                is_file = False
+            if is_file:
                 # The service worker and the page must be re-checked on every visit, or a
                 # phone keeps running an old build (hashed /assets/ files can be kept forever).
                 fresh = full_path in ("sw.js", "index.html", "manifest.json")

@@ -71,6 +71,10 @@ BODIES = [
     {"name": "../../etc/passwd"},
     {"name": "\x00"},
     {"path": "../../../windows/system32/config/sam"},
+    # Longer than any filesystem allows a single component to be: is_dir() raises
+    # ENAMETOOLONG rather than answering False, which was a 500 on Linux.
+    {"path": "a" * 500},
+    {"folder": "a" * 500},
     {"folder": "C:/Windows"},
     {"value": 1e308},                        # the largest finite float
     {"rating": 999},

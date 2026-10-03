@@ -203,3 +203,25 @@ def _fresh_guess_limits():
 
     ratelimit.reset_all()
     yield
+
+
+@pytest.fixture(autouse=True)
+def _no_detached_jobs(monkeypatch):
+    """No test may launch a real background index job.
+
+    `jobs._spawn` starts a DETACHED_PROCESS on Windows, deliberately, so that a
+    production index run outlives the server that started it. In a test that means
+    a real python process pointed at a pytest tmp directory which nothing ever
+    reaps. Three had accumulated here, one per full suite run, holding about 3 GB
+    between them — and the resulting memory pressure surfaced as a numpy
+    allocation failure in one run and `fork: Resource temporarily unavailable` in
+    another, each on a different, innocent test.
+
+    Tests that want to assert on what would have been spawned can ask for this
+    fixture and read the list, or override it with their own monkeypatch.
+    """
+    from photointel.pipeline import jobs
+
+    spawned: list[list[str]] = []
+    monkeypatch.setattr(jobs, "_spawn", lambda args: spawned.append(args))
+    return spawned

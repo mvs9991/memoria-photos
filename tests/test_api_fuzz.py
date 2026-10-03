@@ -275,3 +275,50 @@ def test_a_client_side_route_still_serves_the_app_shell(ctx, app, small_library)
         r = client.get(path)
         assert r.status_code == 200, f"{path} -> {r.status_code}"
         assert "html" in r.headers.get("content-type", ""), f"{path} did not serve the shell"
+
+
+# ----------------------------------------------- paths the filesystem rejects outright
+
+def test_an_overlong_path_is_refused_not_a_crash(ctx, app, small_library, monkeypatch):
+    """A path longer than the filesystem allows makes is_dir()/is_file() *raise*
+    rather than answer False. Linux raises ENAMETOOLONG where Windows does not, so
+    this only ever failed in CI; it is simulated here so it is caught on either.
+    """
+    import pathlib
+
+    real_is_dir, real_is_file = pathlib.Path.is_dir, pathlib.Path.is_file
+
+    def boom(self, *a, **kw):
+        if "aaaa" in str(self):
+            raise OSError(36, "File name too long")
+        return real_is_dir(self, *a, **kw)
+
+    def boom_file(self, *a, **kw):
+        if "aaaa" in str(self):
+            raise OSError(36, "File name too long")
+        return real_is_file(self, *a, **kw)
+
+    monkeypatch.setattr(pathlib.Path, "is_dir", boom)
+    monkeypatch.setattr(pathlib.Path, "is_file", boom_file)
+
+    client = TestClient(app, raise_server_exceptions=False)
+    long_name = "a" * 400
+    r = client.get("/api/browse", params={"path": long_name})
+    assert not crashed(r) and r.status_code == 400, f"browse -> {r.status_code} {r.text[:120]}"
+    # The SPA catch-all must fall through to the app shell, not 500.
+    r = client.get(f"/{long_name}")
+    assert not crashed(r), f"catch-all -> {r.status_code} {r.text[:120]}"
+
+
+def test_browse_reports_an_unlistable_folder(ctx, app, small_library, monkeypatch):
+    """A symlink loop or a share that drops mid-listing is the caller's problem to
+    see, not an unhandled 500. Only PermissionError was handled before."""
+    import os as _os
+
+    def boom(*a, **kw):
+        raise OSError(40, "Too many levels of symbolic links")
+
+    monkeypatch.setattr(_os, "scandir", boom)
+    r = TestClient(app, raise_server_exceptions=False).get(
+        "/api/browse", params={"path": str(small_library)})
+    assert r.status_code == 400 and "cannot list" in r.json()["detail"]

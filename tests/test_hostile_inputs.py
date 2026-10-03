@@ -9,6 +9,7 @@ corrupt byte in a 250,000-photo library must not cost the user the other 249,999
 """
 from __future__ import annotations
 
+import os
 import struct
 import zipfile
 from datetime import datetime
@@ -234,6 +235,20 @@ def test_invalid_exif_orientation_is_survivable(ctx, tmp_path, orientation):
     # A long name. 100 rather than the 255 a filesystem allows: the whole path has
     # to stay under Windows' 260-character limit, and pytest's tmp dir is already long.
     "a" * 100 + ".jpg",
+    # Legal on Linux, impossible on Windows. These skip on Windows and run on the
+    # Linux CI job, which is the half of the matrix that would otherwise go
+    # untested — a photo copied off a phone or a NAS really can be named this.
+    "con.jpg",                         # a reserved device name on Windows
+    "aux.jpg",
+    "trailing space .jpg",
+    "trailing dot..jpg",
+    "star*.jpg",
+    "question?.jpg",
+    'double"quote.jpg',
+    "pipe|.jpg",
+    "less<greater>.jpg",
+    "colon:name.jpg",
+    "back\\slash.jpg",
 ])
 def test_awkward_filenames_index_and_round_trip(ctx, tmp_path, name):
     """Unicode and punctuation in names must survive the scanner and the database
@@ -244,6 +259,11 @@ def test_awkward_filenames_index_and_round_trip(ctx, tmp_path, name):
         make_image(root / name, taken=datetime(2024, 5, 1, 9, 0), noise=12)
     except (OSError, UnicodeEncodeError):
         pytest.skip(f"this filesystem will not store a file named {name!r}")
+    # Not every refusal raises. On Windows a ':' opens an alternate data stream and
+    # a '\' is a separator, so the write succeeds but no file of that name exists.
+    # Checking the directory listing is the only reliable way to tell.
+    if name not in os.listdir(root):
+        pytest.skip(f"this filesystem silently stored {name!r} under another name")
 
     index(ctx, [str(root)])
     conn = ctx.connect()
