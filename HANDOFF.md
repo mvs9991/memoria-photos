@@ -790,6 +790,29 @@ the future, everything collapsing into one event, fuzzy duplicate thresholds too
   CR2/NEF/ARW/DNG has ever actually been decoded. **If the new machine has RAW files, this is the
   first thing worth testing.**
 - **Scene/occasion search accuracy** is known only as a lower bound (§5).
+- **Questions for the owner raised by the parallel audits** (none changed, each pinned by a test or
+  left alone on purpose, because they are product decisions rather than bugs):
+  - *Backup never verifies copies it already made.* A copy is skipped on size + modification time,
+    so one corrupted afterwards with the same size and time is never detected or repaired, even
+    though the database holds the sha256. A periodic `backup --verify` would close it
+    (`test_PIN_backup_does_not_verify_existing_copies`).
+  - *Backup replaces the older backup copy of a file edited since.* The old bytes are kept
+    nowhere. "Never overwrites" holds only in the sense that a newer backup copy is never replaced
+    by an older source. Keep versions, or is replace-on-change intended?
+  - *The hash-mismatch warning compares with the sha256 taken at indexing*, so a photo edited
+    since then could be reported as "check the disk". Not reproduced.
+  - *Anonymous share-link uploads have no quota* (up to 200 files of 20 GB each per request, no
+    per-IP or total limit), and share tokens are compared with SQL equality with no rate limit on
+    guessing (22+ characters of `token_urlsafe(16)`, so judged not exploitable).
+  - *DAV files with a non-photo extension* stay in `.incoming` / `dav_pending` until a MOVE;
+    nothing expires them.
+  - *A face-grouping spot check* (informal, no ground truth, so **not a measurement**: ~15 groups
+    viewed as 128 px crops) found the biggest groups mostly coherent and no sign of the old
+    mega-merge. The visible weaknesses are children and adults, and babies, landing in one group
+    (people 1191, 13, 32, 1192 on the real library), one crowd-scene group of three different men,
+    and mid-size groups that are one burst of near-identical frames. 1,006 of the 2,036 unnamed
+    groups have 5+ photos and 563 have exactly 3. Whether `merge_threshold` 0.68 is right cannot
+    be settled this way; a "split this group" review of the lowest-confidence faces would help.
 - **Face thresholds** were calibrated on LFW (adult celebrity portraits) then corrected against one
   real library. A library of young children changing year to year may need re-tuning; sweep with
   the method in §4 rather than guessing.
