@@ -225,3 +225,29 @@ def _no_detached_jobs(monkeypatch):
     spawned: list[list[str]] = []
     monkeypatch.setattr(jobs, "_spawn", lambda args: spawned.append(args))
     return spawned
+
+
+@pytest.fixture(autouse=True)
+def _keep_root_logging_clean():
+    """Undo any logging handlers a test installs on the root logger.
+
+    `setup_logging` (which `cli.main` calls) attaches a StreamHandler bound to
+    whatever `sys.stderr` is at the time — under pytest, that test's capture
+    buffer — plus a file handler inside a tmp directory. Both are added to the
+    *root* logger and its own guard keeps them there for the rest of the session,
+    so every later log record wrote to a closed file and printed "ValueError: I/O
+    operation on closed file" over the rest of the run.
+    """
+    import logging as _logging
+
+    root = _logging.getLogger()
+    before, level = list(root.handlers), root.level
+    yield
+    for h in list(root.handlers):
+        if h not in before:
+            root.removeHandler(h)
+            try:
+                h.close()
+            except Exception:
+                pass
+    root.setLevel(level)

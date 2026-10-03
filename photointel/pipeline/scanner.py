@@ -69,7 +69,14 @@ def iter_files(root: Path, exclude: list[Path], on_error: Callable[[str, Excepti
                 st = entry.stat(follow_symlinks=False)
                 if st.st_size == 0:
                     continue
-                rel = entry.path[root_len:].replace("\\", "/")
+                # Separators are normalised to "/" so a library survives being
+                # moved between Windows and Linux. Only the platform's own
+                # separator is translated: on Linux a backslash is an ordinary
+                # character in a filename, and rewriting it split "back\slash.jpg"
+                # into a folder and a file, giving a rel_path that does not exist.
+                rel = entry.path[root_len:]
+                if os.sep != "/":
+                    rel = rel.replace(os.sep, "/")
                 ctime = getattr(st, "st_birthtime", None) or st.st_ctime
                 yield rel, int(st.st_size), float(st.st_mtime), float(ctime)
             except OSError as exc:

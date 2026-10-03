@@ -174,19 +174,25 @@ def test_no_malformed_request_can_alter_an_original(ctx, app, library_root):
     assert not changed, f"originals were modified: {changed}"
 
 
-def test_an_unwritable_export_folder_is_refused_clearly(ctx, app, library_root):
+def test_an_unwritable_export_folder_is_refused_clearly(ctx, app, library_root, tmp_path):
     """Picking a folder you cannot write to is a mistake to report, not a crash.
 
     It is checked before any file is written: failing partway left a half-finished
     export behind. _check_destination is shared by the XMP, photo and backup
     exports, so all three inherit this.
     """
+    # A destination whose parent is a regular file. Portable, and unwritable even
+    # for root — unlike "C:/Windows", which the first version of this test used and
+    # which is writable on the CI runner and merely a relative path on Linux.
+    blocker = tmp_path / "not-a-folder"
+    blocker.write_text("I am a file", encoding="utf-8")
+    dest = blocker / "exports"
+
     client = TestClient(app, raise_server_exceptions=False)
-    r = client.post("/api/export/xmp", json={"folder": "C:/Windows"})
+    r = client.post("/api/export/xmp", json={"folder": str(dest)})
     assert r.status_code == 400, f"-> {r.status_code} {r.text[:160]}"
-    assert "cannot write" in r.json()["detail"].lower()
-    # Nothing was created on the way to finding that out.
-    assert not Path("C:/Windows/memoria-export.json").exists()
+    assert "cannot create" in r.json()["detail"].lower()
+    assert blocker.read_text(encoding="utf-8") == "I am a file"   # and it was left alone
 
 
 def test_an_export_folder_inside_the_library_is_still_refused(ctx, app, library_root):
@@ -214,11 +220,14 @@ def test_the_cli_reports_an_export_refusal_instead_of_a_traceback(ctx, library_r
     assert "Traceback" not in err
 
 
-def test_the_cli_reports_an_unwritable_export_folder(ctx, library_root, capsys):
+def test_the_cli_reports_an_unwritable_export_folder(ctx, library_root, tmp_path, capsys):
     from photointel import cli
 
+    blocker = tmp_path / "not-a-folder"
+    blocker.write_text("I am a file", encoding="utf-8")
+
     with pytest.raises(SystemExit) as exit_info:
-        cli.main(["--data", str(ctx.paths.data), "export-xmp", "C:/Windows"])
+        cli.main(["--data", str(ctx.paths.data), "export-xmp", str(blocker / "exports")])
     assert exit_info.value.code == 1
     err = capsys.readouterr().err
-    assert "cannot write to" in err and "Traceback" not in err
+    assert "Export refused" in err and "cannot create" in err and "Traceback" not in err
