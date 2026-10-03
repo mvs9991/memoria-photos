@@ -51,15 +51,30 @@ _MEDIA_NAME = re.compile(r"^(.*?)(\(\d+\))?(\.[^.]+)$")
 # ---------------------------------------------------------------------------- matching
 
 class _FolderSidecars:
-    """The .json sidecars of one folder, parsed for name matching."""
+    """The .json sidecars of one folder, parsed for name matching.
+
+    Lookup is by dictionary, built once per folder: sidecars are bucketed by their "(n)" suffix and
+    then by lower-cased core name, so a photo costs a few hash lookups instead of a scan of every
+    sidecar. The choice among candidates is the same as the original linear scan (best rank, then the
+    longest file name, then the first in `names` order); tests/test_takeout_matching.py keeps the
+    original scan as an oracle and compares the two.
+    """
 
     def __init__(self, names: list[str]):
         self.entries: list[tuple[str, str | None, str]] = []   # (core lower, "(n)" or None, file name)
+        # "(n)" or None -> core lower -> [(position, file name)] in `names` order
+        self._by_num: dict[str | None, dict[str, list[tuple[int, str]]]] = {}
+        # "(n)" or None -> ascending distinct core lengths (for truncated-name lookups)
+        self._lengths: dict[str | None, list[int]] = {}
         for n in names:
             if n.lower() in NOT_SIDECARS or not n.lower().endswith(".json"):
                 continue
             m = _NUM_AT_END.match(n[:-5])
-            self.entries.append((m.group(1).lower(), m.group(2), n))
+            core, jnum = m.group(1).lower(), m.group(2)
+            self._by_num.setdefault(jnum, {}).setdefault(core, []).append((len(self.entries), n))
+            self.entries.append((core, jnum, n))
+        for jnum, cores in self._by_num.items():
+            self._lengths[jnum] = sorted({len(c) for c in cores})
 
     def match(self, media_name: str) -> str | None:
         """File name of the sidecar describing `media_name`, or None."""
@@ -67,31 +82,47 @@ class _FolderSidecars:
         if not m:
             return None
         stem, num, ext = m.group(1), m.group(2), m.group(3)
+        cores = self._by_num.get(num)
+        if not cores:
+            return None
         for base_stem in _stem_variants(stem):
             hit = self._match_one(f"{base_stem}{ext}".lower(), base_stem.lower(), num)
             if hit:
                 return hit
         return None
 
-    def _match_one(self, name: str, stem: str, num: str | None) -> str | None:
-        full = name + SUPPLEMENTAL
-        best, best_rank = None, 99
-        for core, jnum, fname in self.entries:
-            if jnum != num:
-                continue
-            if core == name:                       # IMG.jpg.json
-                rank = 0
-            elif core == full:                     # IMG.jpg.supplemental-metadata.json
-                rank = 1
-            elif full.startswith(core) and (len(core) > len(name) or len(core) >= MIN_TRUNCATED):
-                rank = 2                           # truncated to fit 51 characters
-            elif core == stem:                     # uploaded without an extension
-                rank = 3
-            else:
-                continue
-            if rank < best_rank or (rank == best_rank and best is not None and len(fname) > len(best)):
-                best, best_rank = fname, rank
+    @staticmethod
+    def _longest(cands: list[tuple[int, str]]) -> str:
+        """The first of the longest file names (the original scan replaced only on strictly longer)."""
+        best = None
+        for _, fname in sorted(cands):
+            if best is None or len(fname) > len(best):
+                best = fname
         return best
+
+    def _match_one(self, name: str, stem: str, num: str | None) -> str | None:
+        cores = self._by_num.get(num)
+        if not cores:
+            return None
+        full = name + SUPPLEMENTAL
+        hit = cores.get(name)                      # IMG.jpg.json
+        if hit:
+            return self._longest(hit)
+        hit = cores.get(full)                      # IMG.jpg.supplemental-metadata.json
+        if hit:
+            return self._longest(hit)
+        cands: list[tuple[int, str]] = []          # truncated to fit 51 characters
+        for length in self._lengths[num]:
+            if length > len(full):
+                break
+            if length > len(name) or length >= MIN_TRUNCATED:
+                cands.extend(cores.get(full[:length], ()))
+        if cands:
+            return self._longest(cands)
+        hit = cores.get(stem)                      # uploaded without an extension
+        if hit:
+            return self._longest(hit)
+        return None
 
 
 def _stem_variants(stem: str) -> list[str]:
