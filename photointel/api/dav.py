@@ -96,6 +96,12 @@ def _who(request: Request) -> tuple[str | None, str | None, Response | None]:
     return (name.strip() or "Phone"), "owner", None
 
 
+def _discard(tmp: Path) -> None:
+    """Remove one of this drop box's own temp uploads from <upload folder>/.incoming. The only
+    removal in this module, and it only ever receives a path that mkstemp made there."""
+    tmp.unlink(missing_ok=True)
+
+
 def _entry(conn, who: str, path: str):
     return conn.execute("SELECT * FROM dav_files WHERE who = ? AND path = ?", (who, path)).fetchone()
 
@@ -243,26 +249,36 @@ async def dav(request: Request, path: str = ""):
         ext = Path(clean).suffix.lower()
         fd, tmp_name = tempfile.mkstemp(dir=incoming, suffix=ext if ext in SUPPORTED_EXTENSIONS else ".part")
         size = 0
-        with os.fdopen(fd, "wb") as out:
-            async for chunk in request.stream():
-                size += len(chunk)
-                if size > uploads_mod.MAX_BYTES:
-                    break
-                out.write(chunk)
         tmp = Path(tmp_name)
+        try:
+            with os.fdopen(fd, "wb") as out:
+                async for chunk in request.stream():
+                    size += len(chunk)
+                    if size > uploads_mod.MAX_BYTES:
+                        break
+                    out.write(chunk)
+        except BaseException:
+            # The phone dropped the connection (or the disk filled) part-way: a half photo must
+            # not be left in .incoming for ever.
+            _discard(tmp)
+            raise
         if size > uploads_mod.MAX_BYTES:
-            tmp.unlink(missing_ok=True)
+            _discard(tmp)
             return Response("file is too large", status_code=413)
         if ext not in SUPPORTED_EXTENSIONS:
-            # Probably a temporary name the app will MOVE into place; keep it until then.
+            # Probably a temporary name the app will MOVE into place; keep it until then. A retry
+            # of the same temporary name replaces the earlier bytes, so drop those.
+            old = conn.execute("SELECT tmp_path FROM dav_pending WHERE who = ? AND path = ?", (who, clean)).fetchone()
             conn.execute("INSERT OR REPLACE INTO dav_pending(who, path, tmp_path, size, created_at) VALUES (?,?,?,?,?)",
                          (who, clean, str(tmp), size, time.time()))
             conn.commit()
+            if old is not None and old[0] != str(tmp):
+                _discard(Path(old[0]))
             return Response(status_code=201)
         try:
             code, _ = await run_in_threadpool(_finalize, conn, who, clean, tmp, size)
         finally:
-            tmp.unlink(missing_ok=True)
+            _discard(tmp)
         return Response(status_code=code)
     if method == "MOVE":
         dest_url = request.headers.get("destination", "")
@@ -280,7 +296,7 @@ async def dav(request: Request, path: str = ""):
             try:
                 code, _ = await run_in_threadpool(_finalize, conn, who, dest, tmp, pend["size"])
             finally:
-                tmp.unlink(missing_ok=True)
+                _discard(tmp)
                 conn.execute("DELETE FROM dav_pending WHERE who = ? AND path = ?", (who, clean))
                 conn.commit()
             return Response(status_code=code)

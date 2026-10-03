@@ -188,6 +188,9 @@ def shared_upload(token: str, files: list[UploadFile]):
                        album_id=int(share["album_id"])).__dict__ for f in files[:200]]
     for r in out:
         r.pop("path", None)                  # the visitor learns nothing about the server's folders
+        r.pop("photo_id", None)              # nor which of the owner's photos their bytes matched
+        if r.get("status") == "duplicate":
+            r["reason"] = "already there"    # not "already in your library": that is the owner's business
     return {"results": out}
 
 
