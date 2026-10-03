@@ -58,7 +58,7 @@ photointel/
   api/       app.py routes_*.py images.py
 web/         React + TypeScript UI (Vite)
 eval/        dataset builders, calibration, evaluation, library inspector
-tests/       327 tests, no GPU required
+tests/       359 tests, no GPU required
 ```
 
 **The indexing pipeline** is a feeder thread → N CPU worker threads (read, hash, decode, EXIF,
@@ -606,7 +606,7 @@ the future, everything collapsing into one event, fuzzy duplicate thresholds too
 
 ## 10. Working notes
 
-- Run the suite with `.venv/Scripts/python.exe -m pytest -q`. 327 tests, ~3 min, no GPU needed —
+- Run the suite with `.venv/Scripts/python.exe -m pytest -q`. 359 tests, ~3 min, no GPU needed —
   the neural nets are replaced by deterministic fakes.
 - Test fixtures seed randomness from `zlib.crc32` of the **file name**, not `hash()` (salted per
   process) and not the full path (contains pytest's per-run tmp counter). Both made failures

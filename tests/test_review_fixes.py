@@ -313,3 +313,28 @@ def test_guessing_passwords_locks_logins_for_a_while(ctx, library, app):
         assert attacker.post("/api/auth/login", json={"username": "Priya", "password": f"guess{i}"}).status_code == 401
     assert attacker.post("/api/auth/login", json={"username": "Priya", "password": "priya-pass"}).status_code == 429
     assert owner.get("/api/stats").status_code == 200                  # signed-in people are unaffected
+
+
+# 13 --------------------------------------------------------------- the API schema
+
+def test_the_openapi_schema_has_no_duplicate_operation_ids(ctx, app):
+    """FastAPI derives an operation id from one arbitrary member of a route's method
+    set, so a single route answering twelve WebDAV verbs produced twelve identical
+    ids. That filled /api/docs with two dozen bogus entries and would make any
+    generated client collapse them onto one function."""
+    import collections
+    import warnings
+
+    with warnings.catch_warnings(record=True) as caught:
+        warnings.simplefilter("always")
+        schema = app.openapi()
+    assert not [w for w in caught if "Duplicate Operation ID" in str(w.message)]
+
+    seen = collections.Counter()
+    for item in schema["paths"].values():
+        for op in item.values():
+            if isinstance(op, dict) and "operationId" in op:
+                seen[op["operationId"]] += 1
+    assert [k for k, v in seen.items() if v > 1] == []
+    # WebDAV is a protocol endpoint, not part of the documented REST API.
+    assert [p for p in schema["paths"] if p.startswith("/dav")] == []

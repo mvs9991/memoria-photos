@@ -185,8 +185,12 @@ def _finalize(conn, who: str, path: str, tmp: Path, size: int) -> tuple[int, str
     return (204 if existed else 201), saved.status
 
 
-@router.api_route("/dav", methods=METHODS)
-@router.api_route("/dav/{path:path}", methods=METHODS)
+# Kept out of the OpenAPI schema. WebDAV is a protocol endpoint, not part of the REST
+# API, and FastAPI builds an operation id from one arbitrary member of a route's method
+# set — so all twelve methods here collided on a single id, filling /api/docs with 24
+# bogus "dav" entries and breaking any generated client.
+@router.api_route("/dav", methods=METHODS, include_in_schema=False)
+@router.api_route("/dav/{path:path}", methods=METHODS, include_in_schema=False)
 async def dav(request: Request, path: str = ""):
     method = request.method.upper()
     if method == "OPTIONS":

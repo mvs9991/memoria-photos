@@ -594,7 +594,7 @@ photointel/
   api/        app.py routes_*.py images.py
 web/          React + TypeScript UI
 eval/         dataset builders, calibration, end-to-end evaluation
-tests/        327 tests, no GPU required
+tests/        359 tests, no GPU required
 ```
 
 The layering is deliberate: vision → features → database → relationship engines → search → UI.
@@ -607,10 +607,15 @@ face recogniser.
 python -m pytest tests/ -q
 ```
 
-They stub the neural nets, so all 327 tests run on CPU in about three minutes and still cover
+They stub the neural nets, so all 359 tests run on CPU in about three minutes and still cover
 scanning, incremental re-indexing, moves, decoding, metadata, clustering, corrections, events,
 duplicates, search parsing and the HTTP API. The fixtures seed their randomness from stable
 hashes, so a failure reproduces on the next run instead of disappearing.
+
+`test_hostile_inputs.py` is the robustness half: corrupt and truncated files, a ZIP renamed to
+`.jpg`, a decompression bomb, impossible EXIF dates, out-of-range GPS, filenames in five scripts,
+and 12,000×1 panoramas. Each one plants four known-good photos alongside the junk and asserts they
+all still index — one bad byte in a 250,000-photo library must not cost the user the rest.
 
 ## Licence
 

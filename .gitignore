@@ -34,3 +34,4 @@ web/qa.mjs
 web/perf.mjs
 web/jank.mjs
 web/diag*.mjs
+web/jk*.mjs
