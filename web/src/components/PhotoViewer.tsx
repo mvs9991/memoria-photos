@@ -321,7 +321,7 @@ export function PhotoViewer({ ids, index, onIndex, onClose }: Props) {
             ) : (
               <img key={`${id}-${photo?.rotation ?? 0}`}
                 src={showHi ? hiSrc : loSrc} alt={photo?.filename ?? ""}
-                className={`viewer-img${showHi ? "" : " is-lo"}`} draggable={false}
+                className={`viewer-img${showHi ? "" : " is-lo"}`} draggable={false} fetchPriority="high"
                 // the thumbnail is small: stretch it to where the full image will sit, so nothing jumps
                 style={!showHi && aspect ? { width: `min(100%, calc((100vh - 92px) * ${aspect.toFixed(4)}))`, height: "auto" } : undefined} />
             )}
