@@ -16,6 +16,15 @@ import { CorrectionDialog } from "./CorrectionDialog";
 import { StarRating } from "./StarRating";
 import { useViewer } from "./ViewerContext";
 
+/** Image addresses this page has fully received (they are named by content, so they never go stale). */
+const loadedImages = new Set<string>();
+function preload(src: string, done?: () => void) {
+  if (loadedImages.has(src)) { done?.(); return; }
+  const img = new Image();
+  img.onload = () => { loadedImages.add(src); done?.(); };
+  img.src = src;
+}
+
 interface Props {
   ids: number[];
   index: number;
@@ -96,12 +105,25 @@ export function PhotoViewer({ ids, index, onIndex, onClose }: Props) {
   // Preload neighbours so paging feels instant.
   useEffect(() => {
     [index - 1, index + 1, index + 2].forEach((i) => {
-      if (i >= 0 && i < ids.length) {
-        const img = new Image();
-        img.src = thumbUrl(ids[i], "l");
-      }
+      if (i >= 0 && i < ids.length) preload(thumbUrl(ids[i], "l"));
     });
   }, [index, ids]);
+
+  // The large image is made on demand the first time a photo is opened (the server decodes the original:
+  // 0.3-6 s on a real library, where 0.3% of photos had one cached). Until it arrives the 512 px thumbnail,
+  // which every photo has, is shown at the same size, so the viewer opens at once and then sharpens.
+  const hiSrc = zoom > 1.2 ? originalUrl(id, photo?.rotation) : thumbUrl(id, "l", photo?.rotation);
+  const loSrc = zoom > 1.2 ? thumbUrl(id, "l", photo?.rotation) : thumbUrl(id, "m", photo?.rotation);
+  const [, setArrived] = useState(0);
+  useEffect(() => {
+    if (photo?.media_type === "video" || loadedImages.has(hiSrc)) return;
+    let alive = true;
+    preload(hiSrc, () => { if (alive) setArrived((n) => n + 1); });
+    return () => { alive = false; };
+  }, [hiSrc, photo?.media_type]);
+  const showHi = loadedImages.has(hiSrc);
+  const turned = photo?.rotation === 90 || photo?.rotation === 270;
+  const aspect = photo?.width && photo?.height ? (turned ? photo.height / photo.width : photo.width / photo.height) : 0;
 
   // The new value is decided at the moment of the press, from the freshest value we know, and shown at
   // once. It used to be computed from the *rendered* photo (`!photo.favorite`), which only changes after
@@ -298,8 +320,10 @@ export function PhotoViewer({ ids, index, onIndex, onClose }: Props) {
                 className="viewer-img" onClick={(e) => e.stopPropagation()} />
             ) : (
               <img key={`${id}-${photo?.rotation ?? 0}`}
-                src={zoom > 1.2 ? originalUrl(id, photo?.rotation) : thumbUrl(id, "l", photo?.rotation)} alt={photo?.filename ?? ""}
-                className="viewer-img" draggable={false} />
+                src={showHi ? hiSrc : loSrc} alt={photo?.filename ?? ""}
+                className={`viewer-img${showHi ? "" : " is-lo"}`} draggable={false}
+                // the thumbnail is small: stretch it to where the full image will sit, so nothing jumps
+                style={!showHi && aspect ? { width: `min(100%, calc((100vh - 92px) * ${aspect.toFixed(4)}))`, height: "auto" } : undefined} />
             )}
             {playingLive && (
               <video key={`live-${id}`} src={motionUrl(id)} autoPlay muted playsInline

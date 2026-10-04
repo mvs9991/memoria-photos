@@ -717,10 +717,23 @@ def stats():
     # Google's trash, copies hidden from Duplicates). They used to count them, which is why the sidebar
     # said 29,500 photos while every page showed fewer. Disk usage (`bytes`) deliberately still counts
     # them: the files are on the disk whether or not they are shown.
-    total = one("SELECT COUNT(*) FROM photos WHERE status='ok' AND hidden = 0 AND live_component = 0")
-    date_row = conn.execute(
-        "SELECT MIN(taken_ts), MAX(taken_ts) FROM photos "
-        "WHERE status='ok' AND hidden = 0 AND live_component = 0 AND taken_ts IS NOT NULL").fetchone()
+    # One pass over photos for every figure that is a count or range of it. They were separate queries,
+    # each a full scan (~30 ms apiece on a 30k library), and the sidebar asks for these every minute.
+    vis = "status = 'ok' AND hidden = 0 AND live_component = 0"
+    agg = conn.execute(
+        f"""SELECT COALESCE(SUM(CASE WHEN {vis} THEN 1 ELSE 0 END), 0),
+                   MIN(CASE WHEN {vis} AND taken_ts IS NOT NULL THEN taken_ts END),
+                   MAX(CASE WHEN {vis} AND taken_ts IS NOT NULL THEN taken_ts END),
+                   COALESCE(SUM(CASE WHEN {vis} AND media_type = 'video' THEN 1 ELSE 0 END), 0),
+                   COUNT(DISTINCT CASE WHEN {vis} AND place_id IS NOT NULL THEN place_id END),
+                   COALESCE(SUM(CASE WHEN {vis} AND gps_lat IS NOT NULL THEN 1 ELSE 0 END), 0),
+                   COALESCE(SUM(CASE WHEN status = 'ok' THEN size ELSE 0 END), 0),
+                   COALESCE(SUM(CASE WHEN status = 'error' THEN 1 ELSE 0 END), 0),
+                   COALESCE(SUM(CASE WHEN status = 'missing' THEN 1 ELSE 0 END), 0),
+                   COALESCE(SUM(CASE WHEN status = 'trashed' AND live_component = 0 THEN 1 ELSE 0 END), 0),
+                   COALESCE(SUM(CASE WHEN status = 'pending' THEN 1 ELSE 0 END), 0)
+            FROM photos""").fetchone()
+    total, date_from, date_to, videos, places, with_gps, size_ok, errors, missing, trash, pending = agg
     top_places = [dict(r) for r in conn.execute(
         """SELECT pl.id, pl.name, pl.city, pl.admin1, pl.country, COUNT(p.id) n FROM places pl
            JOIN photos p ON p.place_id = pl.id WHERE p.status='ok' AND p.hidden = 0 AND p.live_component = 0
@@ -738,25 +751,22 @@ def stats():
         "trips": one("SELECT COUNT(*) FROM events WHERE kind='trip'"),
         "albums": one(f"SELECT COUNT(*) FROM albums a WHERE a.hidden = 0 AND "
                       f"{albums_mod.visible_sql('a', current_user_id())}"),
-        "videos": one("SELECT COUNT(*) FROM photos WHERE status='ok' AND hidden = 0 AND media_type='video' "
-                      "AND live_component=0"),
-        "places": one("SELECT COUNT(DISTINCT place_id) FROM photos WHERE place_id IS NOT NULL AND status='ok' "
-                      "AND hidden = 0 AND live_component = 0"),
+        "videos": videos,
+        "places": places,
         "duplicate_groups": one("SELECT COUNT(*) FROM dup_groups g WHERE g.kind != 'similar' AND "
                                 "(SELECT COUNT(*) FROM dup_members m JOIN photos p ON p.id = m.photo_id "
                                 " WHERE m.group_id = g.id AND p.status NOT IN ('locked', 'private')) > 1"),
         "duplicate_photos": one("SELECT COUNT(DISTINCT m.photo_id) FROM dup_members m JOIN dup_groups g "
                                 "ON g.id=m.group_id JOIN photos p ON p.id = m.photo_id "
                                 "WHERE g.kind != 'similar' AND p.status NOT IN ('locked', 'private')"),
-        "with_gps": one("SELECT COUNT(*) FROM photos WHERE gps_lat IS NOT NULL AND status='ok' AND hidden = 0 "
-                        "AND live_component = 0"),
+        "with_gps": with_gps,
         "favorites": favorites.count(conn, current_user_id()),
-        "errors": one("SELECT COUNT(*) FROM photos WHERE status='error'"),
-        "missing": one("SELECT COUNT(*) FROM photos WHERE status='missing'"),
-        "trash": one("SELECT COUNT(*) FROM photos WHERE status='trashed' AND live_component=0"),
-        "pending": one("SELECT COUNT(*) FROM photos WHERE status='pending'"),
-        "bytes": one("SELECT COALESCE(SUM(size),0) FROM photos WHERE status='ok'"),
-        "date_range": {"from": date_row[0], "to": date_row[1]},
+        "errors": errors,
+        "missing": missing,
+        "trash": trash,
+        "pending": pending,
+        "bytes": size_ok,
+        "date_range": {"from": date_from, "to": date_to},
         "top_places": top_places,
         "roots": [dict(r) for r in conn.execute("SELECT id, path, last_scan_at FROM roots")],
     }
