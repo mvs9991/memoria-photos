@@ -26,7 +26,7 @@ tried and rejected, and what is still unverified. `README.md` documents the prod
 ## Commands
 
 ```bash
-.venv/Scripts/python.exe -m pytest -q          # 697 tests, ~12 min, no GPU needed (PHOTOINTEL_TEST_RESTIC=<restic.exe> adds the real-restic test)
+.venv/Scripts/python.exe -m pytest -q          # 703 tests, ~12 min, no GPU needed (PHOTOINTEL_TEST_RESTIC=<restic.exe> adds the real-restic test)
 python -m photointel add-root "D:/Photos"
 python -m photointel index                     # resumable; only processes what changed
 python -m photointel index --post-only --full-recluster   # after changing clustering settings
