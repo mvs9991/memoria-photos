@@ -292,14 +292,29 @@ export default function People() {
 // a 23k-photo library, mostly one-off faces from crowds. Rendering them all cost
 // 9,229 DOM nodes and a 7s load, so the tail is revealed on request.
 const PEOPLE_PAGE = 300;
+// ...and even 300 tiles took ~4.8 s to appear on a phone-speed CPU, which shows about six. The first
+// screenful is drawn at once and the rest is added as you scroll towards it, up to PEOPLE_PAGE.
+const FIRST_PAINT = 60;
+const GROW_BY = 120;
 
 function PeopleGrid({ people, selecting, picked, onPick, onSet, onBegin }: {
   people: any[]; selecting: boolean; picked: number[]; onPick: (id: number) => void;
   onSet: (ids: number[]) => void; onBegin: () => void;
 }) {
-  const [shown, setShown] = useState(PEOPLE_PAGE);
+  const [shown, setShown] = useState(FIRST_PAINT);
   const visible = people.length > shown ? people.slice(0, shown) : people;
   const hostRef = useRef<HTMLDivElement>(null);
+  const sentinel = useRef<HTMLDivElement>(null);
+  const growing = shown < Math.min(PEOPLE_PAGE, people.length);
+  useEffect(() => {
+    const el = sentinel.current;
+    if (!growing || !el) return;
+    const io = new IntersectionObserver((entries) => {
+      if (entries.some((e) => e.isIntersecting)) setShown((n) => Math.min(Math.max(n, FIRST_PAINT) + GROW_BY, PEOPLE_PAGE));
+    }, { root: hostRef.current?.closest("[data-scroll-root]") ?? null, rootMargin: "1200px 0px" });
+    io.observe(el);
+    return () => io.disconnect();
+  }, [growing, shown]);
   const drag = useDragSelect({
     ids: visible.map((p) => p.id),
     selection: new Set(picked),
@@ -341,7 +356,8 @@ function PeopleGrid({ people, selecting, picked, onPick, onSet, onBegin }: {
         );
       })}
     </div>
-    {people.length > shown && (
+    {growing && <div ref={sentinel} className="people-grow" aria-hidden />}
+    {!growing && people.length > shown && (
       <button className="btn subtle people-more" onClick={() => setShown((n) => n + PEOPLE_PAGE * 2)}>
         Show more — {(people.length - shown).toLocaleString()} more people
       </button>
