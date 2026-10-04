@@ -3,6 +3,7 @@ from __future__ import annotations
 
 import json
 import logging
+import threading
 from datetime import datetime, timedelta
 
 from fastapi import APIRouter, Body, HTTPException, Query, Response
@@ -329,10 +330,18 @@ def photo_detail(photo_id: int):
 
 # ----------------------------------------------------------------------------- video & motion
 
+_transcoding: dict[str, threading.Lock] = {}
+_transcoding_guard = threading.Lock()
+
+
 @router.get("/photos/{photo_id}/video")
-def photo_video(photo_id: int):
+def photo_video(photo_id: int, direct: bool = False):
     """Play a video. Browser-playable files are streamed as-is (with Range support);
-    anything else is transcoded once to an H.264 preview in the cache."""
+    anything else is transcoded once to an H.264 preview in the cache.
+
+    `direct=1` streams an HEVC original as it is: iPhones and most recent Android phones play HEVC, and the
+    transcode on this machine runs far slower than real time (76 s for an 8 s 4K clip). The viewer asks for
+    it only when the browser says it can play HEVC, and falls back to the transcode if playback fails."""
     from ..video import VideoError, playable_in_browser, transcode_to_mp4
     from .images import abs_path
 
@@ -346,21 +355,29 @@ def photo_video(photo_id: int):
     path = abs_path(row)
     if not path.exists():
         raise HTTPException(410, "original file is missing")
-    if playable_in_browser(row["video_codec"], row["ext"]):
+    hevc_direct = direct and (row["video_codec"] or "").lower() == "hevc" and \
+        (row["ext"] or "").lower() in (".mp4", ".mov", ".m4v")
+    if playable_in_browser(row["video_codec"], row["ext"]) or hevc_direct:
         return FileResponse(path, media_type="video/webm" if row["ext"] == ".webm" else "video/mp4",
                             headers={"Cache-Control": "private, max-age=3600"})
     cached = state.ctx.paths.data / "cache" / "videos" / (row["sha256"] or str(photo_id))[:2] / \
         f"{row['sha256'] or photo_id}.mp4"
     if not cached.exists():
-        try:
-            transcode_to_mp4(path, cached)
-        except VideoError as exc:
-            raise HTTPException(415, str(exc))
+        # One transcode per video: a player sends several range requests at once, and each used to start its
+        # own transcode of the same file into the same temporary name.
+        with _transcoding_guard:
+            lock = _transcoding.setdefault(str(cached), threading.Lock())
+        with lock:
+            if not cached.exists():
+                try:
+                    transcode_to_mp4(path, cached)
+                except VideoError as exc:
+                    raise HTTPException(415, str(exc))
     return FileResponse(cached, media_type="video/mp4", headers={"Cache-Control": "private, max-age=86400"})
 
 
 @router.get("/photos/{photo_id}/motion")
-def photo_motion(photo_id: int):
+def photo_motion(photo_id: int, direct: bool = False):
     """The moving part of a Live photo (its paired video) or a motion photo (embedded MP4)."""
     from ..video import motion_bytes
     from .images import abs_path
@@ -373,7 +390,7 @@ def photo_motion(photo_id: int):
         raise HTTPException(404, "photo not found")
     guard_locked(row)
     if row["live_video_id"]:
-        return photo_video(int(row["live_video_id"]))
+        return photo_video(int(row["live_video_id"]), direct=direct)
     if (row["motion_offset"] or 0) > 0:
         path = abs_path(row)
         if not path.exists():

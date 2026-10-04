@@ -244,3 +244,11 @@
   .viewer-nav { opacity: 0.75; }
   .viewer-zoom { opacity: 1; }
 }
+
+.viewer-preparing {
+  position: absolute; left: 50%; bottom: 18px; transform: translateX(-50%);
+  max-width: calc(100% - 32px);
+  padding: 8px 14px; border-radius: 999px;
+  background: rgba(10, 10, 12, 0.72); color: #fff; font-size: 12.5px; text-align: center;
+  pointer-events: none;
+}

@@ -8,7 +8,7 @@ import {
 } from "lucide-react";
 import { TrashDialog, useAllowDelete } from "./TrashDialog";
 import { useRole } from "../lib/hooks";
-import { api, downloadUrl, faceUrl, motionUrl, originalUrl, thumbUrl, videoUrl } from "../lib/api";
+import { BROWSER_VIDEO_CODECS, api, canPlayHevc, downloadUrl, faceUrl, motionUrl, originalUrl, thumbUrl, videoUrl } from "../lib/api";
 import { clock, exposureLabel, formatBytes, formatDateTime, megapixels } from "../lib/format";
 import { AlbumPicker } from "./AlbumPicker";
 import { StarRating } from "./StarRating";
@@ -125,6 +125,15 @@ export function PhotoViewer({ ids, index, onIndex, onClose }: Props) {
     return () => { alive = false; };
   }, [hiSrc, photo?.media_type]);
   const showHi = loadedImages.has(hiSrc);
+
+  // Video: an HEVC original is streamed as it is when this browser can play it (else, or if that fails,
+  // the server's transcode); a transcode on first play can take minutes, so say so instead of just spinning.
+  const codec = (photo?.video_codec ?? "").toLowerCase();
+  const [noDirect, setNoDirect] = useState<number | null>(null);
+  const [videoReady, setVideoReady] = useState<number | null>(null);
+  const [liveNoDirect, setLiveNoDirect] = useState<number | null>(null);
+  const direct = codec === "hevc" && canPlayHevc() && noDirect !== id;
+  const preparing = photo?.media_type === "video" && !direct && !!codec && !BROWSER_VIDEO_CODECS.has(codec) && videoReady !== id;
   const turned = photo?.rotation === 90 || photo?.rotation === 270;
   const aspect = photo?.width && photo?.height ? (turned ? photo.height / photo.width : photo.width / photo.height) : 0;
 
@@ -319,8 +328,22 @@ export function PhotoViewer({ ids, index, onIndex, onClose }: Props) {
             style={{ transform: `translate(${offset.x + swipe.x}px, ${offset.y + swipe.y}px) scale(${zoom * (1 - Math.min(swipe.y, 300) / 1500)})`,
               opacity: swipe.y ? Math.max(0.4, 1 - swipe.y / 400) : undefined }}>
             {photo?.media_type === "video" ? (
-              <video key={id} src={videoUrl(id)} poster={thumbUrl(id, "l")} controls autoPlay playsInline
-                className="viewer-img" onClick={(e) => e.stopPropagation()} />
+              <>
+                <video key={`${id}-${direct ? "direct" : "transcoded"}`} src={videoUrl(id, direct)}
+                  poster={thumbUrl(id, "m")} controls autoPlay playsInline
+                  className="viewer-img" onClick={(e) => e.stopPropagation()}
+                  onLoadedData={(e) => {
+                    // A browser can "load" an HEVC stream it cannot decode: sound, no picture, no error.
+                    if (direct && e.currentTarget.videoWidth === 0) setNoDirect(id);
+                    else setVideoReady(id);
+                  }}
+                  onError={() => { if (direct) setNoDirect(id); }} />
+                {preparing && (
+                  <span className="viewer-preparing" role="status">
+                    Preparing this video for playback — the first time can take a few minutes
+                  </span>
+                )}
+              </>
             ) : (
               <img key={`${id}-${photo?.rotation ?? 0}`}
                 src={showHi ? hiSrc : loSrc} alt={photo?.filename ?? ""}
@@ -329,9 +352,11 @@ export function PhotoViewer({ ids, index, onIndex, onClose }: Props) {
                 style={!showHi && aspect ? { width: `min(100%, calc((100vh - 92px) * ${aspect.toFixed(4)}))`, height: "auto" } : undefined} />
             )}
             {playingLive && (
-              <video key={`live-${id}`} src={motionUrl(id)} autoPlay muted playsInline
+              <video key={`live-${id}-${liveNoDirect === id ? "t" : "d"}`}
+                src={motionUrl(id, canPlayHevc() && liveNoDirect !== id)} autoPlay muted playsInline
                 className="viewer-img viewer-motion" onEnded={() => setPlayingLive(false)}
-                onError={() => setPlayingLive(false)} />
+                // an HEVC motion the browser turned out not to play: try the server's transcode once
+                onError={() => { if (canPlayHevc() && liveNoDirect !== id) setLiveNoDirect(id); else setPlayingLive(false); }} />
             )}
             {hoverFaces && photo?.faces?.map((f) => (
               <span key={f.id} className="viewer-face"

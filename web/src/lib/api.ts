@@ -632,8 +632,28 @@ export const thumbUrl = (id: number, size: "sm" | "m" | "l" = "m", rot = 0) =>
   `${BASE}/thumb/${id}?s=${size}${rot ? `&r=${rot}` : ""}`;
 export const originalUrl = (id: number, rot = 0) => `${BASE}/photos/${id}/original${rot ? `?r=${rot}` : ""}`;
 export const downloadUrl = (id: number) => `${BASE}/photos/${id}/download`;
-export const videoUrl = (id: number) => `${BASE}/photos/${id}/video`;
-export const motionUrl = (id: number) => `${BASE}/photos/${id}/motion`;
+export const videoUrl = (id: number, direct = false) => `${BASE}/photos/${id}/video${direct ? "?direct=1" : ""}`;
+export const motionUrl = (id: number, direct = false) => `${BASE}/photos/${id}/motion${direct ? "?direct=1" : ""}`;
+
+/** Codecs every browser plays in an MP4; anything else the server has to transcode on first play. */
+export const BROWSER_VIDEO_CODECS = new Set(["h264", "vp8", "vp9", "av1"]);
+
+/** Can this browser play HEVC itself? iPhones and most recent Android phones can; then the server streams
+ * the original instead of transcoding it, which on the library's computer runs far slower than real time. */
+export const canPlayHevc = (() => {
+  let known: boolean | undefined;
+  return () => {
+    if (known === undefined) {
+      try {
+        const v = document.createElement("video");
+        known = ["hvc1.1.6.L93.B0", "hev1.1.6.L93.B0"].some((c) => v.canPlayType(`video/mp4; codecs="${c}"`) !== "");
+      } catch {
+        known = false;
+      }
+    }
+    return known;
+  };
+})();
 export const sharedThumbUrl = (token: string, id: number, size: "sm" | "m" | "l" = "m") =>
   `${BASE}/share/${token}/thumb/${id}?s=${size}`;
 export const sharedVideoUrl = (token: string, id: number) => `${BASE}/share/${token}/video/${id}`;
