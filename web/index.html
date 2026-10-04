@@ -17,6 +17,19 @@
     <link rel="icon" href="data:image/svg+xml,<svg xmlns='http://www.w3.org/2000/svg' viewBox='0 0 100 100'><rect width='100' height='100' rx='24' fill='%230c0c0f'/><circle cx='50' cy='44' r='17' fill='none' stroke='%23e2b062' stroke-width='7'/><rect x='14' y='22' width='72' height='56' rx='12' fill='none' stroke='%23e2b062' stroke-width='7'/></svg>" />
   </head>
   <body>
+    <script>
+      // The first requests start here, while the app's code is still downloading and starting up (about
+      // two seconds on a phone). The app takes these answers instead of asking again: see takeEarly in
+      // src/lib/api.ts, which must ask for exactly these addresses.
+      (function () {
+        var early = {};
+        window.__memoriaEarly = early;
+        function go(p) { early[p] = fetch("/api" + p, { credentials: "same-origin" }); early[p].catch(function () {}); }
+        go("/auth/status");
+        var path = location.pathname.replace(/\/+$/, "");
+        if (path === "/photos" && !location.search) go("/photos/index?order=date_desc&collapse_stacks=true&archived=exclude");
+      })();
+    </script>
     <div id="root"></div>
     <script type="module" src="/src/main.tsx"></script>
   </body>

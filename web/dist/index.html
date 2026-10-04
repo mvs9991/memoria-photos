@@ -15,14 +15,27 @@
     <meta name="apple-mobile-web-app-title" content="Memoria" />
     <link rel="apple-touch-icon" href="/apple-touch-icon.png" />
     <link rel="icon" href="data:image/svg+xml,<svg xmlns='http://www.w3.org/2000/svg' viewBox='0 0 100 100'><rect width='100' height='100' rx='24' fill='%230c0c0f'/><circle cx='50' cy='44' r='17' fill='none' stroke='%23e2b062' stroke-width='7'/><rect x='14' y='22' width='72' height='56' rx='12' fill='none' stroke='%23e2b062' stroke-width='7'/></svg>" />
-    <script type="module" crossorigin src="/assets/index-D1E9rtTk.js"></script>
-    <link rel="modulepreload" crossorigin href="/assets/hooks-ZikKqxYD.js">
-    <link rel="modulepreload" crossorigin href="/assets/Portal-BvHt742t.js">
-    <link rel="modulepreload" crossorigin href="/assets/States-rL3X3a_z.js">
-    <link rel="modulepreload" crossorigin href="/assets/format-BE33wEPr.js">
+    <script type="module" crossorigin src="/assets/index-DLWTNpn9.js"></script>
+    <link rel="modulepreload" crossorigin href="/assets/hooks-Cre7I9LO.js">
+    <link rel="modulepreload" crossorigin href="/assets/Portal-Cl45Y8_K.js">
+    <link rel="modulepreload" crossorigin href="/assets/States-DpIJsCDS.js">
+    <link rel="modulepreload" crossorigin href="/assets/format-Cvf3Mfgq.js">
     <link rel="stylesheet" crossorigin href="/assets/index-D9_S6kU9.css">
   </head>
   <body>
+    <script>
+      // The first requests start here, while the app's code is still downloading and starting up (about
+      // two seconds on a phone). The app takes these answers instead of asking again: see takeEarly in
+      // src/lib/api.ts, which must ask for exactly these addresses.
+      (function () {
+        var early = {};
+        window.__memoriaEarly = early;
+        function go(p) { early[p] = fetch("/api" + p, { credentials: "same-origin" }); early[p].catch(function () {}); }
+        go("/auth/status");
+        var path = location.pathname.replace(/\/+$/, "");
+        if (path === "/photos" && !location.search) go("/photos/index?order=date_desc&collapse_stacks=true&archived=exclude");
+      })();
+    </script>
     <div id="root"></div>
   </body>
 </html>

@@ -327,11 +327,30 @@ export class ApiError extends Error {
   }
 }
 
+/** A plain GET that index.html already started for this exact address, taken once. */
+function takeEarly(path: string): Promise<Response> | undefined {
+  const early = (window as { __memoriaEarly?: Record<string, Promise<Response>> }).__memoriaEarly;
+  const p = early?.[path];
+  if (p) delete early![path];
+  return p;
+}
+
 async function request<T>(path: string, init?: RequestInit): Promise<T> {
-  const res = await fetch(`${BASE}${path}`, {
+  const send = () => fetch(`${BASE}${path}`, {
     headers: init?.body ? { "Content-Type": "application/json" } : undefined,
     ...init,
   });
+  const early = init ? undefined : takeEarly(path);
+  let res: Response;
+  if (early) {
+    try {
+      res = await early;
+    } catch {
+      res = await send();           // the early attempt failed to connect: ask normally
+    }
+  } else {
+    res = await send();
+  }
   noteResponse(res);
   if (!res.ok) {
     let detail = res.statusText;
