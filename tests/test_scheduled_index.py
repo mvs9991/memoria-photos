@@ -161,12 +161,15 @@ def test_the_scheduler_asks_for_a_scheduled_run(ctx, monkeypatch):
     t = threading.Thread(target=scheduler.run, args=(ctx, stop), daemon=True)
     t.start()
     deadline = time.time() + 10
-    while not captured and time.time() < deadline:
+    want = {"kind": "index", "scheduled": True}
+    # Wait for *the scheduled* request: an upload-folder index can come first on a slow machine (it failed CI
+    # once on Windows by asserting on captured[0]), and that order is not what this test is about.
+    while want not in captured and time.time() < deadline:
         time.sleep(0.05)
     stop.set()
     t.join(timeout=5)
     assert captured, "the scheduler never asked for an index"
-    assert captured[0] == {"kind": "index", "scheduled": True}
+    assert want in captured, f"no scheduled run among {captured}"
 
 
 def test_the_command_line_flag_reaches_the_runner(ctx, library, capsys):
