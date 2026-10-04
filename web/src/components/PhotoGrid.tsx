@@ -425,6 +425,15 @@ function Scrubber({ sections, totalHeight, scrollTop, viewport, onSeek }: {
   const ref = useRef<HTMLDivElement>(null);
   const [dragging, setDragging] = useState(false);
   const [hoverY, setHoverY] = useState<number | null>(null);
+  const [height, setHeight] = useState(0);
+  useEffect(() => {
+    const el = ref.current;
+    if (!el) return;
+    const ro = new ResizeObserver(() => setHeight(el.clientHeight));
+    ro.observe(el);
+    setHeight(el.clientHeight);
+    return () => ro.disconnect();
+  }, []);
 
   const marks = useMemo(() => {
     const seen = new Set<string>();
@@ -436,8 +445,16 @@ function Scrubber({ sections, totalHeight, scrollTop, viewport, onSeek }: {
       seen.add(year);
       out.push({ label: year, ratio: s.top / Math.max(totalHeight, 1) });
     }
-    return out.slice(0, 24);
-  }, [sections, totalHeight]);
+    // Years with few photos sit a few pixels apart; keep a label only if it clears the previous one.
+    const MIN_GAP = 16;
+    const kept: { label: string; ratio: number }[] = [];
+    for (const m of out) {
+      const last = kept[kept.length - 1];
+      if (height > 0 && last && (m.ratio - last.ratio) * height < MIN_GAP) continue;
+      kept.push(m);
+    }
+    return kept.slice(0, 24);
+  }, [sections, totalHeight, height]);
 
   const handle = (clientY: number) => {
     const el = ref.current;

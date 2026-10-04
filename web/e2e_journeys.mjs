@@ -23,12 +23,14 @@ const ctx = await browser.newContext({ viewport: { width: 1400, height: 1000 }, 
 const page = await ctx.newPage();
 const problems = [];
 page.on("console", (m) => m.type() === "error" && problems.push(`console: ${m.text().slice(0, 140)}`));
+const failures = [];
+page.on("requestfailed", (r) => failures.push(`${r.url().slice(-60)} ${r.failure()?.errorText}`));
 page.on("pageerror", (e) => problems.push(`pageerror: ${String(e).slice(0, 140)}`));
 page.on("response", (r) => { if (r.url().includes("/api/") && r.status() >= 400 && r.status() !== 404) problems.push(`HTTP ${r.status()} ${r.url().slice(0, 100)}`); });
 
 let pass = 0, fail = 0;
 async function step(name, fn) {
-  if (process.env.ONLY && !name.toLowerCase().includes(process.env.ONLY.toLowerCase())) return;
+  if (process.env.ONLY && !process.env.ONLY.toLowerCase().split("|").some((k) => name.toLowerCase().includes(k))) return;
   const before = problems.length;
   try {
     const detail = await fn();
@@ -38,6 +40,11 @@ async function step(name, fn) {
   } catch (e) {
     fail++; console.log(`FAIL  ${name}  — ${String(e.message || e).split("\n")[0].slice(0, 230)}`);
     try { await page.screenshot({ path: `${SHOTS}/${name.replace(/\W+/g, "_").slice(0, 50)}.png` }); } catch {}
+    try {
+      const st = await page.evaluate(() => ({ url: location.pathname + location.search, spinner: document.querySelector(".spinner")?.parentElement?.innerText?.slice(0, 40) ?? null,
+        tiles: document.querySelectorAll(".tile-wrap").length }));
+      console.log("      page state:", JSON.stringify(st), " recent failures:", failures.slice(-3));
+    } catch {}
     await page.keyboard.press("Escape").catch(() => {});
   }
 }
@@ -239,9 +246,11 @@ await step("upload a photo from the Upload page", async () => {
     "from PIL import Image; import numpy as np; a=np.random.default_rng(7).integers(0,255,(480,640,3),dtype='uint8'); Image.fromarray(a).save(r'D:/pi_cache/e2e/upload_me.jpg')"]);
   await goto("/upload", ".page");
   await page.setInputFiles('input[type="file"]', tmp);
-  await page.waitForTimeout(4000);
-  const s = await stats();
-  ok(s.photos === before + 1 || s.pending > 0, `photos ${before} -> ${s.photos} (pending ${s.pending})`);
+  // The upload starts an index job that loads the models and saturates the CPU; wait for it to finish so
+  // the next journey does not run into it (a slow search there is the job, not the search).
+  let s = await stats();
+  for (let i = 0; i < 90 && !(s.photos === before + 1 && s.pending === 0); i++) { await page.waitForTimeout(1000); s = await stats(); }
+  ok(s.photos === before + 1, `photos ${before} -> ${s.photos} (pending ${s.pending}) after waiting for the index job`);
   return `photos ${before} -> ${s.photos}, pending ${s.pending}`;
 });
 
@@ -251,9 +260,13 @@ await step("search from the top bar finds Goa photos", async () => {
   const box = page.getByPlaceholder(/Search/i).first();
   await box.fill("Trips Goa");
   await box.press("Enter");
-  await page.waitForSelector(".tile-wrap", { timeout: 15000 });
-  ok((await tiles().count()) >= 1, "no results");
-  return `${await tiles().count()} results`;
+  // Wait for the RESULTS page, not just any tiles: the Photos page we left still has tiles on screen
+  // for a moment, so waiting on ".tile-wrap" alone counted the wrong page (or none, once it unmounted).
+  await page.waitForURL(/\/search\?q=/, { timeout: 15000 });
+  await page.waitForSelector(".search-interpretation", { timeout: 30000 });
+  const n = await tiles().count();
+  ok(n === 6, `expected the 6 Goa photos, the page shows ${n}`);
+  return `${n} results`;
 });
 await step("duplicates page: mark a group reviewed", async () => {
   await goto("/duplicates", ".page");

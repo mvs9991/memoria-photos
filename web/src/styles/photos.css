@@ -163,6 +163,8 @@
   transition: opacity var(--t) var(--ease);
 }
 .grid-host:hover .scrubber, .scrubber.is-dragging { opacity: 1; }
+/* No hover on touch: a tap leaves the emulated hover stuck, so the labels sit over the photos. */
+@media (hover: none) { .scrubber { display: none; } }
 .scrubber-mark {
   position: absolute;
   right: 12px;

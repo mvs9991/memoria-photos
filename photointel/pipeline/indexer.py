@@ -486,7 +486,12 @@ class Indexer:
         last_commit = time.time()
         last_cancel_check = 0.0
         t_begin = time.time()
-        conn.execute("BEGIN")
+        # A batch's transaction is opened (BEGIN IMMEDIATE) only when its first result arrives. Opening a
+        # plain BEGIN up front pinned a read snapshot while analysis was still loading models; any commit
+        # by another connection in that window made the first write fail at once with "database is
+        # locked" (SQLITE_BUSY_SNAPSHOT), losing the photo. IMMEDIATE waits on busy_timeout instead, and
+        # an idle writer holds no lock.
+        in_txn = False
         try:
             while True:
                 try:
@@ -496,6 +501,9 @@ class Indexer:
                 if item is _SENTINEL:
                     break
                 if item is not None:
+                    if not in_txn:
+                        conn.execute("BEGIN IMMEDIATE")
+                        in_txn = True
                     try:
                         self._write_result(conn, item)
                     except Exception as exc:
@@ -512,7 +520,7 @@ class Indexer:
                 now = time.time()
                 if pending and (pending >= 100 or now - last_commit > 2.0):
                     conn.commit()
-                    conn.execute("BEGIN")
+                    in_txn = False
                     pending = 0
                     last_commit = now
                     rate = done / max(1e-6, now - t_begin)
