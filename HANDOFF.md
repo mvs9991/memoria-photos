@@ -698,6 +698,30 @@ under 3 s on the real library (slowest: `/api/health`, 2.8 s).
    **Method note.** Time a stage on its own and then inside the real job. A stage that is fast
    alone and slow in the job is waiting on something, not computing.
 
+### End-to-end journeys in a real browser (and what they found)
+
+`web/e2e_journeys.mjs` drives 29 user journeys (every screen opens cleanly; viewer next/previous/details;
+favourite; select, create an album, remove from it; archive; hide from the viewer and bring back from
+Collections; delete with the typed confirmation, Esc to cancel it, the Trash page, Select all, Restore;
+upload; search; duplicates review; folders; fix a date) against a **disposable** 24-photo library built by
+`eval/make_e2e_library.py`. It must never be pointed at a real library: it deletes and edits. Index the
+library once, snapshot `lib` and `data` into `D:/pi_cache/e2e/pristine`, and run `eval/e2e_reset.ps1`
+before every run (it stops the server *and* any index job the Upload test spawned, whose command line names
+the data folder, not the port; stopping only the listener left a job holding the log file and corrupted
+the first snapshot). Afterwards `eval/e2e_check_originals.py` compares the library folder with the
+snapshot: after delete, restore, archive, hide, upload and date fix, all 24 originals were present and
+byte-identical and nothing new appeared in the folder (uploads go under `<data>/uploads`).
+
+What it found: the **Trash, Locked and Private pages still used the old selection code**, so they had none
+of hold-and-drag, per-day Select all or Esc to finish (the Trash page offered "Select all" only *after*
+something was picked). They now use `useGridSelect`. It also showed the Esc guards missed
+`role="alertdialog"` (the delete confirmation uses it); that was latent, not live, because the dialog
+handles Esc in the capture phase, but both guards now include it.
+Run it on a quiet machine: with several browsers and servers competing for RAM (2.6 GB free) it produced
+flaky failures that vanished when the load went away (a favourite toggled twice not toggling back,
+`ERR_INSUFFICIENT_RESOURCES`, an upload not yet indexed after 4 s), and the test server itself died while
+loading the search model.
+
 ### Selecting photos and people (press-and-hold, drag)
 
 `web/src/lib/dragSelect.ts` is shared by the photo grid and the People grid, and `useGridSelect` in

@@ -4,11 +4,11 @@
  */
 import { useMemo, useState } from "react";
 import { useMutation, useQuery, useQueryClient } from "@tanstack/react-query";
-import { CheckSquare, Lock, LockOpen, X } from "lucide-react";
+import { Lock, LockOpen, X } from "lucide-react";
 import { api, ApiError, gridItems } from "../lib/api";
 import { PhotoGrid } from "../components/PhotoGrid";
 import { EmptyState, Spinner } from "../components/States";
-import { useSelectAllShortcut, useSelection } from "../components/SelectionBar";
+import { SelectToggle, useGridSelect } from "../components/SelectionBar";
 import { useViewer } from "../components/ViewerContext";
 import { useTitle } from "../lib/hooks";
 
@@ -72,12 +72,12 @@ function EnterPin({ count }: { count: number }) {
 function Open() {
   const qc = useQueryClient();
   const viewer = useViewer();
-  const selection = useSelection();
-  const [selecting, setSelecting] = useState(false);
   const photos = useQuery({ queryKey: ["locked-photos"], queryFn: api.lockedPhotos });
   const items = useMemo(() => gridItems(photos.data), [photos.data]);
   const allIds = useMemo(() => items.map((i) => i.id), [items]);
-  useSelectAllShortcut(selecting, allIds, selection.setAll);
+  const gs = useGridSelect(allIds);
+  // The shared hook gives this page hold-and-drag, per-day Select all and Esc, like every other page.
+  const selection = { selected: gs.selected, clear: gs.clear };
   const refresh = () => { qc.invalidateQueries(); selection.clear(); };
   const close = useMutation({ mutationFn: api.closeLocked, onSuccess: () => qc.invalidateQueries({ queryKey: ["locked-status"] }) });
   const unlock = useMutation({ mutationFn: (ids: number[]) => api.unlock(ids), onSuccess: refresh });
@@ -90,10 +90,7 @@ function Open() {
           <p className="dim">Open on this device for up to 15 minutes. Nothing here appears anywhere else in Memoria.</p>
         </div>
         <div className="toolbar">
-          <button className={`btn btn-ghost btn-sm${selecting ? " is-on" : ""}`}
-            onClick={() => { setSelecting((v) => !v); selection.clear(); }}>
-            <CheckSquare size={14} /> {selecting ? "Done" : "Select"}
-          </button>
+          <SelectToggle sel={gs} />
           <button className="btn btn-primary btn-sm" onClick={() => close.mutate()}><Lock size={14} /> Lock now</button>
         </div>
       </div>
@@ -109,8 +106,7 @@ function Open() {
       {photos.isLoading ? <Spinner /> : (
         <PhotoGrid items={items} grouping="month" targetHeight={200}
           onOpen={(_, index) => viewer.open(allIds, index)}
-          selectable selectMode={selecting} selection={selection.selected} onToggleSelect={selection.toggle}
-          onSelectRange={selection.addMany}
+          {...gs.gridProps}
           emptyState={<EmptyState icon={<Lock size={26} />} title="Nothing locked yet"
             hint="Select photos anywhere and choose “Lock” to move them here." />} />
       )}

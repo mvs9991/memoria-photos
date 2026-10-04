@@ -5,12 +5,12 @@
  */
 import { useMemo, useState } from "react";
 import { useMutation, useQuery, useQueryClient } from "@tanstack/react-query";
-import { CheckSquare, RotateCcw, Trash2, X } from "lucide-react";
+import { RotateCcw, Trash2, X } from "lucide-react";
 import { api, FLAG } from "../lib/api";
 import { PhotoGrid } from "../components/PhotoGrid";
 import { Portal } from "../components/Portal";
 import { EmptyState, ErrorState, Spinner } from "../components/States";
-import { useSelectAllShortcut, useSelection } from "../components/SelectionBar";
+import { SelectToggle, useGridSelect } from "../components/SelectionBar";
 import { useViewer } from "../components/ViewerContext";
 import { formatBytes } from "../lib/format";
 import { useTitle } from "../lib/hooks";
@@ -19,8 +19,6 @@ export default function Trash() {
   useTitle("Trash");
   const qc = useQueryClient();
   const viewer = useViewer();
-  const selection = useSelection();
-  const [selecting, setSelecting] = useState(false);
   const [erase, setErase] = useState<{ ids: number[] | null } | null>(null);
   const { data, isLoading, isError, error, refetch } = useQuery({ queryKey: ["trash"], queryFn: api.trash });
 
@@ -28,7 +26,9 @@ export default function Trash() {
     id: t.photo_id, ratio: t.ratio, ts: t.trashed_at, flags: t.video ? FLAG.video : 0, dur: t.duration ?? 0,
   })), [data]);
   const allIds = useMemo(() => items.map((i) => i.id), [items]);
-  useSelectAllShortcut(selecting, allIds, selection.setAll);
+  const gs = useGridSelect(allIds);
+  // The shared hook gives this page hold-and-drag, per-day Select all and Esc, like every other page.
+  const selection = { selected: gs.selected, clear: gs.clear };
 
   const restore = useMutation({
     mutationFn: (ids: number[]) => api.restoreFromTrash(ids),
@@ -56,10 +56,7 @@ export default function Trash() {
         </div>
         {data.items.length > 0 && (
           <div className="toolbar">
-            <button className={`btn btn-ghost btn-sm${selecting ? " is-on" : ""}`}
-              onClick={() => { setSelecting((v) => !v); selection.clear(); }}>
-              <CheckSquare size={14} /> {selecting ? "Done" : "Select"}
-            </button>
+            <SelectToggle sel={gs} />
             <button className="btn btn-ghost btn-sm" onClick={() => restore.mutate(allIds)} disabled={restore.isPending}>
               <RotateCcw size={14} /> Restore all
             </button>
@@ -74,7 +71,7 @@ export default function Trash() {
         <div className="review-bar selection-bar" role="toolbar" aria-label="Selected files">
           <span className="tnum"><strong>{sel.length.toLocaleString()}</strong> selected</span>
           {sel.length < allIds.length && (
-            <button className="btn btn-quiet btn-sm" onClick={() => selection.setAll(allIds)}>Select all {allIds.length}</button>
+            <button className="btn btn-quiet btn-sm" onClick={gs.selectAll}>Select all {allIds.length}</button>
           )}
           <button className="btn btn-primary btn-sm" onClick={() => restore.mutate(sel)} disabled={restore.isPending}>
             <RotateCcw size={14} /> Restore
@@ -97,8 +94,7 @@ export default function Trash() {
 
       <PhotoGrid items={items} grouping="none" targetHeight={190} scrubber={false}
         onOpen={(_, index) => viewer.open(allIds, index)}
-        selectable selectMode={selecting} selection={selection.selected} onToggleSelect={selection.toggle}
-        onSelectRange={selection.addMany}
+        {...gs.gridProps}
         emptyState={<EmptyState icon={<Trash2 size={26} />} title="The Trash is empty"
           hint={data.allow_delete ? "Files you delete — from a selection, the viewer or Duplicates — wait here before they are erased."
             : "Deleting is turned off in Settings."} />} />

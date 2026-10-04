@@ -231,7 +231,7 @@ export function useGridSelect(allIds: number[]) {
       if (e.key !== "Escape" || e.defaultPrevented) return;
       const t = e.target as HTMLElement | null;
       if (t && (t.tagName === "INPUT" || t.tagName === "TEXTAREA" || t.isContentEditable)) return;
-      if (document.querySelector('[role="dialog"], .slideshow')) return;
+      if (document.querySelector('[role="dialog"], [role="alertdialog"], .slideshow')) return;
       exit();
     };
     window.addEventListener("keydown", onKey);
