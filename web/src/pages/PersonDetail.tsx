@@ -47,10 +47,13 @@ export default function PersonDetail() {
   });
   const flags = useMutation({
     mutationFn: (body: any) => api.personFlags(personId, body),
-    onSuccess: () => {
-      qc.invalidateQueries({ queryKey: ["person", personId] });
-      qc.invalidateQueries({ queryKey: ["people"] });
-    },
+    // Returned, so the mutation stays pending until the person has refetched: the buttons below are
+    // disabled meanwhile, because they compute the new value from the rendered one (`!p.hidden`) and a
+    // second click before the refetch would send the same value again instead of toggling back.
+    onSuccess: () => Promise.all([
+      qc.invalidateQueries({ queryKey: ["person", personId] }),
+      qc.invalidateQueries({ queryKey: ["people"] }),
+    ]),
   });
   const split = useMutation({
     mutationFn: (faceIds: number[]) => api.splitPerson(personId, faceIds),
@@ -133,13 +136,13 @@ export default function PersonDetail() {
             {exporting && <ExportDialog spec={{ person_ids: [personId] }} onClose={() => setExporting(false)}
               title={`Export the photos of ${p.label}`} />}
             <button className={`btn btn-ghost btn-sm${p.is_me ? " is-on" : ""}`}
-              onClick={() => flags.mutate({ is_me: !p.is_me })} title="Mark as yourself">
+              disabled={flags.isPending} onClick={() => flags.mutate({ is_me: !p.is_me })} title="Mark as yourself">
               <UserCheck size={14} /> {p.is_me ? "This is you" : "This is me"}
             </button>
-            <button className="btn btn-ghost btn-sm" onClick={() => flags.mutate({ hidden: !p.hidden })}>
+            <button className="btn btn-ghost btn-sm" disabled={flags.isPending} onClick={() => flags.mutate({ hidden: !p.hidden })}>
               <EyeOff size={14} /> {p.hidden ? "Unhide" : "Hide"}
             </button>
-            <button className="btn btn-ghost btn-sm" onClick={() => flags.mutate({ ignored: !p.ignored })}
+            <button className="btn btn-ghost btn-sm" disabled={flags.isPending} onClick={() => flags.mutate({ ignored: !p.ignored })}
               title="Exclude from People and search">
               <UserX size={14} /> {p.ignored ? "Un-ignore" : "Ignore"}
             </button>
