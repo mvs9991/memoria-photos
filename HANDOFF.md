@@ -941,3 +941,18 @@ the future, everything collapsing into one event, fuzzy duplicate thresholds too
   vanished mid-walk). The size is now remembered for 60 s and vanished files are skipped
   (`tests/test_health_cache_size.py`). Only Settings reads it.
 - A one-off pytest hang of ~32 min (16 s CPU) was seen once and not reproduced on re-run (631 passed). Cause unknown.
+
+### Touch-screen lessons (2026-10-04, found on a real phone)
+
+Four things the desktop-sized tests never showed, all fixed and checked with real touch events in a phone-sized
+browser (`web/jk_*.mjs` scratch scripts are gitignored; the journeys in `web/e2e_journeys.mjs` run at desktop size):
+
+- **A bar that appears in the page flow moves the page.** The select-mode bar pushed the grid down 70 px under the
+  finger on the first press-and-hold. Bars now live in a zero-height sticky slot (`FloatingBar`, `.bar-slot`).
+- **450 ms is too short a hold**: a slow tap lasts about that long. It is 650 ms (`HOLD_MS`).
+- **Invisible is not untappable.** The select circle (opacity 0) sat over each tile's top-left corner and took
+  taps; it is `pointer-events: none` on touch screens until select mode is on.
+- **Hover effects need `@media (hover: hover)`.** On a phone a tap that changes what hovering would show can count
+  as the hover, so a photo needed two taps (not reproducible in Chromium's emulation; the fix was confirmed by the user).
+- The viewer's top row (nine icons) overflowed a phone with Delete clipped at the end; Delete is first and the row scrolls.
+- The phone layout has a bottom tab bar instead of the left rail (`PhoneNav` in `Sidebar.tsx`).
