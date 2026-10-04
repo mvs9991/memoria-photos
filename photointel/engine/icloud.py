@@ -121,10 +121,10 @@ def import_icloud(ctx, conn: sqlite3.Connection) -> dict:
     def names_in(rid: int, export: str) -> dict[str, list[tuple[int, str]]]:
         key = (rid, export)
         if key not in index_cache:
-            like = f"{export}/%" if export else "%"
+            like = db.like_prefix(export) if export else "%"
             idx: dict[str, list[tuple[int, str]]] = defaultdict(list)
             for r in conn.execute("SELECT id, filename, folder FROM photos WHERE root_id = ? AND "
-                                  "(folder = ? OR folder LIKE ?) AND status NOT IN ('missing', 'deleted')",
+                                  "(folder = ? OR folder LIKE ? ESCAPE '\\') AND status NOT IN ('missing', 'deleted')",
                                   (rid, export, like)):
                 idx[r["filename"].lower()].append((int(r["id"]), r["folder"]))
             index_cache[key] = idx

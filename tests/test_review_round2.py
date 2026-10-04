@@ -344,3 +344,17 @@ def test_a_shared_album_does_not_rerun_its_search_or_write_for_every_thumbnail(c
     after = c.execute("SELECT last_used_at FROM share_links WHERE token = ?", (token,)).fetchone()[0]
     c.close()
     assert after == before, "each thumbnail wrote the link's last-used time"
+
+
+def test_typing_an_underscore_or_percent_in_search_suggests_only_what_contains_it(ctx, client):
+    pids = _make_people(ctx, n_people=2)
+    c = ctx.connect()
+    c.execute("UPDATE persons SET name = 'Ann' WHERE id = ?", (pids[0],))
+    c.execute("UPDATE persons SET name = 'bob_smith' WHERE id = ?", (pids[1],))
+    c.commit()
+    c.close()
+    labels = lambda q: [s["label"] for s in client.get("/api/search/suggestions", params={"q": q}).json()["suggestions"]
+                        if s["type"] == "person"]
+    assert labels("_") == ["bob_smith"]   # was: every named person ('_' is any one letter in LIKE)
+    assert labels("%") == []
+    assert labels("ann") == ["Ann"]

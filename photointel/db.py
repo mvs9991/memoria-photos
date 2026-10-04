@@ -266,4 +266,13 @@ def chunks(ids, size: int = 900):
 def like_prefix(text: str) -> str:
     """A `LIKE ? ESCAPE '\\'` pattern for "starts with text/": '_' and '%' in a folder name are letters, not
     wildcards. Unescaped, the folder IMG_2020 also matched IMGX2020's photos."""
-    return text.replace("\\", "\\\\").replace("%", "\\%").replace("_", "\\_") + "/%"
+    return _like_escape(text) + "/%"
+
+
+def like_contains(text: str) -> str:
+    """A `LIKE ? ESCAPE '\\'` pattern for "contains text": typing '_' or '%' in a search box matched everything."""
+    return "%" + _like_escape(text) + "%"
+
+
+def _like_escape(text: str) -> str:
+    return text.replace("\\", "\\\\").replace("%", "\\%").replace("_", "\\_")
