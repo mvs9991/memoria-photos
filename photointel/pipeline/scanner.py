@@ -3,6 +3,7 @@ from __future__ import annotations
 
 import logging
 import os
+import stat
 import sqlite3
 import time
 from dataclasses import dataclass
@@ -27,6 +28,22 @@ class ScanStats:
     skipped_dirs: int = 0
     errors: int = 0
     seconds: float = 0.0
+
+
+# A Windows junction or directory symlink looks like an ordinary folder to scandir before Python 3.12, so
+# "do not follow symlinks" did not stop the walk going through one. Documents\My Pictures, My Videos and
+# My Music are such junctions (to Pictures, Videos, Music): walking them failed with "Access is denied"
+# every hour, and one that opened would index the same photos twice, or loop forever if it pointed back up
+# its own tree. Only these two kinds are skipped: OneDrive folders are reparse points too (a cloud tag),
+# and their photos must still be found.
+_LINK_TAGS = {getattr(stat, "IO_REPARSE_TAG_MOUNT_POINT", 0xA0000003), getattr(stat, "IO_REPARSE_TAG_SYMLINK", 0xA000000C)}
+
+
+def _is_link_dir(entry: os.DirEntry) -> bool:
+    try:
+        return getattr(entry.stat(follow_symlinks=False), "st_reparse_tag", 0) in _LINK_TAGS
+    except OSError:
+        return False
 
 
 def iter_files(root: Path, exclude: list[Path], on_error: Callable[[str, Exception], None] | None = None
@@ -57,7 +74,7 @@ def iter_files(root: Path, exclude: list[Path], on_error: Callable[[str, Excepti
                     low = name.lower()
                     if low in SKIP_DIR_NAMES or name.startswith("."):
                         continue
-                    if os.path.normcase(entry.path) in exclude_norm:
+                    if os.path.normcase(entry.path) in exclude_norm or _is_link_dir(entry):
                         continue
                     dirs.append(entry.path)
                     continue
