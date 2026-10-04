@@ -275,6 +275,23 @@ def collect_ids(client) -> dict:
             "groups": [g["id"] for g in get("/api/duplicates").get("groups", [])]}
 
 
+def _mentions(body: str, marker: str) -> bool:
+    """A coordinate marker ("38.72") counts only as a number of its own: as a bare substring it matched
+    the digits inside timestamps such as 1791098538.7234 in /api/audit, which failed CI now and then
+    with no leak at all."""
+    if re.fullmatch(r"\d+\.\d+", marker):
+        return re.search(rf"(?<![\d.]){re.escape(marker)}", body) is not None
+    return marker in body
+
+
+def test_the_marker_match_catches_coordinates_but_not_timestamps():
+    assert _mentions('{"lat": 38.7223, "lon": -9.1393}', "38.72") and _mentions('{"lon": -9.1393}', "9.13")
+    assert _mentions("[38.72]", "38.72") and _mentions("at 38.72,", "38.72")
+    assert not _mentions('{"created_at": 1791098538.7234}', "38.72")
+    assert not _mentions('{"created_at": 1791098549.1301}', "9.13")
+    assert _mentions("PRIVSECRET here", "PRIVSECRET")
+
+
 def sweep(client, w, secret_photos, secret_faces, secret_people, markers, who) -> list[str]:
     """Every documented GET, with real and secret ids as parameters. Returns what it found."""
     problems: list[str] = []
@@ -322,7 +339,7 @@ def sweep(client, w, secret_photos, secret_faces, secret_people, markers, who) -
                 for qv in re.findall(r"[?&]q=([^&]+)", v):          # a search echoes what was asked
                     body = body.replace(qv, "")
                 for mk in markers:
-                    if mk in body:
+                    if _mentions(body, mk):
                         problems.append(f"{who}: {v} mentions {mk!r}")
                 try:
                     found = ids_in(r.json()) if "json" in ct else set()
