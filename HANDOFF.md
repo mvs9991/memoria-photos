@@ -58,7 +58,7 @@ photointel/
   api/       app.py routes_*.py images.py
 web/         React + TypeScript UI (Vite)
 eval/        dataset builders, calibration, evaluation, library inspector
-tests/       676 tests, no GPU required
+tests/       683 tests, no GPU required
 ```
 
 **The indexing pipeline** is a feeder thread → N CPU worker threads (read, hash, decode, EXIF,
@@ -123,7 +123,7 @@ python -m photointel index               # SigLIP2 (~1.5 GB) downloads here, on 
 python -m photointel serve               # http://127.0.0.1:8765
 ```
 
-Verified at an early commit (when the suite had 126 tests; it now has 676): a fresh clone ran the
+Verified at an early commit (when the suite had 126 tests; it now has 683): a fresh clone ran the
 full test suite and booted the CLI against a new empty library using only committed files. On
 Linux/macOS activate with `source .venv/bin/activate`; `"D:/Photos"` is only this machine's example
 path. `add-root` must come before `index`.
@@ -912,7 +912,7 @@ the future, everything collapsing into one event, fuzzy duplicate thresholds too
 
 ## 10. Working notes
 
-- Run the suite with `.venv/Scripts/python.exe -m pytest -q`. 676 tests, ~12 min, no GPU needed —
+- Run the suite with `.venv/Scripts/python.exe -m pytest -q`. 683 tests, ~12 min, no GPU needed —
   the neural nets are replaced by deterministic fakes.
 - Test fixtures seed randomness from `zlib.crc32` of the **file name**, not `hash()` (salted per
   process) and not the full path (contains pytest's per-run tmp counter). Both made failures
@@ -956,3 +956,28 @@ browser (`web/jk_*.mjs` scratch scripts are gitignored; the journeys in `web/e2e
   as the hover, so a photo needed two taps (not reproducible in Chromium's emulation; the fix was confirmed by the user).
 - The viewer's top row (nine icons) overflowed a phone with Delete clipped at the end; Delete is first and the row scrolls.
 - The phone layout has a bottom tab bar instead of the left rail (`PhoneNav` in `Sidebar.tsx`).
+
+### Latency pass (2026-10-04) — measured on the real library (29,514 photos), localhost, median of 3
+
+| Request | Before | After |
+|---|---|---|
+| `/api/photos/index` (Photos page) | 785 ms, 950 KB | 401 ms, 146 KB on the wire |
+| `/api/people` | 483 KB | 56 KB on the wire |
+| `/api/people/suggestions/merges` | 4,134 ms every visit | 106 ms (2.98 s on the first visit after a restart) |
+| `/api/events`, `/api/timeline` | 265 KB, 149 KB | 33 KB, 21 KB |
+| `/api/jobs` | 500 on every call (see below) | 15 ms |
+
+What changed (none alters a response's content; `tests/test_speed.py`): gzip for text (`GZipMiddleware`, level 5,
+images/video/downloads/206 excluded); `Cache-Control: immutable` on hashed `/assets/`; merge-suggestion face
+comparisons cached on a fingerprint of faces, live people, missing/live photos and the embeddings generation (names,
+covers and "not the same" are read fresh); `columnar()` looks optional columns up once and `/photos/index` returns a
+`JSONResponse` directly (skipping `jsonable_encoder`; output checked identical on all 29,514 rows).
+
+Still the slowest: `/api/insights` ~420 ms, `/api/stats` ~210 ms (the sidebar polls it every minute),
+`/api/timeline` ~245 ms. Not touched. Over Wi-Fi to a phone the transfer savings matter more than these.
+
+**Stuck transactions** (`tests/test_stuck_transaction.py`): one write that lost a lock race left Python's implicit
+transaction open on that API worker's thread-local connection; its snapshot went stale and every later write on that
+thread failed at once with "database is locked" until a restart (seen live: `/api/jobs` 500 on every call).
+`ApiState.conn()` now rolls back, at a request's first use, anything an earlier request left open, and logs which
+request left it. `reap_stale_jobs` reads before writing and rolls back if it loses the race.
