@@ -142,6 +142,12 @@
 /* While selecting, every tile shows its circle (as Apple Photos does) — a hover-only control
    is invisible on a phone, where there is no hover. */
 .grid-host.is-selecting .tile-select { opacity: 1; }
+/* On a touch screen the circle is invisible until select mode is on, but invisible is not untappable: a tap
+   near a photo's top-left corner hit it, switched select mode on, and ticked the photo instead of opening it.
+   (A mouse still gets it on hover.) */
+@media (hover: none) {
+  .grid-host:not(.is-selecting) .tile-select:not(.on) { pointer-events: none; }
+}
 /* Press-and-hold must not select text or raise the browser's image menu on a long press. */
 .grid-host.is-selectable .tile-wrap,
 .grid-host.is-selectable .tile {
