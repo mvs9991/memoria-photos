@@ -867,12 +867,17 @@ def memories(limit: int = 12):
         })
 
     years_ago = []
+    from ..metadata import naive_to_ts
+
     for delta in (1, 2, 3, 5):
         y = now.year - delta
+        # A range on taken_ts, not strftime('%Y', ...) = y: the same year (timestamps are wall-clock encoded
+        # as UTC), but it can use the taken_ts index instead of reading every photo, four times over.
         row = conn.execute(
-            """SELECT id FROM photos WHERE status='ok' AND hidden=0 AND archived=0 AND live_component=0 AND taken_ts IS NOT NULL
-               AND strftime('%Y', taken_ts, 'unixepoch') = ? AND COALESCE(source_kind,'') != 'screenshot'
-               ORDER BY rating DESC, COALESCE(quality_score,0) DESC LIMIT 8""", (str(y),)).fetchall()
+            """SELECT id FROM photos WHERE status='ok' AND hidden=0 AND archived=0 AND live_component=0
+               AND taken_ts >= ? AND taken_ts < ? AND COALESCE(source_kind,'') != 'screenshot'
+               ORDER BY rating DESC, COALESCE(quality_score,0) DESC LIMIT 8""",
+            (naive_to_ts(datetime(y, 1, 1)), naive_to_ts(datetime(y + 1, 1, 1)))).fetchall()
         if row:
             years_ago.append({"title": f"{delta} year{'s' if delta > 1 else ''} ago", "year": y,
                               "photo_ids": [r[0] for r in row]})
