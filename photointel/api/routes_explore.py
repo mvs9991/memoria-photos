@@ -7,6 +7,7 @@ from collections import defaultdict
 from fastapi import APIRouter, HTTPException, Query, UploadFile
 from pydantic import BaseModel
 
+from .. import db
 from ..engine import albums as albums_mod
 from ..engine import insights as insights_mod
 from .deps import get_state
@@ -67,8 +68,8 @@ def browse_folders(root_id: int | None = None, path: str = ""):
     prefix = path.strip("/")
     rows = conn.execute(
         f"SELECT folder, COUNT(*) n, MAX(COALESCE(quality_score, 0)) q FROM photos WHERE root_id = ? AND {vis} "
-        f"AND (? = '' OR folder = ? OR folder LIKE ?) GROUP BY folder",
-        (root_id, prefix, prefix, prefix + "/%")).fetchall()
+        f"AND (? = '' OR folder = ? OR folder LIKE ? ESCAPE '\\') GROUP BY folder",
+        (root_id, prefix, prefix, db.like_prefix(prefix))).fetchall()
     children: dict[str, int] = defaultdict(int)
     direct = 0
     for r in rows:
@@ -82,8 +83,8 @@ def browse_folders(root_id: int | None = None, path: str = ""):
     for name, n in sorted(children.items(), key=lambda kv: kv[0].lower()):
         full = f"{prefix}/{name}" if prefix else name
         cover = conn.execute(
-            f"SELECT id FROM photos WHERE root_id = ? AND {vis} AND (folder = ? OR folder LIKE ?) "
-            f"ORDER BY rating DESC, COALESCE(quality_score, 0) DESC LIMIT 1", (root_id, full, full + "/%")).fetchone()
+            f"SELECT id FROM photos WHERE root_id = ? AND {vis} AND (folder = ? OR folder LIKE ? ESCAPE '\\') "
+            f"ORDER BY rating DESC, COALESCE(quality_score, 0) DESC LIMIT 1", (root_id, full, db.like_prefix(full))).fetchone()
         folders.append({"root_id": root_id, "name": name, "path": full, "count": n,
                         "cover_photo_id": cover[0] if cover else None})
     return {"root_id": root_id, "path": prefix, "folders": folders, "direct_count": direct}
@@ -102,7 +103,15 @@ def random_photos(count: int = Query(1, ge=1, le=500), album: int | None = None,
     """Random photos for slideshows and photo frames (also usable by Home Assistant et al.)."""
     conn = get_state().conn()
     if album is not None:
-        pool = albums_mod.album_photo_ids(conn, album)
+        from .deps import current_user_id
+
+        # Only an album this account may see (it took any id: one family member could pull random photos out
+        # of another's private album), and a smart album shows what its search finds now.
+        a = albums_mod.can_see(conn, album, current_user_id())
+        if a is None:
+            raise HTTPException(404, "album not found")
+        pool = (get_state().search.search(conn, a["query"], limit=5000).photo_ids if a["kind"] == "smart"
+                else albums_mod.album_photo_ids(conn, album))
     else:
         where, args = photo_filter_sql(conn, person=[person] if person else None, min_rating=min_rating,
                                        collection=collection, include_screenshots=False, collapse_stacks=True,

@@ -99,8 +99,8 @@ def photo_filter_sql(conn, person: list[int] | None = None, place: int | None = 
         where.append("p.folder = ?")
         args.append(folder)
     elif folder:
-        where.append("(p.folder = ? OR p.folder LIKE ?)")
-        args.extend([folder, folder + "/%"])
+        where.append("(p.folder = ? OR p.folder LIKE ? ESCAPE '\\')")
+        args.extend([folder, db.like_prefix(folder)])
     if favorite:
         where.append(f"{favorites.expr('p', current_user_id())} = 1")
     if has_faces is True:

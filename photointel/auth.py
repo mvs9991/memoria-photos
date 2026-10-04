@@ -141,8 +141,11 @@ def resolve_share(conn: sqlite3.Connection, token: str):
         return None
     if row["expires_at"] and row["expires_at"] < time.time():
         return None
-    conn.execute("UPDATE share_links SET last_used_at = ? WHERE token = ?", (time.time(), token))
-    conn.commit()
+    # At most once a minute: every thumbnail of a shared album resolves its link, and writing (and committing)
+    # each time made a visitor's page cost a write per photo.
+    if not row["last_used_at"] or time.time() - row["last_used_at"] > 60:
+        conn.execute("UPDATE share_links SET last_used_at = ? WHERE token = ?", (time.time(), token))
+        conn.commit()
     return row
 
 

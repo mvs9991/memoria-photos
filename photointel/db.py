@@ -261,3 +261,9 @@ def chunks(ids, size: int = 900):
     for i in range(0, len(ids), size):
         chunk = ids[i:i + size]
         yield chunk, ",".join("?" * len(chunk))
+
+
+def like_prefix(text: str) -> str:
+    """A `LIKE ? ESCAPE '\\'` pattern for "starts with text/": '_' and '%' in a folder name are letters, not
+    wildcards. Unescaped, the folder IMG_2020 also matched IMGX2020's photos."""
+    return text.replace("\\", "\\\\").replace("%", "\\%").replace("_", "\\_") + "/%"

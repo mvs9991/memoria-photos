@@ -33,7 +33,15 @@ export async function uploadAll(url: string, files: File[],
     while (next < files.length) {
       const i = next++;
       onUpdate(i, { status: "uploading", progress: 0 });
-      const r = await sendFile(url, files[i], (p) => onUpdate(i, { status: "uploading", progress: p }));
+      let r = await sendFile(url, files[i], (p) => onUpdate(i, { status: "uploading", progress: p }));
+      // A phone going to sleep or a Wi-Fi blip loses the connection mid-file. Sending again is safe (the
+      // server skips content it already has), so try twice more before calling it failed. A refusal from
+      // the server (a rejected file, signed out) is not retried.
+      for (let attempt = 1; attempt <= 2 && r.status === "failed" && /^(connection lost|server said 5)/.test(r.reason ?? ""); attempt++) {
+        await new Promise((ok) => setTimeout(ok, 1500 * attempt));
+        onUpdate(i, { status: "uploading", progress: 0 });
+        r = await sendFile(url, files[i], (p) => onUpdate(i, { status: "uploading", progress: p }));
+      }
       onUpdate(i, { status: r.status, reason: r.reason, progress: 1 });
     }
   };

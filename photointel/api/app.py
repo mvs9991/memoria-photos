@@ -100,6 +100,12 @@ def _small_thumb_backfill(ctx: AppContext, stop: threading.Event) -> None:
 
 
 def create_app(ctx: AppContext) -> FastAPI:
+    # PyTorch's native libraries are loaded here, on the main thread, before any worker or background thread
+    # exists. Loaded lazily, the first one to need them could be a request thread while the model warm-up
+    # thread was loading them too: a test run once died with a Windows access violation inside torch's import.
+    from ..vectors import _torch
+
+    _torch()
     set_state(ApiState(ctx))
     threading.Thread(target=_warm_models, args=(ctx,), daemon=True, name="warm-models").start()
     threading.Thread(target=_trash_sweeper, args=(ctx, threading.Event()), daemon=True, name="trash-sweeper").start()

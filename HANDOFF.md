@@ -1063,3 +1063,12 @@ the clip's length on first play; pre-transcoding all 194 was judged too heavy (h
   sidecar that cannot be restored because the name is taken stays in the trash folder and is never purged —
   harmless, noted), editing/creations (locked and private photos are refused by status), the Locked PIN limiter
   (one counter for all devices on purpose).
+- **Random photos** (`/api/random?album=`, slideshows and frames) took any album id: one family member could pull
+  photos out of another's private album; a smart album gave nothing. Now `can_see` and the saved search.
+- **Folder filters** used `LIKE 'name/%'` unescaped: `IMG_2020` also matched `IMGX2020` (`_` is a wildcard).
+  `db.like_prefix` escapes it (photo list `?folder=` and the folder browser).
+- **Share links:** every thumbnail/video/download through a link recomputed the album's photo list (for a smart
+  album, a full search: 100 searches for a 100-photo page) and wrote `last_used_at`. The list is kept 30 s per
+  link (revocation and expiry still apply at once) and the timestamp is written at most once a minute.
+- **Upload page:** a file whose connection dropped (a phone sleeping, a Wi-Fi blip) is retried twice before it is
+  marked failed; the server dedupes by content, so a retry cannot add a second copy. Not covered by a test.

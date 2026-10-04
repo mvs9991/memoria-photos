@@ -274,3 +274,73 @@ def test_splitting_moves_only_faces_that_belong_to_the_person(ctx, client):
         "a face of someone else was moved by splitting another person"
     assert c.execute("SELECT person_id FROM faces WHERE id = ?", (faces_a[0],)).fetchone()[0] == r["created"]
     c.close()
+
+
+def test_a_folder_name_with_an_underscore_does_not_match_its_lookalikes(ctx, client):
+    ids = visible_ids(ctx, 4)
+    c = ctx.connect()
+    root = c.execute("SELECT root_id FROM photos WHERE id = ?", (ids[0],)).fetchone()[0]
+    for pid, folder in zip(ids, ("IMG_2020", "IMG_2020/Goa", "IMGX2020", "IMGX2020/Goa")):
+        c.execute("UPDATE photos SET folder = ?, root_id = ? WHERE id = ?", (folder, root, pid))
+    c.commit()
+    c.close()
+    got = set(client.get("/api/photos/index", params={"folder": "IMG_2020"}).json()["ids"])
+    assert got == set(ids[:2]), f"folder IMG_2020 also matched IMGX2020: {got}"
+    sub = client.get("/api/folders/browse", params={"root_id": root, "path": "IMG_2020"}).json()
+    assert [f["name"] for f in sub["folders"]] == ["Goa"] and sub["folders"][0]["count"] == 1
+
+
+def test_random_photos_respect_who_may_see_an_album(ctx, library):
+    """/api/random?album= (slideshows, photo frames) took any album id: one family member could pull random
+    photos out of another's private album."""
+    from photointel.api.app import create_app
+    from photointel import ratelimit
+
+    Indexer(ctx, workers=2).run(roots=[str(library)])
+    app = create_app(ctx)
+    ratelimit.reset_all()
+    owner = TestClient(app)
+    owner.post("/api/auth/password", json={"new": "owner-pass"})
+    assert owner.post("/api/accounts/enable", json={"username": "Sanjay"}).status_code == 200
+    owner.post("/api/accounts", json={"username": "Priya", "password": "priya-pass", "role": "family"})
+    owner.post("/api/accounts", json={"username": "Ravi", "password": "ravi-pass", "role": "family"})
+
+    def login(name, pw):
+        c = TestClient(app)
+        assert c.post("/api/auth/login", json={"username": name, "password": pw}).status_code == 200
+        return c
+
+    priya, ravi = login("Priya", "priya-pass"), login("Ravi", "ravi-pass")
+    ids = visible_ids(ctx, 2)
+    aid = priya.post("/api/albums", json={"name": "Mine", "photo_ids": ids}).json()["id"]
+    assert priya.post(f"/api/albums/{aid}", json={"private": True}).status_code == 200
+    assert ravi.get(f"/api/albums/{aid}").status_code == 404           # the album itself is hidden from Ravi
+    r = ravi.get(f"/api/random?album={aid}&count=5")
+    assert r.status_code == 404 or not r.json().get("ids"), "random photos came out of someone else's private album"
+    assert priya.get(f"/api/random?album={aid}&count=5").json()["ids"], "the album's owner should still get them"
+
+
+def test_a_shared_album_does_not_rerun_its_search_or_write_for_every_thumbnail(ctx, client, monkeypatch):
+    from photointel.api import routes_auth
+    from photointel.api.deps import get_state
+
+    getattr(routes_auth, "_share_ids_cache", {}).clear()
+    aid = client.post("/api/albums", json={"name": "Beach", "query": "2024"}).json()["id"]
+    token = client.post(f"/api/albums/{aid}/share", json={}).json()["token"]
+    ids = client.get(f"/share/{token}".replace("/share", "/api/share")).json()["photos"]["ids"]
+    assert ids, "the smart album should hold photos"
+    calls = []
+    search = get_state().search
+    real = search.search
+    monkeypatch.setattr(search, "search", lambda *a, **k: calls.append(1) or real(*a, **k))
+    writes = []
+    c = ctx.connect()
+    before = c.execute("SELECT last_used_at FROM share_links WHERE token = ?", (token,)).fetchone()[0]
+    c.close()
+    for pid in ids[:5]:
+        assert client.get(f"/api/share/{token}/thumb/{pid}?s=sm").status_code == 200
+    assert len(calls) == 0, f"the album's search ran {len(calls)} times for 5 thumbnails"
+    c = ctx.connect()
+    after = c.execute("SELECT last_used_at FROM share_links WHERE token = ?", (token,)).fetchone()[0]
+    c.close()
+    assert after == before, "each thumbnail wrote the link's last-used time"

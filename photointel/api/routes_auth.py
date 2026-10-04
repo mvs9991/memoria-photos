@@ -148,10 +148,34 @@ def revoke(token: str):
 
 # ---------------------------------------------------------------- share links (visitor side)
 
+_SHARE_IDS_TTL = 30.0
+_share_ids_cache: dict[str, tuple[float, list[int], frozenset]] = {}
+
+
 def _share_photo_ids(conn, share) -> list[int]:
+    """The shared album's photos, remembered for half a minute per link. Every thumbnail, video and download
+    through a link checks membership against this list, and for a smart album it is a full search: a visitor
+    opening a 100-photo album ran 100 searches. (Revoking or expiry still apply at once: `_require` resolves
+    the link on every request, before this is used.)"""
+    key = str(share["token"]) if "token" in share.keys() else f"album:{share['album_id']}"
+    hit = _share_ids_cache.get(key)
+    now = time.monotonic()
+    if hit and now - hit[0] < _SHARE_IDS_TTL:
+        return hit[1]
     if share["kind"] == "smart":
-        return get_state().search.search(conn, share["query"], limit=5000).photo_ids
-    return albums_mod.album_photo_ids(conn, share["album_id"])
+        ids = get_state().search.search(conn, share["query"], limit=5000).photo_ids
+    else:
+        ids = albums_mod.album_photo_ids(conn, share["album_id"])
+    if len(_share_ids_cache) > 256:
+        _share_ids_cache.clear()
+    _share_ids_cache[key] = (now, ids, frozenset(ids))
+    return ids
+
+
+def _in_share(conn, share, photo_id: int) -> bool:
+    _share_photo_ids(conn, share)
+    key = str(share["token"]) if "token" in share.keys() else f"album:{share['album_id']}"
+    return photo_id in _share_ids_cache[key][2]
 
 
 def _require(token: str):
@@ -218,7 +242,7 @@ def shared_thumb(token: str, photo_id: int, s: str = Query("m", pattern="^(sm|m|
     from .images import thumb
 
     conn, share = _require(token)
-    if photo_id not in set(_share_photo_ids(conn, share)):
+    if not _in_share(conn, share, photo_id):
         raise HTTPException(404, "not in this album")
     return thumb(photo_id, s=s)
 
@@ -228,7 +252,7 @@ def shared_video(token: str, photo_id: int):
     from .routes_library import photo_video
 
     conn, share = _require(token)
-    if photo_id not in set(_share_photo_ids(conn, share)):
+    if not _in_share(conn, share, photo_id):
         raise HTTPException(404, "not in this album")
     return photo_video(photo_id)
 
@@ -238,6 +262,6 @@ def shared_download(token: str, photo_id: int):
     from .images import download
 
     conn, share = _require(token)
-    if not share["allow_download"] or photo_id not in set(_share_photo_ids(conn, share)):
+    if not share["allow_download"] or not _in_share(conn, share, photo_id):
         raise HTTPException(403, "downloads are not allowed for this link")
     return download(photo_id)
