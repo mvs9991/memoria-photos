@@ -216,3 +216,12 @@ input[type="radio"] {
   flex: none;
   cursor: pointer;
 }
+
+/* iOS Safari zooms the whole page in when a text field under 16 px gets focus, and leaves it zoomed. Every field
+   here was 12.5-14 px (the search box, filters, passwords, the PIN), so on a phone they are made 16 px.
+   !important because field styles set their size with more specific selectors; desktop keeps its sizes. */
+@media (hover: none) and (pointer: coarse) {
+  input:not([type="checkbox"]):not([type="radio"]):not([type="range"]):not([type="file"]),
+  select,
+  textarea { font-size: 16px !important; }
+}
