@@ -1,6 +1,8 @@
 """Duplicate review."""
 from __future__ import annotations
 
+from typing import Literal
+
 from fastapi import APIRouter, HTTPException, Query
 from pydantic import BaseModel
 
@@ -83,8 +85,12 @@ def list_groups(kind: str | None = Query(None, pattern="^(exact|near|likely|simi
 
 
 class ReviewBody(BaseModel):
-    status: str | None = None          # reviewed | not_duplicate | pending
+    status: Literal["reviewed", "not_duplicate", "pending"] | None = None
     keep_photo_id: int | None = None
+
+
+def _members(conn, group_id: int) -> set[int]:
+    return {int(r[0]) for r in conn.execute("SELECT photo_id FROM dup_members WHERE group_id = ?", (group_id,))}
 
 
 @router.post("/duplicates/{group_id}/review")
@@ -93,6 +99,8 @@ def review(group_id: int, body: ReviewBody):
     g = conn.execute("SELECT * FROM dup_groups WHERE id=?", (group_id,)).fetchone()
     if g is None:
         raise HTTPException(404, "group not found")
+    if body.keep_photo_id and body.keep_photo_id not in _members(conn, group_id):
+        raise HTTPException(400, "the copy to keep must be one of this group's photos")
     sets, args = [], []
     if body.status:
         sets.append("review_status=?")
@@ -117,14 +125,20 @@ class HideBody(BaseModel):
 def hide_copies(group_id: int, body: HideBody):
     """Hide duplicate copies from the library view. Files are never touched."""
     conn = get_state().conn()
-    if not body.photo_ids:
+    g = conn.execute("SELECT keep_photo_id FROM dup_groups WHERE id = ?", (group_id,)).fetchone()
+    if g is None:
+        raise HTTPException(404, "group not found")
+    # Only this group's copies, and never the one marked to keep: the page promises that, and the server used
+    # to hide whatever ids it was sent (the keeper too, which made the photo vanish from the library).
+    ids = [i for i in dict.fromkeys(body.photo_ids) if i in _members(conn, group_id) and i != g["keep_photo_id"]]
+    if not ids:
         return {"hidden": 0}
-    marks = ",".join("?" * len(body.photo_ids))
-    n = conn.execute(f"UPDATE photos SET hidden=1 WHERE id IN ({marks})", body.photo_ids).rowcount
+    marks = ",".join("?" * len(ids))
+    n = conn.execute(f"UPDATE photos SET hidden=1 WHERE id IN ({marks})", ids).rowcount
     conn.execute("UPDATE dup_groups SET review_status='reviewed' WHERE id=?", (group_id,))
-    db.audit(conn, "duplicates_hidden", "dup_group", group_id, {"photos": body.photo_ids})
+    db.audit(conn, "duplicates_hidden", "dup_group", group_id, {"photos": ids})
     conn.commit()
     from ..engine import visibility
 
-    visibility.refresh(conn, body.photo_ids)      # a hidden stack cover hands over its stack
+    visibility.refresh(conn, ids)      # a hidden stack cover hands over its stack
     return {"hidden": n, "note": "Photos were hidden from the library; the original files were not modified."}

@@ -102,7 +102,9 @@ def event_detail(event_id: int):
         data["children"] = []
     rows = conn.execute(photo_sql, (event_id,)).fetchall()
     data["photos"] = columnar(rows)
-    ids = [r["id"] for r in rows][:900]
+    # Every photo of the event (up to 30,000, inside SQLite's variable limit). It was the first 900, so an
+    # event of 1,737 photos on a real library drew its people, places, tags and highlights from its first half.
+    ids = [r["id"] for r in rows][:30000]
     if ids:
         marks = ",".join("?" * len(ids))
         data["people"] = [{"id": p["id"], "label": person_label(p), "cover_face_id": p["cover_face_id"],
