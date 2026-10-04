@@ -29,6 +29,7 @@ import statistics
 import subprocess
 import sys
 import threading
+import urllib.parse
 import time
 from datetime import datetime, timedelta
 from pathlib import Path
@@ -164,7 +165,7 @@ def worker(kind, port, rec, stop, ids, person_ids, expect, errors, seed):
             elif r < .6:
                 cl.call("GET events", "GET", "/api/events")
             elif r < .75:
-                cl.call("GET search", "GET", "/api/search?q=" + rng.choice(["goa", "photos from 2024", "hyderabad", "IMG 0001", "tirupati 2023"]))
+                cl.call("GET search", "GET", "/api/search?q=" + urllib.parse.quote(rng.choice(["goa", "photos from 2024", "hyderabad", "IMG 0001", "tirupati 2023"])))
             elif r < .85:
                 cl.call("GET stats", "GET", "/api/stats")
             else:

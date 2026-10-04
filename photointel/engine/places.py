@@ -69,31 +69,39 @@ def geocode_photos(ctx, conn: sqlite3.Connection, force: bool = False, progress=
     if not rows:
         return {"geocoded": 0}
     t0 = time.time()
-    cache: dict[tuple, tuple[int | None, int | None]] = {}
-    updates = []
+    # Resolve every distinct ~110 m cell FIRST, writing nothing. The lookups are CPU work (12.5 s for
+    # 1,266 cells on a 3,000-photo test library, and it grows with the library); the first
+    # upsert_place used to open a write transaction that stayed open through all of them, so every
+    # edit made in the web app waited for it (a 12.8 s stall measured by a BEGIN IMMEDIATE probe).
+    cells: dict[tuple, tuple] = {}
+    keys = []
     for r in rows:
         key = (round(r["gps_lat"], 3), round(r["gps_lon"], 3))  # ~110 m cells
-        hit = cache.get(key)
-        if hit is None:
-            res = rg.lookup(r["gps_lat"], r["gps_lon"])
-            place_id = None
-            if res.locality is not None and res.city is not None and res.locality.geoname_id != res.city.geoname_id:
-                place_id = upsert_place(conn, res.locality, "locality", city_name=res.city.name)
-            elif res.city is not None:
-                place_id = upsert_place(conn, res.city, "city")
-            elif res.locality is not None:
-                place_id = upsert_place(conn, res.locality, "city")
-            landmark_id = upsert_place(conn, res.landmark, "landmark") if res.landmark else None
-            hit = (place_id, landmark_id)
-            cache[key] = hit
-        updates.append((hit[0], hit[1], r["id"]))
+        keys.append(key)
+        if key not in cells:
+            cells[key] = rg.lookup(r["gps_lat"], r["gps_lon"])
+    cache: dict[tuple, tuple[int | None, int | None]] = {}
+    for key, res in cells.items():       # same order as before, so place ids come out the same
+        place_id = None
+        if res.locality is not None and res.city is not None and res.locality.geoname_id != res.city.geoname_id:
+            place_id = upsert_place(conn, res.locality, "locality", city_name=res.city.name)
+        elif res.city is not None:
+            place_id = upsert_place(conn, res.city, "city")
+        elif res.locality is not None:
+            place_id = upsert_place(conn, res.locality, "city")
+        landmark_id = upsert_place(conn, res.landmark, "landmark") if res.landmark else None
+        cache[key] = (place_id, landmark_id)
+    conn.commit()
+    updates = [(cache[k][0], cache[k][1], r["id"]) for k, r in zip(keys, rows)]
     # A location read from a Takeout sidecar is Google's estimate, not the photo's own GPS:
     # keep saying so after it is geocoded.
-    conn.executemany(
-        "UPDATE photos SET place_id=?, landmark_id=?, "
-        "location_source = CASE WHEN location_source IN ('takeout', 'user', 'gpx') THEN location_source ELSE 'gps' END, "
-        "location_confidence = CASE WHEN location_source IN ('takeout', 'gpx') THEN 'medium' ELSE 'high' END WHERE id=?",
-        updates)
+    for i in range(0, len(updates), 1000):      # short transactions: the lock is free between chunks
+        conn.executemany(
+            "UPDATE photos SET place_id=?, landmark_id=?, "
+            "location_source = CASE WHEN location_source IN ('takeout', 'user', 'gpx') THEN location_source ELSE 'gps' END, "
+            "location_confidence = CASE WHEN location_source IN ('takeout', 'gpx') THEN 'medium' ELSE 'high' END WHERE id=?",
+            updates[i:i + 1000])
+        conn.commit()
     conn.commit()
     out = {"geocoded": len(updates), "distinct_places": len(cache), "seconds": round(time.time() - t0, 2)}
     log.info("Reverse geocoding: %s", out)
