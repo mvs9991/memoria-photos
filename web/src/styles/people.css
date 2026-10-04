@@ -245,6 +245,9 @@
 .face-review {
   position: relative;
   aspect-ratio: 1;
+  /* up to 400 faces on the page; a phone shows a dozen: skip the rest until they scroll near */
+  content-visibility: auto;
+  contain-intrinsic-block-size: auto 110px;
   border-radius: var(--r-md);
   overflow: hidden;
   background: var(--surface-2);
