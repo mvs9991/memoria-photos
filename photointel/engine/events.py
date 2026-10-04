@@ -133,8 +133,9 @@ def _segment(rows, p: EventParams) -> list[Segment]:
             elif split and cur.photo_ids and len(cur.photo_ids) >= p.max_event_photos:
                 segs.append(cur)
                 cur = Segment()
+        if not cur.photo_ids:
+            cur.start = r["taken_ts"]   # not `start or ts`: a photo dated exactly 0 (1 Jan 1970) is a real start
         cur.photo_ids.append(r["id"])
-        cur.start = cur.start or r["taken_ts"]
         cur.end = r["taken_ts"]
         if r["place_id"]:
             cur.place_ids[r["place_id"]] += 1
@@ -320,52 +321,65 @@ def _make_title(category: str | None, place, folder_hint: str | None, seg: Segme
 
 
 def _location_confidence(conn: sqlite3.Connection, photo_ids: list[int]) -> str:
-    q = ",".join("?" * min(len(photo_ids), 900))
-    sample = photo_ids[:900]
-    rows = conn.execute(
-        f"SELECT location_confidence, COUNT(*) n FROM photos WHERE id IN ({q}) GROUP BY location_confidence",
-        sample).fetchall()
     best = "unknown"
     order = {"high": 3, "medium": 2, "low": 1, "unknown": 0, None: 0}
-    for r in rows:
-        if order.get(r["location_confidence"], 0) > order.get(best, 0):
-            best = r["location_confidence"] or "unknown"
+    for chunk, q in db.chunks(photo_ids):
+        for r in conn.execute(f"SELECT DISTINCT location_confidence FROM photos WHERE id IN ({q})", chunk):
+            if order.get(r["location_confidence"], 0) > order.get(best, 0):
+                best = r["location_confidence"] or "unknown"
     return best
 
 
 def _pick_cover(conn: sqlite3.Connection, photo_ids: list[int]) -> int | None:
-    photo_ids = photo_ids[:900]  # SQLite bound-parameter limit; a sample is enough to pick a cover
-    q = ",".join("?" * len(photo_ids))
-    row = conn.execute(
-        f"""SELECT id FROM photos WHERE id IN ({q}) AND status='ok'
-            ORDER BY (COALESCE(quality_score, 40) + CASE WHEN face_count > 0 THEN 12 ELSE 0 END
-                      + CASE WHEN COALESCE(source_kind,'') IN ('camera','phone') THEN 8 ELSE 0 END) DESC
-            LIMIT 1""", photo_ids).fetchone()
-    return int(row[0]) if row else None
+    """The best photo of all of them (it looked at the first 900 only: a 2,000-photo event's cover could never
+    come from its second half)."""
+    best: tuple[float, int] | None = None
+    for chunk, q in db.chunks(photo_ids):
+        row = conn.execute(
+            f"""SELECT id, (COALESCE(quality_score, 40) + CASE WHEN face_count > 0 THEN 12 ELSE 0 END
+                      + CASE WHEN COALESCE(source_kind,'') IN ('camera','phone') THEN 8 ELSE 0 END) AS score
+                FROM photos WHERE id IN ({q}) AND status='ok' ORDER BY score DESC, id LIMIT 1""", chunk).fetchone()
+        if row is not None and (best is None or (row["score"], -row["id"]) > (best[0], -best[1])):
+            best = (row["score"], int(row["id"]))
+    return best[1] if best else None
+
+
+def _people_count(conn: sqlite3.Connection, photo_ids: list[int]) -> int:
+    people: set[int] = set()
+    for chunk, q in db.chunks(photo_ids):
+        people |= {int(r[0]) for r in conn.execute(
+            f"SELECT DISTINCT person_id FROM faces WHERE person_id IS NOT NULL AND photo_id IN ({q})", chunk)}
+    return len(people)
 
 
 def _persist_events(conn: sqlite3.Connection, built: list[dict]) -> list[int]:
     """Match new events to existing ones by photo overlap so ids/user titles survive."""
     now = time.time()
     old_events = conn.execute("SELECT id, user_title, kind FROM events WHERE kind='event'").fetchall()
-    old_photos: dict[int, set[int]] = {}
-    for e in old_events:
-        old_photos[e["id"]] = {int(r[0]) for r in conn.execute("SELECT id FROM photos WHERE event_id=?", (e["id"],))}
-    old_titles = {e["id"]: e["user_title"] for e in old_events}
+    old_rank = {int(e["id"]): n for n, e in enumerate(old_events)}
+    # One pass over the photos instead of a query per event, and each new event is compared only with the old
+    # events it shares photos with (it was compared with every one: events x events set intersections).
+    old_of: dict[int, int] = {}
+    old_size: Counter = Counter()
+    current: dict[int, int] = {}
+    for pid, eid in conn.execute("SELECT id, event_id FROM photos WHERE event_id IS NOT NULL"):
+        current[int(pid)] = int(eid)
+        if eid in old_rank:
+            old_of[int(pid)] = int(eid)
+            old_size[int(eid)] += 1
 
     used_old: set[int] = set()
     result_ids = []
-    conn.execute("UPDATE photos SET event_id = NULL WHERE event_id IS NOT NULL")
+    wanted: dict[int, int] = {}
     for ev in built:
         new_set = set(ev["photo_ids"])
+        shared = Counter(old_of[pid] for pid in new_set if pid in old_of)
         best_id, best_j = None, 0.0
-        for oid, oset in old_photos.items():
-            if oid in used_old or not oset:
+        for oid in sorted(shared, key=old_rank.__getitem__):   # the old order breaks ties, as before
+            if oid in used_old:
                 continue
-            inter = len(new_set & oset)
-            if not inter:
-                continue
-            j = inter / len(new_set | oset)
+            inter = shared[oid]
+            j = inter / (len(new_set) + old_size[oid] - inter)
             if j > best_j:
                 best_id, best_j = oid, j
         signature = f"{int(ev['start'])}-{int(ev['end'])}-{len(new_set)}"
@@ -390,7 +404,15 @@ def _persist_events(conn: sqlite3.Connection, built: list[dict]) -> list[int]:
                  ev["location_confidence"], signature, now, now))
             eid = int(cur.lastrowid)
         result_ids.append(eid)
-        conn.executemany("UPDATE photos SET event_id=? WHERE id=?", [(eid, pid) for pid in ev["photo_ids"]])
+        for pid in ev["photo_ids"]:
+            wanted[int(pid)] = eid
+    # Only the photos whose event changed are written. Clearing every photo's event and setting it again
+    # rewrote the whole photos table on every run, even when nothing had changed: on the real library (31k
+    # photos, a 5,400 rpm drive) committing that took 7.7 of event detection's 10 seconds, every hour.
+    conn.executemany("UPDATE photos SET event_id = NULL WHERE id = ?",
+                     [(pid,) for pid in current if pid not in wanted])
+    conn.executemany("UPDATE photos SET event_id = ? WHERE id = ?",
+                     [(eid, pid) for pid, eid in wanted.items() if current.get(pid) != eid])
     # Remove events that no longer exist (keeps user-renamed ones only if they still have photos).
     stale = [e["id"] for e in old_events if e["id"] not in result_ids]
     if stale:
@@ -439,7 +461,6 @@ def _detect_trips(conn: sqlite3.Connection, p: EventParams) -> int:
             place = places_mod.place_row(conn, place_id)
             city = (place["city"] or place["name"]) if place is not None else "Trip"
             title = f"{city} Trip"
-            cover = max(group, key=lambda g: g["photo_count"])["cover_photo_id"] if False else None
             cover_row = conn.execute(
                 "SELECT cover_photo_id FROM events WHERE id=?", (max(group, key=lambda g: g['photo_count'])["id"],)
             ).fetchone()
@@ -516,10 +537,8 @@ def drop_unseen(conn: sqlite3.Connection, photo_ids: list[int]) -> int:
             conn.execute("DELETE FROM trip_photos WHERE trip_id = ?", (eid,))
             conn.execute("DELETE FROM events WHERE id = ?", (eid,))
             continue
-        cover = _pick_cover(conn, ids) if ids else None
-        people = conn.execute(
-            f"SELECT COUNT(DISTINCT person_id) FROM faces WHERE person_id IS NOT NULL AND photo_id IN "
-            f"({','.join('?' * min(len(ids), 900))})", ids[:900]).fetchone()[0] if ids else 0
+        cover = _pick_cover(conn, ids)
+        people = _people_count(conn, ids)
         conn.execute("UPDATE events SET photo_count = ?, people_count = ?, cover_photo_id = ?, summary = ?, "
                      "summary_source = 'template' WHERE id = ?",
                      (len(ids), people, cover, build_summary(conn, eid), eid))
@@ -547,15 +566,21 @@ def build_summary(conn: sqlite3.Connection, event_id: int) -> str:
     place = places_mod.place_row(conn, ev["place_id"])
     if place is not None:
         bits.append(places_mod.place_label(place))
-    people = conn.execute(
-        f"""SELECT p.id, p.name, p.display_no, COUNT(DISTINCT f.photo_id) n FROM faces f
-            JOIN persons p ON p.id = f.person_id
-            WHERE f.photo_id IN ({','.join('?' * min(len(photo_ids), 900))}) AND p.ignored = 0 AND p.merged_into IS NULL
-            GROUP BY p.id ORDER BY n DESC LIMIT 4""", photo_ids[:900]).fetchall()
+    seen: Counter = Counter()
+    who: dict[int, sqlite3.Row] = {}
+    for chunk, q in db.chunks(photo_ids):   # all of them: a big event's people were counted in its first 900
+        for r in conn.execute(
+                f"""SELECT p.id, p.name, p.display_no, COUNT(DISTINCT f.photo_id) n FROM faces f
+                    JOIN persons p ON p.id = f.person_id
+                    WHERE f.photo_id IN ({q}) AND p.ignored = 0 AND p.merged_into IS NULL
+                    GROUP BY p.id""", chunk):
+            seen[r["id"]] += r["n"]
+            who[r["id"]] = r
+    people = [who[pid] for pid, _ in sorted(seen.items(), key=lambda kv: (-kv[1], kv[0]))[:4]]
     sentence = " · ".join(bits)
     if people:
         names = [person_label(p) for p in people[:3]]
-        more = max(0, len(people) - 3)
+        more = max(0, len(seen) - 3)   # everyone else (counted from `people`, capped at 4, it said "1 other" at most)
         if more:
             names.append(f"{more} other" if more == 1 else f"{more} others")
         sentence += "\nWith " + _join_names(names)
