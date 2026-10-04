@@ -177,22 +177,27 @@ def list_places():
            WHERE p.status='ok' AND p.hidden = 0 AND p.live_component = 0 GROUP BY pl.id ORDER BY n DESC""").fetchall()
     # Counted, covered and peopled from visible photos only, as opening the place shows them: hidden photos
     # made the list say a few more than the page held, and one could even be the place's cover.
+    # Covers, event counts and people counts for every place in three grouped queries. They were three
+    # queries per place (~340 for a real library's 114 places), 1.1 s on each visit to Places or the Map.
+    covers = {r[0]: r[1] for r in conn.execute(
+        """SELECT place_id, id FROM (
+               SELECT place_id, id, ROW_NUMBER() OVER (
+                   PARTITION BY place_id ORDER BY COALESCE(quality_score, 0) DESC, id ASC) AS rk
+               FROM photos WHERE place_id IS NOT NULL AND status = 'ok' AND hidden = 0 AND live_component = 0)
+           WHERE rk = 1""")}
+    event_counts = {r[0]: r[1] for r in conn.execute(
+        "SELECT place_id, COUNT(*) FROM events WHERE place_id IS NOT NULL GROUP BY place_id")}
+    people_counts = {r[0]: r[1] for r in conn.execute(
+        """SELECT p.place_id, COUNT(DISTINCT f.person_id) FROM faces f JOIN photos p ON p.id = f.photo_id
+           WHERE p.place_id IS NOT NULL AND f.person_id IS NOT NULL AND p.status = 'ok' AND p.hidden = 0
+           GROUP BY p.place_id""")}
     places = []
     for r in rows:
-        cover = conn.execute(
-            "SELECT id FROM photos WHERE place_id=? AND status='ok' AND hidden = 0 AND live_component = 0 "
-            "ORDER BY COALESCE(quality_score,0) DESC LIMIT 1",
-            (r["id"],)).fetchone()
-        events = conn.execute("SELECT COUNT(*) FROM events WHERE place_id=?", (r["id"],)).fetchone()[0]
-        people = conn.execute(
-            """SELECT COUNT(DISTINCT f.person_id) FROM faces f JOIN photos p ON p.id = f.photo_id
-               WHERE p.place_id = ? AND f.person_id IS NOT NULL AND p.status = 'ok' AND p.hidden = 0""",
-            (r["id"],)).fetchone()[0]
         places.append({"id": r["id"], "name": r["name"], "city": r["city"], "admin1": r["admin1"],
                        "admin2": r["admin2"], "country": r["country"], "country_code": r["country_code"],
-                       "lat": r["lat"], "lon": r["lon"], "photo_count": r["n"], "event_count": events,
-                       "people_count": people, "cover_photo_id": cover[0] if cover else None,
-                       "last_ts": r["last_ts"]})
+                       "lat": r["lat"], "lon": r["lon"], "photo_count": r["n"],
+                       "event_count": event_counts.get(r["id"], 0), "people_count": people_counts.get(r["id"], 0),
+                       "cover_photo_id": covers.get(r["id"]), "last_ts": r["last_ts"]})
     countries: dict[str, dict] = {}
     for p in places:
         c = countries.setdefault(p["country"] or "Unknown", {"country": p["country"] or "Unknown", "count": 0,
