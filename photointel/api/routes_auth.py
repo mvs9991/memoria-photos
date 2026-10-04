@@ -35,7 +35,13 @@ class LoginBody(BaseModel):
 
 def _login_keys(request: Request, name: str | None) -> tuple[str, ...]:
     host = request.client.host if request.client else "?"
-    return (f"ip:{host}", f"user:{(name or '').strip().lower()}")
+    who = (name or "").strip().lower()
+    if not who:
+        # The single-password library has no account name. A shared "user:" key would make ten wrong
+        # guesses from any one device (or any stranger on the network) lock the owner out of their own
+        # library for 15 minutes, so there the address alone is what is limited.
+        return (f"ip:{host}",)
+    return (f"ip:{host}", f"user:{who}")
 
 
 def _check_limit(limiter, keys) -> None:

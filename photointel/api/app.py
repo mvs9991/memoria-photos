@@ -73,7 +73,19 @@ def create_app(ctx: AppContext) -> FastAPI:
         app.include_router(router, prefix="/api")
     app.include_router(dav.router)          # /dav/: the backup-app drop box (its own sign-in)
 
+    def _hardened(response):
+        """Headers every response carries: no guessing a type for what we serve (a photo or upload can
+        never be run as a page), no framing by another site (clickjacking), and no leaking the address
+        of a page, which can hold a share token, to sites it links to."""
+        response.headers.setdefault("X-Content-Type-Options", "nosniff")
+        response.headers.setdefault("X-Frame-Options", "SAMEORIGIN")
+        response.headers.setdefault("Referrer-Policy", "same-origin")
+        return response
+
     @app.middleware("http")
+    async def hardening(request: Request, call_next):
+        return _hardened(await access(request, call_next))
+
     async def access(request: Request, call_next):
         """Who is asking and whether they may. With accounts, every API route needs a signed-in
         account and its role must allow the request; with just a password, a session; with
