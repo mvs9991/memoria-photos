@@ -13,7 +13,7 @@ from starlette.middleware.gzip import GZipMiddleware
 from fastapi.responses import FileResponse, JSONResponse
 from fastapi.staticfiles import StaticFiles
 
-from .. import accounts, auth
+from .. import accounts, auth, db
 from ..context import AppContext
 from . import dav, images, routes_accounts, routes_albums, routes_auth, routes_duplicates, routes_explore, routes_export, routes_trash, routes_upload, routes_events, routes_library, routes_people, routes_search, routes_service, routes_system
 from .deps import ApiState, get_state, set_current_user, set_locked_open, set_state, start_request, start_response_notes
@@ -30,6 +30,19 @@ def _warm_models(ctx: AppContext) -> None:
         log.info("Semantic model warm after %.1fs", time.time() - t0)
     except Exception as exc:
         log.warning("Could not warm the semantic model: %s", exc)
+    # ...and the photo embeddings every search and "similar photos" ranks against: loading ~29k of them
+    # made the first "similar photos" after a restart take 2.6 s instead of ~50 ms.
+    try:
+        state = get_state()
+        conn = ctx.connect()
+        try:
+            model_id = db.active_model_id(conn, "semantic")
+            if model_id:
+                state.index_cache.get(conn, model_id, int(db.get_meta(conn, "gen:embeddings", 0) or 0))
+        finally:
+            conn.close()
+    except Exception as exc:
+        log.warning("Could not preload photo embeddings: %s", exc)
 
 
 def _trash_sweeper(ctx: AppContext, stop: threading.Event) -> None:
