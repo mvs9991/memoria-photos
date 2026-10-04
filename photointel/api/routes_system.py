@@ -281,15 +281,41 @@ def _without_unseen_photos(conn, entries: list[dict]) -> list[dict]:
     return out
 
 
+_CACHE_BYTES_TTL = 60.0
+_cache_bytes_memo: dict = {}
+
+
+def _dir_bytes(root) -> int:
+    """Size of a folder tree, tolerating files that vanish mid-walk (a cache clear, a thumbnail rewrite)."""
+    total = 0
+    for dirpath, _dirs, names in os.walk(root, onerror=lambda _e: None):
+        for name in names:
+            try:
+                total += os.stat(os.path.join(dirpath, name)).st_size
+            except OSError:
+                pass
+    return total
+
+
+def _cache_bytes(folders) -> int:
+    """Walking every thumbnail of a large library took 11 s on each /api/health call (and a file deleted
+    during the walk made it a 500). The figure is only shown on Settings, so a minute-old one is fine."""
+    key = tuple(str(f) for f in folders)
+    hit = _cache_bytes_memo.get(key)
+    now = time.monotonic()
+    if hit and now - hit[0] < _CACHE_BYTES_TTL:
+        return hit[1]
+    value = sum(_dir_bytes(f) for f in folders if os.path.isdir(f))
+    _cache_bytes_memo[key] = (now, value)
+    return value
+
+
 @router.get("/health")
 def health():
     state = get_state()
     conn = state.conn()
     paths = state.ctx.paths
-    cache_bytes = 0
-    for d in (paths.thumbs, paths.previews, paths.faces):
-        if d.exists():
-            cache_bytes += sum(f.stat().st_size for f in d.rglob("*") if f.is_file())
+    cache_bytes = _cache_bytes((paths.thumbs, paths.previews, paths.faces))
     try:
         free = shutil.disk_usage(paths.data).free
     except OSError:
