@@ -11,7 +11,9 @@ file, which is never modified.
 from __future__ import annotations
 
 import logging
+import os
 import re
+import threading
 from dataclasses import dataclass, field
 from datetime import datetime, timezone
 from pathlib import Path
@@ -240,24 +242,35 @@ def transcode_to_mp4(src: Path | str, dest: Path, max_side: int = 1280) -> Path:
     if not AV_AVAILABLE:
         raise VideoError("PyAV is not installed")
     dest.parent.mkdir(parents=True, exist_ok=True)
-    tmp = dest.with_name(dest.stem + ".part.mp4")
+    # Named per process and thread: two transcodes of one video used to write into the same ".part.mp4".
+    tmp = dest.with_name(f"{dest.stem}.{os.getpid()}-{threading.get_ident():x}.part.mp4")
     try:
         with av.open(str(src)) as inp, av.open(str(tmp), "w", options={"movflags": "faststart"}) as out:
             vin = inp.streams.video[0]
             vin.thread_type = "AUTO"
             vout = None
+            sw = sh = 0
             for frame in inp.decode(video=0):
-                img = upright(frame.to_image(), int(getattr(frame, "rotation", 0) or 0))
-                if max(img.size) > max_side:
-                    img.thumbnail((max_side, max_side))
-                w, h = img.width - img.width % 2, img.height - img.height % 2   # yuv420p needs even sizes
+                rot = int(getattr(frame, "rotation", 0) or 0)
                 if vout is None:
+                    # Shrink in FFmpeg's scaler first, on the stored (unrotated) frame. Turning every full-size
+                    # frame into a Python image before shrinking it was ~90% of the time: 76 s for an 8 s 4K
+                    # clip whose decoding takes 7 s. Now 18 s, same size and orientation.
+                    scale = min(1.0, max_side / max(frame.width, frame.height))
+                    sw = max(2, int(frame.width * scale) // 2 * 2)        # yuv420p needs even sizes
+                    sh = max(2, int(frame.height * scale) // 2 * 2)
+                    w, h = (sh, sw) if rot % 180 else (sw, sh)
                     vout = out.add_stream("libx264", rate=vin.average_rate or 30)
                     vout.width, vout.height, vout.pix_fmt = w, h, "yuv420p"
                     vout.options = {"preset": "veryfast", "crf": "24"}
-                if img.size != (vout.width, vout.height):
-                    img = img.resize((vout.width, vout.height))
-                for pkt in vout.encode(av.VideoFrame.from_image(img)):
+                if rot:
+                    img = upright(frame.reformat(width=sw, height=sh, format="rgb24").to_image(), rot)
+                    if img.size != (vout.width, vout.height):
+                        img = img.resize((vout.width, vout.height))
+                    small = av.VideoFrame.from_image(img).reformat(format="yuv420p")
+                else:
+                    small = frame.reformat(width=sw, height=sh, format="yuv420p")
+                for pkt in vout.encode(small):
                     out.mux(pkt)
             if vout is None:
                 raise VideoError("no frames to transcode")

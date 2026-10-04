@@ -64,3 +64,22 @@ def test_without_direct_hevc_is_transcoded_and_only_once(setup, monkeypatch):
         t.join()
     assert results == [200] * 4
     assert len(calls) == 1, f"{len(calls)} transcodes of one video ran at once"
+
+
+@pytest.mark.parametrize("size,rotation,expected", [
+    ((320, 240), 90, (240, 320)),          # a portrait phone clip stored sideways comes out upright
+    ((2000, 1000), 0, (1280, 640)),        # a large landscape clip is shrunk to the preview size
+    ((1000, 2000), 270, (1280, 640)),
+])
+def test_the_transcode_is_upright_and_small(tmp_path, size, rotation, expected):
+    import av
+
+    from photointel.video import transcode_to_mp4
+
+    src = make_video(tmp_path / "in.mov", size=size, rotation=rotation, codec="mpeg4", seconds=0.5)
+    out = transcode_to_mp4(src, tmp_path / "out" / "x.mp4")
+    with av.open(str(out)) as c:
+        s = c.streams.video[0]
+        assert (s.codec_context.width, s.codec_context.height) == expected
+        assert s.codec_context.name == "h264"
+    assert not list((tmp_path / "out").glob("*.part.mp4")), "a temporary file was left behind"
