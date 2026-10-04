@@ -68,9 +68,12 @@ def album_detail(album_id: int):
                              chunk).fetchall()
     order = {pid: n for n, pid in enumerate(ids)}
     rows.sort(key=lambda r: order[r["id"]])
+    # The same cover the album list shows: the chosen one only while it is still one of the album's visible
+    # photos (it could be hidden, trashed or locked since), else the best of them.
+    cover = a["cover_photo_id"] if a["cover_photo_id"] in order else (albums_mod._best_photo(conn, ids) if ids else None)
     return {"id": a["id"], "name": a["name"], "description": a["description"], "source": a["source"],
             "kind": a["kind"], "query": a["query"], "photo_count": len(ids),
-            "cover_photo_id": a["cover_photo_id"], "photos": columnar(rows), "private": bool(a["private"]),
+            "cover_photo_id": cover, "photos": columnar(rows), "private": bool(a["private"]),
             "mine": current_user_id() is not None and a["owner_user_id"] == current_user_id()}
 
 

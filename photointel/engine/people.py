@@ -353,7 +353,17 @@ def set_people_hidden(conn: sqlite3.Connection, person_ids: list[int], hidden: b
 
 def merge_persons(conn: sqlite3.Connection, target_id: int, source_ids: list[int]) -> dict:
     """Move every face of `source_ids` onto `target_id`. Reversible via the audit log."""
-    source_ids = [int(s) for s in source_ids if int(s) != int(target_id)]
+    # Merge into the person that survives, never into one already merged away: from a stale page, "merge A
+    # into B" after B had been merged into A pointed the two at each other, and A's faces then belonged to a
+    # person no list shows (and opening either looped).
+    target_id, seen = int(target_id), set()
+    while target_id not in seen:
+        seen.add(target_id)
+        row = conn.execute("SELECT merged_into FROM persons WHERE id = ?", (target_id,)).fetchone()
+        if row is None or not row[0]:
+            break
+        target_id = int(row[0])
+    source_ids = [int(s) for s in source_ids if int(s) != target_id]
     if not source_ids:
         return {"merged": 0}
     moved = 0

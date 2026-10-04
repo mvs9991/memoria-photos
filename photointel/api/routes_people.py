@@ -40,7 +40,8 @@ def list_people(include_hidden: bool = False, include_ignored: bool = False, min
     } for r in rows]
     unassigned = conn.execute(
         "SELECT COUNT(*) FROM faces f JOIN photos p ON p.id = f.photo_id "
-        "WHERE f.person_id IS NULL AND f.quality >= 0.3 AND p.status = 'ok' AND p.live_component = 0").fetchone()[0]
+        "WHERE f.person_id IS NULL AND f.quality >= 0.3 AND p.status = 'ok' AND p.hidden = 0 "
+        "AND p.live_component = 0").fetchone()[0]
     return {"people": people, "unassigned_faces": unassigned,
             "me_person_id": get_state().ctx.settings.me_person_id}
 
@@ -52,8 +53,18 @@ def person_detail(person_id: int, photo_limit: int = 500):
     r = conn.execute("SELECT * FROM persons WHERE id=?", (person_id,)).fetchone()
     if r is None:
         raise HTTPException(404, "person not found")
-    if r["merged_into"]:
-        return person_detail(r["merged_into"], photo_limit)
+    # A merged person shows the one it was merged into, following the chain. Iteratively, and never round a
+    # loop: a merge made from a stale page once pointed two people at each other, and this recursed forever.
+    seen = {person_id}
+    while r["merged_into"]:
+        if r["merged_into"] in seen:
+            break
+        seen.add(r["merged_into"])
+        nxt = conn.execute("SELECT * FROM persons WHERE id=?", (r["merged_into"],)).fetchone()
+        if nxt is None:
+            break
+        r = nxt
+    person_id = r["id"]
 
     events = [{"id": e["id"], "title": event_title(e), "kind": e["kind"], "start_ts": e["start_ts"],
                "end_ts": e["end_ts"], "photo_count": e["photo_count"], "matched": e["n"],
@@ -88,15 +99,20 @@ def person_detail(person_id: int, photo_limit: int = 500):
            GROUP BY y ORDER BY y""", (person_id,))]
     best = [int(x[0]) for x in conn.execute(
         """SELECT DISTINCT ph.id FROM photos ph JOIN faces f ON f.photo_id = ph.id
-           WHERE f.person_id = ? AND ph.status='ok'
+           WHERE f.person_id = ? AND ph.status='ok' AND ph.hidden = 0 AND ph.live_component = 0
            ORDER BY (COALESCE(ph.quality_score,0) + f.quality * 20) DESC LIMIT 12""", (person_id,))]
+    # The page lists a dozen events; say how many there are, not how many were sent (it said 60 at most).
+    event_count = conn.execute(
+        """SELECT COUNT(DISTINCT p.event_id) FROM photos p JOIN faces f ON f.photo_id = p.id
+           JOIN events e ON e.id = p.event_id WHERE f.person_id = ? AND e.kind = 'event'
+             AND p.status = 'ok' AND p.hidden = 0""", (person_id,)).fetchone()[0]
     return {
         "id": r["id"], "label": person_label(r), "name": r["name"], "display_no": r["display_no"],
         "photo_count": r["photo_count"], "face_count": r["face_count"], "cover_face_id": r["cover_face_id"],
         "first_seen_ts": r["first_seen_ts"], "last_seen_ts": r["last_seen_ts"],
         "confidence": round(r["cluster_confidence"], 3) if r["cluster_confidence"] else None,
         "hidden": bool(r["hidden"]), "ignored": bool(r["ignored"]),
-        "events": events, "places": places, "years": years, "representative_photos": best,
+        "events": events, "event_count": event_count, "places": places, "years": years, "representative_photos": best,
         "co_occurring": co_occurring(conn, person_id),
         "is_me": state.ctx.settings.me_person_id == person_id,
         "birth_date": r["birth_date"],
@@ -115,7 +131,7 @@ def person_faces(person_id: int, limit: int = Query(300, le=2000), offset: int =
         f"""SELECT f.id, f.photo_id, f.assign_confidence, f.assign_source, f.quality, f.det_score,
                    f.x1, f.y1, f.x2, f.y2, p.taken_ts
             FROM faces f JOIN photos p ON p.id = f.photo_id
-            WHERE f.person_id = ? AND p.status = 'ok' ORDER BY {order_sql} LIMIT ? OFFSET ?""",
+            WHERE f.person_id = ? AND p.status = 'ok' AND p.hidden = 0 ORDER BY {order_sql} LIMIT ? OFFSET ?""",
         (person_id, limit, offset)).fetchall()
     return {"faces": [{"id": r["id"], "photo_id": r["photo_id"], "confidence": r["assign_confidence"],
                        "source": r["assign_source"], "quality": round(r["quality"], 3),
@@ -128,7 +144,7 @@ def unassigned_faces(limit: int = Query(200, le=1000), min_quality: float = 0.35
     rows = conn.execute(
         """SELECT f.id, f.photo_id, f.quality, f.x1, f.y1, f.x2, f.y2, p.taken_ts FROM faces f
            JOIN photos p ON p.id = f.photo_id
-           WHERE f.person_id IS NULL AND f.quality >= ? AND p.status='ok' AND p.live_component=0
+           WHERE f.person_id IS NULL AND f.quality >= ? AND p.status='ok' AND p.hidden = 0 AND p.live_component=0
            ORDER BY f.quality DESC LIMIT ?""", (min_quality, limit)).fetchall()
     return {"faces": [{"id": r["id"], "photo_id": r["photo_id"], "quality": round(r["quality"], 3),
                        "box": [r["x1"], r["y1"], r["x2"], r["y2"]], "taken_ts": r["taken_ts"]} for r in rows]}

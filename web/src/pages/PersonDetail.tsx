@@ -197,7 +197,7 @@ export default function PersonDetail() {
 
       {p.events?.length > 0 && (
         <section>
-          <SectionHeader title="Events" count={p.events.length} />
+          <SectionHeader title="Events" count={p.event_count ?? p.events.length} />
           <div className="event-rail">
             {p.events.slice(0, 12).map((e: any) => (
               <Link key={e.id} to={`/events/${e.id}`} className="event-card event-card-sm">
