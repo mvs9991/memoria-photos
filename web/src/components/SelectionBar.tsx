@@ -12,12 +12,14 @@ import { ExportDialog } from "./ExportDialog";
 import { CreateDialog } from "./CreateDialog";
 import { TrashDialog, useAllowDelete } from "./TrashDialog";
 
-export function SelectionBar({ selected, onClear, extra, allIds, onSelectAll, active = false }: {
+export function SelectionBar({ selected, onClear, onDone, extra, allIds, onSelectAll, active = false }: {
   selected: Set<number>;
   /** select mode is on: show a slim bar even before anything is picked, so the first pick does not
    *  push the whole grid down by the bar's height */
   active?: boolean;
   onClear: () => void;
+  /** leave select mode (the empty bar's Done button) */
+  onDone?: () => void;
   extra?: React.ReactNode;
   /** every photo in the grid, for "Select all" */
   allIds?: number[];
@@ -86,16 +88,29 @@ export function SelectionBar({ selected, onClear, extra, allIds, onSelectAll, ac
     },
   });
 
+  // The how-to sentence is for the first few seconds of select mode; left up it sat over the photos
+  // for as long as the mode was on. After that the bar shrinks to just Select all and Done.
+  const [hintGone, setHintGone] = useState(false);
+  const idle = active && selected.size === 0;
+  useEffect(() => {
+    if (!idle) { setHintGone(false); return; }
+    const t = window.setTimeout(() => setHintGone(true), 4000);
+    return () => window.clearTimeout(t);
+  }, [idle]);
+
   if (selected.size === 0) {
     if (!active) return null;
     return (
       <div className="review-bar selection-bar selection-bar-empty" role="toolbar" aria-label="Select photos">
-        <span className="dim">Tap photos to select them — or press and hold one, then drag across others</span>
+        {hintGone
+          ? <span className="dim">Select photos</span>
+          : <span className="dim">Tap photos to select them — or press and hold one, then drag across others</span>}
         {allIds && onSelectAll && allIds.length > 0 && (
           <button className="btn btn-quiet btn-sm" onClick={() => onSelectAll(allIds)} title="Ctrl+A">
             Select all {allIds.length.toLocaleString()}
           </button>
         )}
+        {onDone && <button className="btn btn-ghost btn-sm" onClick={onDone}>Done</button>}
       </div>
     );
   }
@@ -249,7 +264,7 @@ export function useGridSelect(allIds: number[]) {
       onSetSelection: setAll,
       onBeginSelect: begin,
     },
-    barProps: { selected, onClear: clear, allIds, onSelectAll: setAll, active: selecting },
+    barProps: { selected, onClear: clear, onDone: exit, allIds, onSelectAll: setAll, active: selecting },
   };
 }
 

@@ -1,8 +1,10 @@
-import { NavLink } from "react-router-dom";
+import { useEffect, useState } from "react";
+import { NavLink, useLocation } from "react-router-dom";
 import { useQuery } from "@tanstack/react-query";
 import {
   BookImage, CalendarRange, Copy, Images, MapPin, PanelLeftClose, PanelLeft, Settings as SettingsIcon,
   Sparkles, Users, Clock, Map as MapIcon, LayoutGrid, FolderTree, ChartColumn, Trash2, Upload, Lock, CircleUser, EyeOff,
+  Ellipsis, X,
 } from "lucide-react";
 import { api } from "../lib/api";
 
@@ -37,7 +39,17 @@ export function Sidebar({ collapsed, onToggle }: { collapsed: boolean; onToggle:
     "/duplicates": stats?.duplicate_groups,
   };
 
+  // The same destinations as the sidebar, for the phone's "More" sheet.
+  const more: NavItem[] = [
+    ...nav.filter((n) => !PHONE_TABS.includes(n.to)),
+    ...(auth?.accounts && auth.user?.username && role !== "guest" ? [{ to: "/private", label: "Private", icon: EyeOff }] : []),
+    ...(role === "owner" ? [{ to: "/locked", label: "Locked", icon: Lock }] : []),
+    ...(role === "owner" && (stats?.trash ?? 0) > 0 ? [{ to: "/trash", label: "Trash", icon: Trash2 }] : []),
+    { to: "/settings", label: "Settings", icon: SettingsIcon },
+  ];
+
   return (
+    <>
     <aside className="nav">
       <div className="nav-head">
         <NavLink to="/" className="brand" aria-label="Memoria home">
@@ -110,5 +122,54 @@ export function Sidebar({ collapsed, onToggle }: { collapsed: boolean; onToggle:
         )}
       </div>
     </aside>
+    <PhoneNav tabs={nav.filter((n) => PHONE_TABS.includes(n.to))} more={more} />
+    </>
+  );
+}
+
+/** The four places a phone goes most; everything else is under "More". */
+const PHONE_TABS = ["/", "/photos", "/people", "/albums"];
+
+type NavItem = { to: string; label: string; icon: React.ComponentType<{ size?: number; strokeWidth?: number }>; end?: boolean };
+
+/** On a phone the left rail is hidden (see layout.css) and this bar sits under the page instead. */
+function PhoneNav({ tabs, more }: { tabs: NavItem[]; more: NavItem[] }) {
+  const [open, setOpen] = useState(false);
+  const { pathname } = useLocation();
+  useEffect(() => setOpen(false), [pathname]);
+  return (
+    <>
+      {open && (
+        <div className="tabbar-sheet-wrap" onClick={() => setOpen(false)}>
+          <div className="tabbar-sheet" role="dialog" aria-label="More pages" onClick={(e) => e.stopPropagation()}>
+            <div className="tabbar-sheet-head">
+              <strong>More</strong>
+              <button className="btn btn-quiet btn-icon btn-sm" onClick={() => setOpen(false)} aria-label="Close"><X size={16} /></button>
+            </div>
+            <div className="tabbar-sheet-grid">
+              {more.map(({ to, label, icon: Icon }) => (
+                <NavLink key={to} to={to} className={({ isActive }) => `tabbar-more-link${isActive ? " is-active" : ""}`}>
+                  <Icon size={20} strokeWidth={1.9} />
+                  <span>{label}</span>
+                </NavLink>
+              ))}
+            </div>
+          </div>
+        </div>
+      )}
+      <nav className="tabbar" aria-label="Main">
+        {tabs.map(({ to, label, icon: Icon, end }) => (
+          <NavLink key={to} to={to} end={end} className={({ isActive }) => `tabbar-link${isActive ? " is-active" : ""}`}>
+            <Icon size={20} strokeWidth={1.9} />
+            <span>{label}</span>
+          </NavLink>
+        ))}
+        <button className={`tabbar-link${open ? " is-active" : ""}`} onClick={() => setOpen((v) => !v)}
+          aria-expanded={open} aria-label="More pages">
+          <Ellipsis size={20} strokeWidth={1.9} />
+          <span>More</span>
+        </button>
+      </nav>
+    </>
   );
 }
