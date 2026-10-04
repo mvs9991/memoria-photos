@@ -509,6 +509,13 @@ def drop_unseen(conn: sqlite3.Connection, photo_ids: list[int]) -> int:
             ids = [int(r[0]) for r in conn.execute("SELECT photo_id FROM trip_photos WHERE trip_id = ?", (eid,))]
         else:
             ids = [int(r[0]) for r in conn.execute("SELECT id FROM photos WHERE event_id = ?", (eid,))]
+        if not ids:
+            # Nothing visible is left: the event or trip goes, as the next rebuild would drop it, so its
+            # title, dates and place stop being listed.
+            conn.execute("UPDATE events SET parent_id = NULL WHERE parent_id = ?", (eid,))
+            conn.execute("DELETE FROM trip_photos WHERE trip_id = ?", (eid,))
+            conn.execute("DELETE FROM events WHERE id = ?", (eid,))
+            continue
         cover = _pick_cover(conn, ids) if ids else None
         people = conn.execute(
             f"SELECT COUNT(DISTINCT person_id) FROM faces WHERE person_id IS NOT NULL AND photo_id IN "

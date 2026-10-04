@@ -688,3 +688,24 @@ def test_a_place_only_hidden_photos_were_taken_at_is_not_listed(settled):
             if d.status_code == 200 and ("PLACELOCKXYZ" in d.text or "PLACEPRIVXYZ" in d.text):
                 problems.append(f"{who} /api/places/{pid_}")
     assert not problems, "\n".join(problems)
+
+
+def test_an_event_whose_every_photo_is_locked_vanishes_at_once(world):
+    """Locking all of a trip must not leave an empty event (its title, dates, place) until the next rebuild."""
+    w = world
+    goa = [r[0] for r in w.conn.execute("SELECT id FROM photos WHERE rel_path LIKE 'Trips/Goa/%' AND status = 'ok'")]
+    assert len(goa) == 5
+    ev = w.conn.execute("SELECT event_id FROM photos WHERE id = ?", (goa[0],)).fetchone()[0]
+    assert ev and any(e["id"] == ev for e in w.guest.get("/api/events").json()["events"])
+    assert w.owner.post("/api/photos/lock", json={"photo_ids": goa}).status_code == 200
+    for who in ("owner", "guest", "ravi"):
+        c = getattr(w, who)
+        listed = c.get("/api/events").json()["events"]
+        assert not [e for e in listed if e["id"] == ev], (who, "an event with no visible photo is still listed")
+        assert all(e["photo_count"] > 0 for e in listed), (who, listed)
+        d = c.get(f"/api/events/{ev}")
+        assert d.status_code == 404 or d.json()["photos"]["total"] == 0, (who, d.text[:300])
+        assert not [e for e in c.get("/api/timeline").json()["events"] if e["id"] == ev], who
+        sections = c.get("/api/memories").json()["sections"]
+        assert not [it for sec in sections if sec["kind"] == "recent_events" for it in sec["items"]
+                    if it["id"] == ev], who
