@@ -89,7 +89,8 @@ export default function SearchPage() {
               )}
             </div>
             <span className="dim search-timing tnum">
-              {data.total.toLocaleString()} results · {data.took_ms} ms
+              {data.total.toLocaleString()} results
+              {data.photos.length < data.total ? ` · showing the first ${data.photos.length.toLocaleString()}` : ""} · {data.took_ms} ms
             </span>
             <SaveSmartAlbum query={q} />
           </div>

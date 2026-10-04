@@ -248,7 +248,11 @@ class SearchEngine:
                                              "detail": "few tagged photos — ranked the library visually"})
         else:
             res.photo_ids = self._order(conn, candidates, q, limit)
-        res.total = len(res.photo_ids)
+            # A filter (a person, a year, a place) has an exact answer: say how many photos matched, not how
+            # many were sent. "Jhansi" said "1,000 results" for her 6,434 photos. (A visual ranking has no such
+            # count, so there it stays the number returned.)
+            res.total = len(set(candidates))
+        res.total = max(res.total, len(res.photo_ids))
 
         if q.result_type in ("events", "people", "places"):
             self._aggregate_entities(conn, q, res)
