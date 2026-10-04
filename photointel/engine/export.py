@@ -180,8 +180,11 @@ def _expand(conn: sqlite3.Connection, ids: list[int], spec: ExportSpec) -> list[
             extra += [r[0] for r in conn.execute(
                 f"SELECT id FROM photos WHERE stack_id IN ({marks}) AND status = 'ok' ORDER BY id", chunk)]
         if spec.include_live:
+            # The moving half only while it is itself an ordinary photo: locked, private or trashed is never
+            # exported, and this used to add it on the still's say-so alone.
             extra += [r[0] for r in conn.execute(
-                f"SELECT live_video_id FROM photos WHERE id IN ({marks}) AND live_video_id IS NOT NULL", chunk)]
+                f"SELECT v.id FROM photos p JOIN photos v ON v.id = p.live_video_id "
+                f"WHERE p.id IN ({marks}) AND v.status = 'ok'", chunk)]
         for pid in extra:
             if pid not in seen:
                 seen.add(pid)

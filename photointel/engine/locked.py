@@ -16,9 +16,10 @@ from . import visibility
 
 def lock(conn: sqlite3.Connection, photo_ids: list[int]) -> int:
     ids = visibility.companions(conn, photo_ids)
-    marks = ",".join("?" * len(ids))
-    conn.execute(f"UPDATE photos SET locked = 1 WHERE id IN ({marks})", ids)
-    n = conn.execute(f"UPDATE photos SET status = 'locked' WHERE id IN ({marks}) AND status = 'ok'", ids).rowcount
+    n = 0
+    for chunk, marks in db.chunks(ids):
+        conn.execute(f"UPDATE photos SET locked = 1 WHERE id IN ({marks})", chunk)
+        n += conn.execute(f"UPDATE photos SET status = 'locked' WHERE id IN ({marks}) AND status = 'ok'", chunk).rowcount
     db.audit(conn, "photos_locked", "photo", None, {"count": len(ids)})   # ids stay out of the log on purpose
     conn.commit()
     visibility.refresh(conn, ids)
@@ -27,9 +28,10 @@ def lock(conn: sqlite3.Connection, photo_ids: list[int]) -> int:
 
 def unlock(conn: sqlite3.Connection, photo_ids: list[int]) -> int:
     ids = visibility.companions(conn, photo_ids)
-    marks = ",".join("?" * len(ids))
-    conn.execute(f"UPDATE photos SET locked = 0 WHERE id IN ({marks})", ids)
-    n = conn.execute(f"UPDATE photos SET status = 'ok' WHERE id IN ({marks}) AND status = 'locked'", ids).rowcount
+    n = 0
+    for chunk, marks in db.chunks(ids):
+        conn.execute(f"UPDATE photos SET locked = 0 WHERE id IN ({marks})", chunk)
+        n += conn.execute(f"UPDATE photos SET status = 'ok' WHERE id IN ({marks}) AND status = 'locked'", chunk).rowcount
     db.audit(conn, "photos_unlocked", "photo", None, {"count": len(ids)})
     conn.commit()
     visibility.refresh(conn, ids)

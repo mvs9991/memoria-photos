@@ -435,8 +435,8 @@ def hide_photos(body: HideBody):
     if not body.photo_ids:
         return {"changed": 0}
     conn = get_state().conn()
-    marks = ",".join("?" * len(body.photo_ids))
-    n = conn.execute(f"UPDATE photos SET hidden = ? WHERE id IN ({marks})", (int(body.hidden), *body.photo_ids)).rowcount
+    n = sum(conn.execute(f"UPDATE photos SET hidden = ? WHERE id IN ({marks})", (int(body.hidden), *chunk)).rowcount
+            for chunk, marks in db.chunks(body.photo_ids))
     db.audit(conn, "photos_hidden" if body.hidden else "photos_unhidden", "photo", None, {"photos": body.photo_ids[:2000]})
     conn.commit()
     from ..engine import visibility
@@ -458,9 +458,8 @@ def rotate_photos(body: RotateBody):
     if not body.photo_ids:
         return {"rotated": 0}
     conn = get_state().conn()
-    marks = ",".join("?" * len(body.photo_ids))
-    n = conn.execute(f"UPDATE photos SET rotation = ((rotation + ?) % 360 + 360) % 360 WHERE id IN ({marks})",
-                     (body.degrees, *body.photo_ids)).rowcount
+    n = sum(conn.execute(f"UPDATE photos SET rotation = ((rotation + ?) % 360 + 360) % 360 WHERE id IN ({marks})",
+                         (body.degrees, *chunk)).rowcount for chunk, marks in db.chunks(body.photo_ids))
     db.audit(conn, "photos_rotated", "photo", None, {"photos": body.photo_ids[:2000], "degrees": body.degrees})
     conn.commit()
     return {"rotated": n}
@@ -476,8 +475,8 @@ def rate(body: RateBody):
     if not 0 <= body.rating <= 5:
         raise HTTPException(400, "rating is 0 (none) to 5")
     conn = get_state().conn()
-    marks = ",".join("?" * len(body.photo_ids))
-    conn.execute(f"UPDATE photos SET rating = ? WHERE id IN ({marks})", (body.rating, *body.photo_ids))
+    for chunk, marks in db.chunks(body.photo_ids):
+        conn.execute(f"UPDATE photos SET rating = ? WHERE id IN ({marks})", (body.rating, *chunk))
     db.audit(conn, "photos_rated", "photo", None, {"photos": body.photo_ids[:2000], "rating": body.rating})
     conn.commit()
     return {"rated": len(body.photo_ids), "rating": body.rating}

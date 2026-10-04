@@ -252,3 +252,12 @@ class ThreadLocalDB:
             conn = connect(self.db_path)
             self._local.conn = conn
         return conn
+
+
+def chunks(ids, size: int = 900):
+    """(chunk, "?,?,...") pieces of a list of ids, for `... IN (...)`. SQLite binds at most ~32,766 values in
+    one statement, so "select all" on a big enough library failed when its ids went into a single IN list."""
+    ids = list(ids)
+    for i in range(0, len(ids), size):
+        chunk = ids[i:i + size]
+        yield chunk, ",".join("?" * len(chunk))

@@ -119,11 +119,29 @@ def add_root(body: RootBody):
 @router.delete("/roots/{root_id}")
 def remove_root(root_id: int, delete_photos: bool = Query(True)):
     conn = get_state().conn()
+    removed: list[int] = []
+    people: list[int] = []
     if delete_photos:
+        # Who and what the removal touches, read before the rows (and their faces) go.
+        removed = [int(r[0]) for r in conn.execute("SELECT id FROM photos WHERE root_id = ?", (root_id,))]
+        people = [int(r[0]) for r in conn.execute(
+            "SELECT DISTINCT f.person_id FROM faces f JOIN photos p ON p.id = f.photo_id "
+            "WHERE p.root_id = ? AND f.person_id IS NOT NULL", (root_id,))]
         conn.execute("DELETE FROM photos WHERE root_id=?", (root_id,))
     conn.execute("DELETE FROM roots WHERE id=?", (root_id,))
-    db.audit(conn, "root_removed", "root", root_id, {})
+    db.audit(conn, "root_removed", "root", root_id, {"photos": len(removed)})
     conn.commit()
+    if removed:
+        # People counts, covers, events and the search index described these photos. Without this they
+        # kept counting them, search could still return them, and the next scheduled index skipped the
+        # rebuild because no file had changed.
+        from ..engine import visibility
+        from ..engine.people import update_person_stats
+
+        visibility.refresh(conn, removed)
+        if people:
+            update_person_stats(conn, people)
+            conn.commit()
     return {"ok": True}
 
 

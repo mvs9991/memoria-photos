@@ -22,7 +22,8 @@ export function AccountsCard() {
   const [name, setName] = useState("");
   const [pw, setPw] = useState("");
   const [role, setRole] = useState<Role>("family");
-  const refresh = () => { qc.invalidateQueries({ queryKey: ["accounts"] }); qc.invalidateQueries({ queryKey: ["auth"] }); };
+  // returned, so a mutation stays pending until the list has refetched (its toggles read the old value)
+  const refresh = () => Promise.all([qc.invalidateQueries({ queryKey: ["accounts"] }), qc.invalidateQueries({ queryKey: ["auth"] })]);
   const enable = useMutation({ mutationFn: () => api.enableAccounts(owner.trim()), onSuccess: refresh });
   const add = useMutation({
     mutationFn: () => api.createAccount(name.trim(), pw, role),
@@ -68,7 +69,7 @@ export function AccountsCard() {
                 <span className="dim account-seen">{a.last_login_at ? `seen ${relativeTime(a.last_login_at)}` : "never signed in"}</span>
                 {auth.data.user?.id !== a.id && (
                   <>
-                    <button className="btn btn-quiet btn-sm" onClick={() => change.mutate({ id: a.id, body: { disabled: !a.disabled } })}>
+                    <button className="btn btn-quiet btn-sm" disabled={change.isPending} onClick={() => change.mutate({ id: a.id, body: { disabled: !a.disabled } })}>
                       {a.disabled ? "Turn on" : "Turn off"}
                     </button>
                     <button className="btn btn-quiet btn-sm" onClick={() => {

@@ -91,15 +91,14 @@ def add_photos(conn: sqlite3.Connection, album_id: int, photo_ids: list[int], co
 
 def remove_photos(conn: sqlite3.Connection, album_id: int, photo_ids: list[int]) -> int:
     """Removes content from the album: every copy sharing the photos' hashes goes."""
-    marks = ",".join("?" * len(photo_ids))
-    shas = [r[0] for r in conn.execute(
-        f"SELECT sha256 FROM photos WHERE id IN ({marks}) AND sha256 IS NOT NULL", photo_ids)]
-    n = conn.execute(f"DELETE FROM album_photos WHERE album_id = ? AND photo_id IN ({marks})",
-                     (album_id, *photo_ids)).rowcount
-    if shas:
+    shas = [r[0] for chunk, marks in db.chunks(photo_ids) for r in conn.execute(
+        f"SELECT sha256 FROM photos WHERE id IN ({marks}) AND sha256 IS NOT NULL", chunk)]
+    n = sum(conn.execute(f"DELETE FROM album_photos WHERE album_id = ? AND photo_id IN ({marks})",
+                         (album_id, *chunk)).rowcount for chunk, marks in db.chunks(photo_ids))
+    for chunk, marks in db.chunks(shas):
         n += conn.execute(
             f"DELETE FROM album_photos WHERE album_id = ? AND photo_id IN "
-            f"(SELECT id FROM photos WHERE sha256 IN ({','.join('?' * len(shas))}))", (album_id, *shas)).rowcount
+            f"(SELECT id FROM photos WHERE sha256 IN ({marks}))", (album_id, *chunk)).rowcount
     conn.execute("UPDATE albums SET updated_at = ? WHERE id = ?", (time.time(), album_id))
     db.audit(conn, "album_photos_removed", "album", album_id, {"photos": list(photo_ids)[:2000]})
     conn.commit()

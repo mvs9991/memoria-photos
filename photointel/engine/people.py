@@ -351,18 +351,25 @@ def set_people_hidden(conn: sqlite3.Connection, person_ids: list[int], hidden: b
     return changed
 
 
+def live_person(conn: sqlite3.Connection, person_id: int) -> int:
+    """The person `person_id` became: itself, or the one it was merged into, followed to the end (never round a
+    loop). A page left open from before a merge still names the old person; writing to it strands the faces."""
+    pid, seen = int(person_id), set()
+    while pid not in seen:
+        seen.add(pid)
+        row = conn.execute("SELECT merged_into FROM persons WHERE id = ?", (pid,)).fetchone()
+        if row is None or not row[0]:
+            break
+        pid = int(row[0])
+    return pid
+
+
 def merge_persons(conn: sqlite3.Connection, target_id: int, source_ids: list[int]) -> dict:
     """Move every face of `source_ids` onto `target_id`. Reversible via the audit log."""
     # Merge into the person that survives, never into one already merged away: from a stale page, "merge A
     # into B" after B had been merged into A pointed the two at each other, and A's faces then belonged to a
     # person no list shows (and opening either looped).
-    target_id, seen = int(target_id), set()
-    while target_id not in seen:
-        seen.add(target_id)
-        row = conn.execute("SELECT merged_into FROM persons WHERE id = ?", (target_id,)).fetchone()
-        if row is None or not row[0]:
-            break
-        target_id = int(row[0])
+    target_id = live_person(conn, target_id)
     source_ids = [int(s) for s in source_ids if int(s) != target_id]
     if not source_ids:
         return {"merged": 0}
@@ -384,6 +391,11 @@ def merge_persons(conn: sqlite3.Connection, target_id: int, source_ids: list[int
 
 def split_person(conn: sqlite3.Connection, person_id: int, face_ids: list[int], name: str | None = None) -> dict:
     """Move the given faces out of a person into a new person (a mis-clustered identity)."""
+    # Only faces that are this person's: a stale page could send others, and they were moved (and recorded as
+    # "not this person") all the same.
+    q = ",".join("?" * len(face_ids))
+    face_ids = [int(r[0]) for r in conn.execute(
+        f"SELECT id FROM faces WHERE id IN ({q}) AND person_id = ?", (*face_ids, person_id))]
     if not face_ids:
         return {"created": None}
     model_id = db.active_model_id(conn, "face")
@@ -407,6 +419,8 @@ def split_person(conn: sqlite3.Connection, person_id: int, face_ids: list[int], 
 def assign_faces(conn: sqlite3.Connection, face_ids: list[int], person_id: int | None = None,
                  name: str | None = None) -> dict:
     """Confirm an identity for faces (user action -> locked)."""
+    if person_id is not None:
+        person_id = live_person(conn, person_id)
     if person_id is None:
         if name:
             row = conn.execute("SELECT id FROM persons WHERE name = ? AND merged_into IS NULL", (name,)).fetchone()

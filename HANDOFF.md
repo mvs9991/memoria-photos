@@ -1038,3 +1038,28 @@ viewer falls back to the transcode, which runs once per video (`tests/test_video
 "preparing" notice. The transcode itself scales in FFmpeg before rotating the small frame: 76 → 18 s for an 8 s 4K
 clip (decoding alone is 7 s; hardware decode via d3d11va was slower, 18 s). MPEG-2 still takes about a third of
 the clip's length on first play; pre-transcoding all 194 was judged too heavy (hours of CPU on this machine).
+
+### Route-by-route review (2026-10-04, `tests/test_review_round2.py`; each test failed before its fix unless noted)
+
+- **People:** merging into a person already merged away (a stale page) pointed two people at each other — faces
+  stranded on an invisible person, the person page recursed until it crashed. Merges and face assignments now
+  resolve to the surviving person (`people.live_person`); the person page follows merges iteratively. Splitting
+  moved any face id it was sent and recorded "not this person" for faces that never were; now only that person's.
+  A person's best photos, face review and the ungrouped faces (and their count) left hidden photos in. The page
+  showed "Events 60" at most; it now gets the real count. (Real library checked: 74 merged people, no loops,
+  no stranded faces.)
+- **Duplicates:** "Hide copies" hid whatever ids it was sent, the keeper too (the photo then vanished); the review
+  accepted any status string and any photo as keeper. The server now enforces both.
+- **Events:** people, places, tags, highlights and map came from the first 900 photos (an event on the real library
+  has 1,737). The event page's photo query has no hidden filter, but hiding already detaches a photo from its
+  event, so that one is a guard test, not a fix.
+- **Folders:** removing one left people counts, events and the search index describing its photos (and the next
+  scheduled index skipped the rebuild); it now refreshes them.
+- **Bulk actions** (hide, rate, rotate, archive, lock, private, album removal, clear corrections) put every id in
+  one `IN (...)`: past ~32,766 selected photos ("Select all" on a big library) they failed. `db.chunks`.
+- **Export** added a Live photo's video without checking the video's own status.
+- **Album page** showed a stored cover even after it was hidden; the list did not.
+- Read and left as they are: the Trash (renames only, plan committed before moving, races back out safely; a
+  sidecar that cannot be restored because the name is taken stays in the trash folder and is never purged —
+  harmless, noted), editing/creations (locked and private photos are refused by status), the Locked PIN limiter
+  (one counter for all devices on purpose).

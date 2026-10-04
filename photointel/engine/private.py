@@ -79,9 +79,9 @@ def make_private(ctx, conn: sqlite3.Connection, user: dict, photo_ids: list[int]
     mine = _mine_in_folder(ctx, conn, user, photo_ids)
     ids = visibility.companions(conn, mine) if mine else []
     if ids:
-        marks = ",".join("?" * len(ids))
-        conn.execute(f"UPDATE photos SET private_to = ?, status = CASE WHEN status IN ('ok', 'locked') "
-                     f"THEN 'private' ELSE status END WHERE id IN ({marks})", (int(user["id"]), *ids))
+        for chunk, marks in db.chunks(ids):
+            conn.execute(f"UPDATE photos SET private_to = ?, status = CASE WHEN status IN ('ok', 'locked') "
+                         f"THEN 'private' ELSE status END WHERE id IN ({marks})", (int(user["id"]), *chunk))
         db.audit(conn, "photos_private", "user", int(user["id"]), {"count": len(ids)})   # no ids in the log
         conn.commit()
         visibility.refresh(conn, ids)
@@ -93,9 +93,8 @@ def share(conn: sqlite3.Connection, user: dict, photo_ids: list[int]) -> int:
     """Back to the family: only this person's own private photos."""
     if not photo_ids:
         return 0
-    marks = ",".join("?" * len(photo_ids))
-    mine = [int(r[0]) for r in conn.execute(
-        f"SELECT id FROM photos WHERE private_to = ? AND id IN ({marks})", (int(user["id"]), *photo_ids))]
+    mine = [int(r[0]) for chunk, marks in db.chunks(photo_ids) for r in conn.execute(
+        f"SELECT id FROM photos WHERE private_to = ? AND id IN ({marks})", (int(user["id"]), *chunk))]
     ids = visibility.companions(conn, mine) if mine else []
     if not ids:
         return 0

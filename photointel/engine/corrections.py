@@ -72,9 +72,10 @@ def set_location(conn: sqlite3.Connection, photo_ids: list[int], lat: float, lon
 
 def clear(conn: sqlite3.Connection, photo_ids: list[int]) -> dict:
     """Forget corrections. The file's own values return on the next re-index of the photo."""
-    marks = ",".join("?" * len(photo_ids))
-    n = conn.execute(f"DELETE FROM photo_overrides WHERE photo_id IN ({marks})", photo_ids).rowcount
-    conn.execute(f"UPDATE photos SET meta_version = NULL WHERE id IN ({marks})", photo_ids)  # re-read the file
+    n = 0
+    for chunk, marks in db.chunks(photo_ids):
+        n += conn.execute(f"DELETE FROM photo_overrides WHERE photo_id IN ({marks})", chunk).rowcount
+        conn.execute(f"UPDATE photos SET meta_version = NULL WHERE id IN ({marks})", chunk)  # re-read the file
     db.audit(conn, "corrections_cleared", "photo", None, {"photos": photo_ids[:2000]})
     conn.commit()
     return {"cleared": n}

@@ -233,8 +233,8 @@ def archive(body: ArchiveBody):
     ids = visibility.companions(conn, body.photo_ids)
     if not ids:
         return {"changed": 0}
-    marks = ",".join("?" * len(ids))
-    n = conn.execute(f"UPDATE photos SET archived = ? WHERE id IN ({marks})", (int(body.archived), *ids)).rowcount
+    n = sum(conn.execute(f"UPDATE photos SET archived = ? WHERE id IN ({marks})", (int(body.archived), *chunk)).rowcount
+            for chunk, marks in db.chunks(ids))
     db.audit(conn, "photos_archived" if body.archived else "photos_unarchived", "photo", None, {"photos": ids[:2000]})
     conn.commit()
     visibility.refresh(conn, ids)

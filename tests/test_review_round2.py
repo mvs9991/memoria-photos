@@ -169,3 +169,108 @@ def test_a_review_accepts_only_known_states_and_a_keeper_from_the_group(ctx, cli
     assert client.post(f"/api/duplicates/{gid}/review", json={"status": "banana"}).status_code == 422
     assert client.post(f"/api/duplicates/{gid}/review", json={"keep_photo_id": outsider}).status_code == 400
     assert client.post(f"/api/duplicates/{gid}/review", json={"keep_photo_id": members[1], "status": "reviewed"}).status_code == 200
+
+
+def test_an_export_never_adds_a_live_photos_video_that_is_not_an_ordinary_photo(ctx, client):
+    from photointel.engine import export as export_mod
+
+    still, video = visible_ids(ctx, 2)
+    c = ctx.connect()
+    c.execute("UPDATE photos SET live_video_id = ? WHERE id = ?", (video, still))
+    c.execute("UPDATE photos SET status = 'locked', locked = 1 WHERE id = ?", (video,))
+    c.commit()
+    plan = export_mod.plan(c, export_mod.ExportSpec.from_dict({"photo_ids": [still], "include_live": True}))
+    c.close()
+    assert [i.photo_id for i in plan.items] == [still], "the locked video half was exported with its still"
+
+
+def test_removing_a_folder_refreshes_people_counts_and_the_search_index(ctx, client, tmp_path):
+    from datetime import datetime
+
+    from photointel import db
+    from tests.conftest import make_image
+
+    second = tmp_path / "second"
+    for i in range(3):
+        make_image(second / f"s{i}.jpg", colour=(30 * i, 200, 90), taken=datetime(2023, 5, 1, 10, i), noise=12)
+    Indexer(ctx, workers=1).run(roots=[str(second)])
+    c = ctx.connect()
+    root_id = c.execute("SELECT id FROM roots WHERE path LIKE ?", (f"%{second.name}",)).fetchone()[0]
+    c.close()
+    pid = _make_people(ctx, 1, 0)[0]
+    c = ctx.connect()
+    import time
+    import numpy as np
+    model = db.active_model_id(c, "face")
+    for (photo,) in c.execute("SELECT id FROM photos WHERE root_id = ?", (root_id,)).fetchall():
+        c.execute("INSERT INTO faces(photo_id, model_id, x1, y1, x2, y2, det_score, size_px, quality, embedding, person_id, "
+                  "created_at) VALUES (?,?,0.1,0.1,0.4,0.4,0.99,120,0.9,?,?,?)",
+                  (photo, model, np.ones(4, np.float16).tobytes(), pid, time.time()))
+    from photointel.engine.people import update_person_stats
+    update_person_stats(c)
+    db.set_meta(c, "post_pending", "0")
+    c.commit()
+    assert c.execute("SELECT photo_count FROM persons WHERE id = ?", (pid,)).fetchone()[0] == 3
+    gen_before = int(db.get_meta(c, "gen:embeddings", 0) or 0)
+    c.close()
+
+    assert client.delete(f"/api/roots/{root_id}").status_code == 200
+    c = ctx.connect()
+    assert c.execute("SELECT photo_count FROM persons WHERE id = ?", (pid,)).fetchone()[0] == 0, \
+        "the person still counts photos from the removed folder"
+    assert int(db.get_meta(c, "gen:embeddings", 0) or 0) > gen_before, "search still ranks the removed photos"
+    assert db.get_meta(c, "post_pending") == "1", "the next scheduled index would skip rebuilding events"
+    c.close()
+
+
+BULK = [("/api/photos/rate", {"rating": 3}), ("/api/photos/hide", {"hidden": True}), ("/api/photos/rotate", {"degrees": 90}),
+        ("/api/photos/archive", {"archived": True})]
+
+
+@pytest.mark.parametrize("path,extra", BULK)
+def test_bulk_actions_take_an_empty_selection(ctx, client, path, extra):
+    r = client.post(path, json={"photo_ids": [], **extra})
+    assert r.status_code in (200, 400), f"{path} with nothing selected: {r.status_code} {r.text[:120]}"
+
+
+@pytest.mark.parametrize("path,extra", BULK)
+def test_bulk_actions_take_more_ids_than_sqlite_binds_at_once(ctx, client, path, extra):
+    """"Select all" on a library past ~32,766 photos sends that many ids; one IN (...) cannot hold them."""
+    ids = visible_ids(ctx, 2) + list(range(10_000_000, 10_033_000))
+    r = client.post(path, json={"photo_ids": ids, **extra})
+    assert r.status_code == 200, f"{path} with {len(ids)} ids: {r.status_code} {r.text[:120]}"
+
+
+def test_assigning_faces_to_a_person_merged_away_gives_them_to_the_survivor(ctx, client):
+    a, b = _make_people(ctx, 2, 2)
+    client.post("/api/people/merge", json={"target_id": a, "source_ids": [b]})        # b -> a
+    c = ctx.connect()
+    import time
+    import numpy as np
+    from photointel import db
+    model = db.active_model_id(c, "face")
+    photo = visible_ids(ctx, 6)[5]
+    fid = c.execute("INSERT INTO faces(photo_id, model_id, x1, y1, x2, y2, det_score, size_px, quality, embedding, "
+                    "created_at) VALUES (?,?,0.5,0.5,0.7,0.7,0.99,120,0.9,?,?)",
+                    (photo, model, np.ones(4, np.float16).tobytes(), time.time())).lastrowid
+    c.commit()
+    c.close()
+    client.post("/api/faces/assign", json={"face_ids": [fid], "person_id": b})           # a stale page still shows b
+    c = ctx.connect()
+    owner = c.execute("SELECT person_id FROM faces WHERE id = ?", (fid,)).fetchone()[0]
+    c.close()
+    assert owner == a, f"the face went to person {owner}, which was merged away"
+
+
+def test_splitting_moves_only_faces_that_belong_to_the_person(ctx, client):
+    a, b = _make_people(ctx, 2, 2)
+    c = ctx.connect()
+    faces_a = [r[0] for r in c.execute("SELECT id FROM faces WHERE person_id = ?", (a,))]
+    faces_b = [r[0] for r in c.execute("SELECT id FROM faces WHERE person_id = ?", (b,))]
+    c.close()
+    r = client.post(f"/api/people/{a}/split", json={"face_ids": [faces_a[0], faces_b[0]]}).json()
+    c = ctx.connect()
+    assert c.execute("SELECT person_id FROM faces WHERE id = ?", (faces_b[0],)).fetchone()[0] == b, \
+        "a face of someone else was moved by splitting another person"
+    assert c.execute("SELECT person_id FROM faces WHERE id = ?", (faces_a[0],)).fetchone()[0] == r["created"]
+    c.close()
