@@ -16,7 +16,7 @@ from .. import db
 from ..config import SUPPORTED_EXTENSIONS
 from ..pipeline import jobs as jobs_mod
 from ..pipeline.scanner import ensure_root
-from .deps import get_state
+from .deps import current_user_id, get_state
 
 log = logging.getLogger(__name__)
 router = APIRouter()
@@ -219,15 +219,24 @@ def models():
     return {"models": rows, "active": active, "device": state.ctx.device}
 
 
+# a row of `photos` joined as p: not locked, and not private to anyone but the person asking
+_NOT_SOMEONES_ELSE = "(p.id IS NULL OR (p.locked = 0 AND (p.private_to IS NULL OR p.private_to = ?)))"
+
+
 @router.get("/errors")
 def errors(limit: int = 200):
+    """A file that failed to read keeps status 'error' but still belongs to whoever uploaded it
+    privately, or to the Locked folder, so its name and path are not for anyone else's eyes."""
     conn = get_state().conn()
+    me = current_user_id() or 0
     rows = conn.execute(
         """SELECT e.id, e.photo_id, e.path, e.stage, e.error, e.created_at, p.filename, p.status
            FROM processing_errors e LEFT JOIN photos p ON p.id = e.photo_id
-           ORDER BY e.id DESC LIMIT ?""", (limit,)).fetchall()
+           WHERE {unseen_free}
+           ORDER BY e.id DESC LIMIT ?""".format(unseen_free=_NOT_SOMEONES_ELSE), (me, limit)).fetchall()
     return {"errors": [dict(r) for r in rows],
-            "total": conn.execute("SELECT COUNT(*) FROM processing_errors").fetchone()[0]}
+            "total": conn.execute("SELECT COUNT(*) FROM processing_errors e LEFT JOIN photos p ON p.id = e.photo_id "
+                                  "WHERE " + _NOT_SOMEONES_ELSE, (me,)).fetchone()[0]}
 
 
 @router.get("/audit")
@@ -240,7 +249,36 @@ def audit(limit: int = 100, entity_type: str | None = None):
         args.append(entity_type)
     sql += " ORDER BY id DESC LIMIT ?"
     args.append(limit)
-    return {"entries": [dict(r) for r in conn.execute(sql, args)]}
+    return {"entries": _without_unseen_photos(conn, [dict(r) for r in conn.execute(sql, args)])}
+
+
+_ID_LISTS = ("photos", "photo_ids", "members", "ids")
+
+
+def _without_unseen_photos(conn, entries: list[dict]) -> list[dict]:
+    """The log is written when an action happens, so it names photos (ids, captions) that were
+    visible then and are locked or private now. Entries about such a photo are left out, and its id is
+    taken out of any list in another entry's details (an album, a tag, a stack)."""
+    import json
+
+    unseen = {int(r[0]) for r in conn.execute("SELECT id FROM photos WHERE status IN ('locked', 'private')")}
+    if not unseen:
+        return entries
+    out = []
+    for e in entries:
+        if e["entity_type"] == "photo" and e["entity_id"] in unseen:
+            continue
+        try:
+            details = json.loads(e["details"]) if e.get("details") else None
+        except ValueError:
+            details = None
+        if isinstance(details, dict):
+            for k in _ID_LISTS:
+                if isinstance(details.get(k), list):
+                    details[k] = [x for x in details[k] if x not in unseen]
+            e = {**e, "details": json.dumps(details)}
+        out.append(e)
+    return out
 
 
 @router.get("/health")
