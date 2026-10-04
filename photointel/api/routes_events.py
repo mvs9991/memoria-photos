@@ -211,8 +211,9 @@ def place_detail(place_id: int):
     if p is None or not conn.execute("SELECT 1 FROM photos WHERE place_id=? AND status='ok' LIMIT 1",
                                      (place_id,)).fetchone():
         raise HTTPException(404, "place not found")
+    # Every event at the place: the newest 100 left out 35 at a real library's busiest place.
     events = [_event_dict(conn, e) for e in conn.execute(
-        "SELECT * FROM events WHERE place_id=? AND photo_count > 0 ORDER BY start_ts DESC LIMIT 100", (place_id,))]
+        "SELECT * FROM events WHERE place_id=? AND photo_count > 0 ORDER BY start_ts DESC", (place_id,))]
     people = [{"id": r["id"], "label": person_label(r), "cover_face_id": r["cover_face_id"], "count": r["n"]}
               for r in conn.execute(
         """SELECT pe.*, COUNT(DISTINCT f.photo_id) n FROM persons pe JOIN faces f ON f.person_id = pe.id

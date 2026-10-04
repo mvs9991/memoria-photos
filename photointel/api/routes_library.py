@@ -884,7 +884,10 @@ def memories(limit: int = 12):
 @router.get("/folders")
 def folders():
     conn = get_state().conn()
+    # Counted the way the folder's own grid counts (hidden photos and live photos' video halves left out),
+    # and every folder: a cap of 400 would drop the smallest ones from a big library without a word.
     rows = conn.execute(
-        "SELECT folder, COUNT(*) n FROM photos WHERE status='ok' GROUP BY folder ORDER BY n DESC LIMIT 400"
+        "SELECT folder, COUNT(*) n FROM photos WHERE status='ok' AND hidden = 0 AND live_component = 0 "
+        "GROUP BY folder ORDER BY n DESC"
     ).fetchall()
     return {"folders": [{"path": r["folder"], "count": r["n"]} for r in rows]}
