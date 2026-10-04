@@ -58,7 +58,7 @@ photointel/
   api/       app.py routes_*.py images.py
 web/         React + TypeScript UI (Vite)
 eval/        dataset builders, calibration, evaluation, library inspector
-tests/       633 tests, no GPU required
+tests/       640 tests, no GPU required
 ```
 
 **The indexing pipeline** is a feeder thread → N CPU worker threads (read, hash, decode, EXIF,
@@ -123,7 +123,7 @@ python -m photointel index               # SigLIP2 (~1.5 GB) downloads here, on 
 python -m photointel serve               # http://127.0.0.1:8765
 ```
 
-Verified at an early commit (when the suite had 126 tests; it now has 633): a fresh clone ran the
+Verified at an early commit (when the suite had 126 tests; it now has 640): a fresh clone ran the
 full test suite and booted the CLI against a new empty library using only committed files. On
 Linux/macOS activate with `source .venv/bin/activate`; `"D:/Photos"` is only this machine's example
 path. `add-root` must come before `index`.
@@ -790,6 +790,19 @@ the future, everything collapsing into one event, fuzzy duplicate thresholds too
   CR2/NEF/ARW/DNG has ever actually been decoded. **If the new machine has RAW files, this is the
   first thing worth testing.**
 - **Scene/occasion search accuracy** is known only as a lower bound (§5).
+- **Audits that were cut off by the session limit and are NOT done**, so treat these areas as
+  unaudited rather than clean:
+  - *Privacy leaks for Locked/Private photos in derived data* (the same class of bug as the hidden-photo
+    leaks fixed in events/people/stats). A partial draft is preserved, unreviewed and unmerged, on branch
+    `worktree-agent-a71231e735a3846e2` (commit "WIP, UNVERIFIED"): a 635-line `tests/test_privacy_leaks.py`
+    (its fixture needs a *family* account to create a share link, which the access rules forbid, so it
+    currently errors at setup) and edits to `events.py`, `stacks.py`, `people.py`, `visibility.py`,
+    `routes_system.py` (audit log naming photos now locked/private). Of its findings only the Locked-token
+    revocation was verified and fixed (`auth.revoke_locked_token`, `tests/test_locked_revocation.py`). The
+    audit-log and stack/event cleanup ideas are unverified.
+  - *UI sweep with a real browser across every page and width* and *a load test of the web app while a
+    background index runs* never got to report. The lock-hold fixes were verified on the real library
+    (stages 27 s total, hourly job 2 s) but not under concurrent web traffic.
 - **Questions for the owner raised by the parallel audits** (none changed, each pinned by a test or
   left alone on purpose, because they are product decisions rather than bugs):
   - *Backup never verifies copies it already made.* A copy is skipped on size + modification time,
@@ -875,7 +888,7 @@ the future, everything collapsing into one event, fuzzy duplicate thresholds too
 
 ## 10. Working notes
 
-- Run the suite with `.venv/Scripts/python.exe -m pytest -q`. 633 tests, ~9 min, no GPU needed —
+- Run the suite with `.venv/Scripts/python.exe -m pytest -q`. 640 tests, ~9 min, no GPU needed —
   the neural nets are replaced by deterministic fakes.
 - Test fixtures seed randomness from `zlib.crc32` of the **file name**, not `hash()` (salted per
   process) and not the full path (contains pytest's per-run tmp counter). Both made failures

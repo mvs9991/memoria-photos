@@ -141,7 +141,36 @@ def valid_locked_token(data_dir: Path, token: str | None) -> bool:
         return False
     # Milliseconds: a token opened in the same second as a PIN change must still be refused.
     return (0 <= time.time() * 1000 - issued_ms <= LOCKED_MINUTES * 60_000
-            and issued_ms > _pin_changed_at(data_dir) * 1000)
+            and issued_ms > _pin_changed_at(data_dir) * 1000
+            and not _revoked(data_dir, sig))
+
+
+def revoke_locked_token(data_dir: Path, token: str | None) -> None:
+    """Closing the Locked folder must END this token, not just ask the browser to forget it.
+
+    Before this, "Close" only deleted the cookie: a copy of it made while the folder was open
+    (a script, a second device, a saved request) kept opening the folder for the rest of its 15
+    minutes. Only this token's signature is recorded, so another browser's open folder is
+    unaffected, and an entry is dropped once the token would have expired anyway.
+    """
+    if not token or "." not in token or not valid_locked_token(data_dir, token):
+        return                                  # garbage or already dead: record nothing
+    path = Path(data_dir) / "locked.revoked"
+    now = time.time()
+    horizon = LOCKED_MINUTES * 60 + 60
+    keep = []
+    if path.exists():
+        for line in path.read_text().splitlines():
+            stamp = line.split(" ", 1)[0]
+            if stamp.isdigit() and now - int(stamp) / 1000 < horizon:
+                keep.append(line)
+    keep.append(f"{int(now * 1000)} {token.rsplit('.', 1)[1]}")
+    path.write_text("\n".join(keep) + "\n")
+
+
+def _revoked(data_dir: Path, sig: str) -> bool:
+    path = Path(data_dir) / "locked.revoked"
+    return path.exists() and any(ln.split(" ", 1)[-1] == sig for ln in path.read_text().splitlines())
 
 
 def _pin_changed_at(data_dir: Path) -> float:

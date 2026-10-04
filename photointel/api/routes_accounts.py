@@ -7,7 +7,7 @@ from __future__ import annotations
 
 import time
 
-from fastapi import APIRouter, HTTPException, Response
+from fastapi import APIRouter, HTTPException, Request, Response
 from pydantic import BaseModel
 
 from .. import accounts, auth, db, ratelimit
@@ -183,7 +183,8 @@ def open_locked(body: OpenBody, response: Response):
 
 
 @router.post("/locked/close")
-def close_locked(response: Response):
+def close_locked(request: Request, response: Response):
+    auth.revoke_locked_token(get_state().ctx.paths.data, request.cookies.get(auth.LOCKED_COOKIE))
     response.delete_cookie(auth.LOCKED_COOKIE)
     return {"open": False}
 
