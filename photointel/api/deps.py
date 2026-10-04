@@ -2,12 +2,16 @@
 from __future__ import annotations
 
 import sqlite3
+import logging
 import threading
 
 from ..context import AppContext
 from ..db import ThreadLocalDB, get_meta
 from ..search.engine import SearchEngine
 from ..vectors import IndexCache
+
+
+log = logging.getLogger(__name__)
 
 
 class ApiState:
@@ -17,9 +21,22 @@ class ApiState:
         self.index_cache = IndexCache()
         self.search = SearchEngine(ctx, self.index_cache)
         self.lock = threading.Lock()
+        self._seen = threading.local()
 
     def conn(self) -> sqlite3.Connection:
-        return self.db.get()
+        c = self.db.get()
+        # The first use of this thread's connection in a new request: a transaction still open here was
+        # left by an earlier request that failed between a write and its commit. Left alone it pins a
+        # stale snapshot, and SQLite then refuses every write on this connection at once ("database is
+        # locked"), so one lost race broke saving for good on whichever worker thread it happened on.
+        mark = _request_mark.get()
+        if mark is not None and getattr(self._seen, "mark", None) is not mark:
+            left_by = getattr(self._seen, "path", "?")
+            self._seen.mark, self._seen.path = mark, mark[1]
+            if c.in_transaction:
+                log.warning("Rolled back a transaction left open by an earlier request (%s)", left_by)
+                c.rollback()
+        return c
 
     def generation(self, name: str) -> int:
         return int(get_meta(self.conn(), f"gen:{name}", 0) or 0)
@@ -45,6 +62,14 @@ def get_conn() -> sqlite3.Connection:
 # The signed-in account for the current request (set by the login middleware), or None
 # when the library has no accounts. Used to attribute uploads and to check roles.
 from contextvars import ContextVar  # noqa: E402
+
+_request_mark: ContextVar[object | None] = ContextVar("memoria_request", default=None)
+
+
+def start_request(path: str = "") -> None:
+    """Called once per HTTP request (app middleware), so ApiState.conn can tell requests apart."""
+    _request_mark.set((object(), path))
+
 
 _current_user: ContextVar[dict | None] = ContextVar("memoria_user", default=None)
 

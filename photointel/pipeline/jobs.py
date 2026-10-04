@@ -7,6 +7,7 @@ import os
 import subprocess
 import sys
 import threading
+import sqlite3
 import time
 from pathlib import Path
 
@@ -109,12 +110,24 @@ LONG_SIDE_JOBS = ("export", "backup", "create", "offsite")
 def reap_stale_jobs(conn) -> int:
     """Mark jobs whose process died as interrupted (their work is resumable)."""
     cutoff = time.time() - STALE_AFTER
-    n = conn.execute(
-        "UPDATE jobs SET status='interrupted', finished_at=?, message=COALESCE(message,'') || ' (process ended)' "
-        "WHERE status IN ('running','queued') AND COALESCE(heartbeat_at, created_at) < ?",
-        (time.time(), cutoff)).rowcount
-    conn.commit()
-    return n
+    # Read first: this runs on every jobs poll and scheduler tick, and an UPDATE takes the write lock
+    # even when it matches nothing.
+    stale = conn.execute("SELECT 1 FROM jobs WHERE status IN ('running','queued') "
+                         "AND COALESCE(heartbeat_at, created_at) < ? LIMIT 1", (cutoff,)).fetchone()
+    if stale is None:
+        return 0
+    try:
+        n = conn.execute(
+            "UPDATE jobs SET status='interrupted', finished_at=?, message=COALESCE(message,'') || ' (process ended)' "
+            "WHERE status IN ('running','queued') AND COALESCE(heartbeat_at, created_at) < ?",
+            (time.time(), cutoff)).rowcount
+        conn.commit()
+        return n
+    except sqlite3.OperationalError:
+        # Lost the race for the lock: tidying is best-effort and the next poll does it. Never leave the
+        # half-opened transaction behind (see ApiState.conn).
+        conn.rollback()
+        return 0
 
 
 def active_job(conn, exclude_kinds: tuple[str, ...] = ()) -> dict | None:

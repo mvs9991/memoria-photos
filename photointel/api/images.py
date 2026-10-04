@@ -116,6 +116,19 @@ def _read_cached(path: Path) -> bytes | None:
     return None
 
 
+def _cached_file(path: Path, media: str) -> Response | None:
+    """Serve a cached thumbnail or preview from its bytes, not as a FileResponse.
+
+    A FileResponse measures the file, then opens it. Another request generating the same thumbnail
+    can swap the file in between, and the response then promises a length it does not deliver
+    ("Response content shorter than Content-Length": a broken image on the phone). These files are
+    small, so reading them first costs nothing and the length always matches."""
+    data = _read_cached(path)
+    if data is None:
+        return None
+    return Response(data, media_type=media, headers={"Cache-Control": IMMUTABLE})
+
+
 def _thumb_plain(photo_id: int, s: str, row) -> Response:
     state = get_state()
     paths = state.ctx.paths
@@ -123,24 +136,25 @@ def _thumb_plain(photo_id: int, s: str, row) -> Response:
 
     if s == "m" and sha:
         p = imaging.thumb_path(paths.thumbs, sha)
-        if p.exists():
-            return FileResponse(p, media_type="image/webp", headers={"Cache-Control": IMMUTABLE})
+        if p.exists() and (hit := _cached_file(p, "image/webp")) is not None:
+            return hit
     if s == "sm" and sha:
         small = paths.thumbs / sha[:2] / f"{sha}_sm.webp"
-        if small.exists():
-            return FileResponse(small, media_type="image/webp", headers={"Cache-Control": IMMUTABLE})
+        if small.exists() and (hit := _cached_file(small, "image/webp")) is not None:
+            return hit
         src = imaging.thumb_path(paths.thumbs, sha)
         if src.exists():
             try:
                 img = Image.open(src).convert("RGB")
                 imaging.save_thumbnail(img, small, 256, quality=72)
-                return FileResponse(small, media_type="image/webp", headers={"Cache-Control": IMMUTABLE})
+                if (hit := _cached_file(small, "image/webp")) is not None:
+                    return hit
             except Exception:
                 log.debug("small thumb generation failed", exc_info=True)
     if s == "l" and sha:
         preview = paths.previews / sha[:2] / f"{sha}.jpg"
-        if preview.exists():
-            return FileResponse(preview, media_type="image/jpeg", headers={"Cache-Control": IMMUTABLE})
+        if preview.exists() and (hit := _cached_file(preview, "image/jpeg")) is not None:
+            return hit
 
     # Generate on demand (cache miss, cleared cache, or a photo that failed analysis).
     path = abs_path(row)

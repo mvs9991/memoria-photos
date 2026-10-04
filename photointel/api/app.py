@@ -15,7 +15,7 @@ from fastapi.staticfiles import StaticFiles
 from .. import accounts, auth
 from ..context import AppContext
 from . import dav, images, routes_accounts, routes_albums, routes_auth, routes_duplicates, routes_explore, routes_export, routes_trash, routes_upload, routes_events, routes_library, routes_people, routes_search, routes_service, routes_system
-from .deps import ApiState, get_state, set_current_user, set_locked_open, set_state, start_response_notes
+from .deps import ApiState, get_state, set_current_user, set_locked_open, set_state, start_request, start_response_notes
 
 log = logging.getLogger(__name__)
 WEB_DIST = Path(__file__).resolve().parent.parent.parent / "web" / "dist"
@@ -84,6 +84,7 @@ def create_app(ctx: AppContext) -> FastAPI:
 
     @app.middleware("http")
     async def hardening(request: Request, call_next):
+        start_request(request.url.path)
         return _hardened(await access(request, call_next))
 
     async def access(request: Request, call_next):
