@@ -52,10 +52,46 @@ def _trash_sweeper(ctx: AppContext, stop: threading.Event) -> None:
             log.exception("Trash sweep failed")
 
 
+_last_request = [time.monotonic()]
+IDLE_FOR = 30.0
+
+
+def _idle() -> bool:
+    return time.monotonic() - _last_request[0] > IDLE_FOR
+
+
+def _small_thumb_backfill(ctx: AppContext, stop: threading.Event) -> None:
+    """Make the phone grid's small thumbnails for photos indexed before the indexer made them. Only while
+    nobody has asked the server for anything for 30 s and no index job runs: it reads from the same slow
+    disk as everyone else."""
+    from ..engine import thumbs
+    from ..pipeline import jobs
+
+    while not stop.wait(60):
+        if not _idle():
+            continue
+        try:
+            conn = ctx.connect()
+            try:
+                if jobs.active_job(conn) is not None:
+                    continue
+                made = thumbs.backfill(conn, ctx.paths.thumbs, may_run=lambda: _idle() and not stop.is_set())
+                if made:
+                    log.info("Made %d small thumbnails while idle", made)
+                elif not thumbs.missing(conn, ctx.paths.thumbs, 1):
+                    stop.wait(3600)             # all done; look again in an hour (new imports make their own)
+            finally:
+                conn.close()
+        except Exception:
+            log.exception("Small thumbnail backfill failed")
+
+
 def create_app(ctx: AppContext) -> FastAPI:
     set_state(ApiState(ctx))
     threading.Thread(target=_warm_models, args=(ctx,), daemon=True, name="warm-models").start()
     threading.Thread(target=_trash_sweeper, args=(ctx, threading.Event()), daemon=True, name="trash-sweeper").start()
+    threading.Thread(target=_small_thumb_backfill, args=(ctx, threading.Event()), daemon=True,
+                     name="small-thumbs").start()
     from .. import scheduler
 
     threading.Thread(target=scheduler.run, args=(ctx, threading.Event()), daemon=True, name="scheduler").start()
@@ -85,6 +121,7 @@ def create_app(ctx: AppContext) -> FastAPI:
 
     @app.middleware("http")
     async def hardening(request: Request, call_next):
+        _last_request[0] = time.monotonic()
         start_request(request.url.path)
         response = _hardened(await access(request, call_next))
         if request.url.path.startswith("/assets/") and response.status_code == 200:

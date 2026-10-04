@@ -19,6 +19,7 @@ from fastapi.responses import FileResponse, StreamingResponse
 from PIL import Image
 
 from .. import imaging
+from ..engine import thumbs
 from ..config import RAW_EXTENSIONS
 from ..rotation import rotate_image
 from .deps import get_state, guard_locked
@@ -140,14 +141,14 @@ def _thumb_plain(photo_id: int, s: str, row) -> Response:
         if p.exists() and (hit := _cached_file(p, "image/webp")) is not None:
             return hit
     if s == "sm" and sha:
-        small = paths.thumbs / sha[:2] / f"{sha}_sm.webp"
+        small = thumbs.small_path(paths.thumbs, sha)
         if small.exists() and (hit := _cached_file(small, "image/webp")) is not None:
             return hit
         src = imaging.thumb_path(paths.thumbs, sha)
         if src.exists():
             try:
                 img = Image.open(src).convert("RGB")
-                imaging.save_thumbnail(img, small, 256, quality=72)
+                thumbs.save_small(img, paths.thumbs, sha)
                 if (hit := _cached_file(small, "image/webp")) is not None:
                     return hit
             except Exception:

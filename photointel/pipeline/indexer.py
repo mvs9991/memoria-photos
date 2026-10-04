@@ -25,7 +25,7 @@ from typing import Callable
 import numpy as np
 
 from .. import db, hashing, imaging, metadata, quality, video
-from ..engine import corrections
+from ..engine import corrections, thumbs
 from ..config import VIDEO_EXTENSIONS
 from ..context import AppContext
 
@@ -354,6 +354,9 @@ class Indexer:
                 tp = imaging.thumb_path(self.ctx.paths.thumbs, meta["sha256"])
                 if not tp.exists():
                     imaging.save_thumbnail(img, tp, self.ctx.settings.thumb_size)
+                # ...and the phone grid's small one, while the image is in memory (see engine/thumbs.py)
+                if not thumbs.small_path(self.ctx.paths.thumbs, meta["sha256"]).exists():
+                    thumbs.save_small(img, self.ctx.paths.thumbs, meta["sha256"])
                 t0 = self._timed("thumbnail", t0)
                 stage = "hash"
                 meta["phash"], meta["dhash"] = hashing.perceptual_hashes(img)

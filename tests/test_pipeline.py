@@ -150,8 +150,11 @@ def test_thumbnails_created_and_shared_by_duplicates(ctx, library):
     conn = ctx.connect()
     rows = conn.execute("SELECT sha256 FROM photos WHERE status='ok'").fetchall()
     shas = {r["sha256"] for r in rows}
-    thumbs = list(ctx.paths.thumbs.rglob("*.webp"))
-    assert len(thumbs) == len(shas)      # one thumbnail per distinct content, not per file
+    files = list(ctx.paths.thumbs.rglob("*.webp"))
+    medium = [f for f in files if not f.name.endswith("_sm.webp")]
+    small = [f for f in files if f.name.endswith("_sm.webp")]
+    # one of each size per distinct content, not per file (the small one is the phone grid's, see engine/thumbs.py)
+    assert len(medium) == len(shas) and len(small) == len(shas)
     conn.close()
 
 
