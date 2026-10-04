@@ -133,6 +133,13 @@ export function SelectionBar({ selected, onClear, onDone, extra, allIds, onSelec
             Select all {allIds.length.toLocaleString()}
           </button>
         )}
+        {/* Delete is first, next to the count: at the end of a bar this long it was off the edge of a phone. */}
+        {canDelete && (
+          <button className="btn btn-quiet btn-sm selection-trash" onClick={() => setTrashing(true)}
+            title="Move the files to the Trash (restorable for 30 days)">
+            <Trash2 size={14} /> Delete
+          </button>
+        )}
         <button className="btn btn-primary btn-sm" onClick={() => setPicker(true)}>
           <BookImage size={14} /> Add to album
         </button>
@@ -176,12 +183,6 @@ export function SelectionBar({ selected, onClear, onDone, extra, allIds, onSelec
         {role === "owner" && (
           <button className="btn btn-ghost btn-sm" onClick={() => lock.mutate()} title="Move to the PIN-protected Locked folder">
             <Lock size={14} /> Lock
-          </button>
-        )}
-        {canDelete && (
-          <button className="btn btn-quiet btn-sm selection-trash" onClick={() => setTrashing(true)}
-            title="Move the files to the Trash (restorable for 30 days)">
-            <Trash2 size={14} /> Delete
           </button>
         )}
         {note && <span className="dim selection-note">{note}</span>}
