@@ -1018,3 +1018,10 @@ A count-consistency sweep (each list's count vs. what opening the item shows, re
 The remaining cold-load time is the phone's CPU running the app (≈1.2 s after the Photos code arrives). The cache
 lives on a 5,400 rpm laptop disk (D:); cold thumbnail reads take 1.5–2.4 s. Moving the data folder to the SSD would
 remove that, but C: has 13 GB free — owner decision.
+
+`web/e2e_gestures.mjs` (20 checks) drives press-and-hold, tap and drag selection with real mouse and touch input
+at desktop and phone size against the disposable library on 8768: hold selects without opening, drag selects and
+shrinks a range, edge auto-scroll, a swipe is a scroll, releasing never opens the viewer. Its People part needs
+faces (the e2e library has none) and is skipped there. Holds wait 900 ms because `HOLD_MS` is 650.
+`ANALYZE` was tried on a copy of the real database: no query got faster and one got slower (38 → 57 ms), so the
+planner is left without statistics on purpose.
