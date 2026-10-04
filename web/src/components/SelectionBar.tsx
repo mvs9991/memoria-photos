@@ -1,12 +1,11 @@
 /** Actions for photos selected in a grid: add to album, tag, plus page-specific extras. */
-import { useCallback, useEffect, useState } from "react";
+import { Suspense, lazy, useCallback, useEffect, useState } from "react";
 import { useMutation, useQuery, useQueryClient } from "@tanstack/react-query";
 import { Archive, Sparkles, BookImage, CalendarClock, CheckSquare, Columns2, EyeOff, FolderOutput, Lock, MapPin, RotateCw, Tag, Trash2, X } from "lucide-react";
 import { useRole } from "../lib/hooks";
 import { api } from "../lib/api";
 import { AlbumPicker } from "./AlbumPicker";
 import { CompareView } from "./CompareView";
-import { CorrectionDialog } from "./CorrectionDialog";
 import { StarRating } from "./StarRating";
 import { ExportDialog } from "./ExportDialog";
 import { CreateDialog } from "./CreateDialog";
@@ -16,6 +15,9 @@ import { TrashDialog, useAllowDelete } from "./TrashDialog";
  *  a bar in the page flow pushed the whole grid down by its height the moment the first photo was held,
  *  so the screen jumped under the finger (and on a desktop drag, selected the wrong tiles). The zero-height
  *  sticky slot keeps its place in the flow and its stick-to-the-top behaviour, and costs the page nothing. */
+// The date/place dialog carries the map library; it loads when first opened.
+const CorrectionDialog = lazy(() => import("./CorrectionDialog").then((m) => ({ default: m.CorrectionDialog })));
+
 export function FloatingBar({ children }: { children: React.ReactNode }) {
   return <div className="bar-slot">{children}</div>;
 }
@@ -190,7 +192,7 @@ export function SelectionBar({ selected, onClear, onDone, extra, allIds, onSelec
         {trashing && <TrashDialog photoIds={ids} onClose={() => setTrashing(false)}
           onDone={(r) => { if (r.trashed && !r.skipped.length) onClear(); }} />}
         {comparing && <CompareView ids={ids} onClose={() => setComparing(false)} />}
-        {fixing && <CorrectionDialog photoIds={ids} mode={fixing} onClose={() => setFixing(null)} />}
+        {fixing && <Suspense fallback={null}><CorrectionDialog photoIds={ids} mode={fixing} onClose={() => setFixing(null)} /></Suspense>}
         {picker && <AlbumPicker photoIds={ids} onClose={() => setPicker(false)}
           onDone={() => setNote(`Added ${ids.length.toLocaleString()} to the album`)} />}
       </div>

@@ -1,5 +1,5 @@
 /** Fullscreen photo viewer: zoom/pan, keyboard navigation, metadata and people. */
-import { useCallback, useEffect, useRef, useState } from "react";
+import { Suspense, lazy, useCallback, useEffect, useRef, useState } from "react";
 import { Link } from "react-router-dom";
 import { useMutation, useQuery, useQueryClient } from "@tanstack/react-query";
 import {
@@ -7,14 +7,17 @@ import {
   Layers, MapPin, Minus, Pencil, Plus, ScanText, Tag, Users, X, Sparkles, HardDrive,
 } from "lucide-react";
 import { TrashDialog, useAllowDelete } from "./TrashDialog";
-import { Editor } from "./Editor";
 import { useRole } from "../lib/hooks";
 import { api, downloadUrl, faceUrl, motionUrl, originalUrl, thumbUrl, videoUrl } from "../lib/api";
 import { clock, exposureLabel, formatBytes, formatDateTime, megapixels } from "../lib/format";
 import { AlbumPicker } from "./AlbumPicker";
-import { CorrectionDialog } from "./CorrectionDialog";
 import { StarRating } from "./StarRating";
 import { useViewer } from "./ViewerContext";
+
+// Opened rarely, and the place dialog carries the whole map library: loaded when first needed, so they
+// are not part of the script every visit has to download and run before anything shows.
+const Editor = lazy(() => import("./Editor").then((m) => ({ default: m.Editor })));
+const CorrectionDialog = lazy(() => import("./CorrectionDialog").then((m) => ({ default: m.CorrectionDialog })));
 
 /** Image addresses this page has fully received (they are named by content, so they never go stale). */
 const loadedImages = new Set<string>();
@@ -259,8 +262,8 @@ export function PhotoViewer({ ids, index, onIndex, onClose }: Props) {
               {photo.media_type === "video" ? <Scissors size={18} /> : <SlidersHorizontal size={18} />}
             </button>
           )}
-          {editing && photo && <Editor photoId={id} video={photo.media_type === "video"} duration={photo.duration}
-            onClose={() => setEditing(false)} />}
+          {editing && photo && <Suspense fallback={null}><Editor photoId={id} video={photo.media_type === "video"} duration={photo.duration}
+            onClose={() => setEditing(false)} /></Suspense>}
           {photo?.media_type === "image" && (
             <button className="btn btn-quiet btn-icon" onClick={() => rotate.mutate(90)}
               title="Rotate (R) — only in Memoria; the file is not changed" aria-label="Rotate">
@@ -437,7 +440,7 @@ function InfoPanel({ photo, similar, onOpenSimilar }: {
           <button className="btn btn-quiet btn-sm vi-fix" onClick={() => setFixing("place")}><Pencil size={12} /> Set place</button>
         </div>
       )}
-      {fixing && <CorrectionDialog photoIds={[photo.id]} mode={fixing} onClose={() => setFixing(null)} />}
+      {fixing && <Suspense fallback={null}><CorrectionDialog photoIds={[photo.id]} mode={fixing} onClose={() => setFixing(null)} /></Suspense>}
 
       {photo.place && (
         <div className="vi-row">
