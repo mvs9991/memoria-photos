@@ -652,3 +652,39 @@ def test_a_private_photo_is_shown_to_its_person_but_never_kept_by_the_browser_or
         assert r.status_code in (200, 404), r.status_code
         if r.status_code == 200:
             assert r.headers["cache-control"] == "no-store"
+
+
+def test_a_place_only_hidden_photos_were_taken_at_is_not_listed(settled):
+    """The test library has no GeoNames data, so places are planted by hand: one used only by locked
+    photos, one only by private photos, one shared with a visible photo."""
+    w = settled
+    conn = w.conn
+    lock_ids, priv_ids = list(w.locked.values()), [i for n, i in w.private.items() if "_E" not in n]
+    hidden_places = []
+    for name, ids in (("PLACELOCKXYZ", lock_ids), ("PLACEPRIVXYZ", priv_ids)):
+        pl = conn.execute("INSERT INTO places (name, kind, city, country, country_code, lat, lon, population) "
+                          "VALUES (?, 'city', ?, 'Testland', 'TL', 10.0, 10.0, 1000)", (name, name)).lastrowid
+        conn.execute(f"UPDATE photos SET place_id = ? WHERE id IN ({','.join(map(str, ids))})", (pl,))
+        hidden_places.append(pl)
+    vis = conn.execute("INSERT INTO places (name, kind, city, country, country_code, lat, lon, population) "
+                       "VALUES ('PLACEVISXYZ', 'city', 'PLACEVISXYZ', 'Testland', 'TL', 11.0, 11.0, 1000)").lastrowid
+    conn.execute("UPDATE photos SET place_id = ? WHERE id = ?", (vis, w.neighbour))
+    conn.commit()
+    assert "PLACEVISXYZ" in w.owner.get("/api/places").text, "control: a visible place must be listed"
+    problems = []
+    for who in ("owner", "ravi", "guest"):
+        c = getattr(w, who)
+        for path in ("/api/places", "/api/stats", "/api/insights", "/api/collections", "/api/map/points",
+                     "/api/search?q=PLACELOCKXYZ", "/api/search?q=PLACEPRIVXYZ", "/api/photos/index?place=1",
+                     "/api/events", "/api/memories", "/api/people"):
+            body = c.get(path).text.replace("PLACELOCKXYZ", "", 2 if "q=PLACELOCKXYZ" in path else 0)
+            if "q=PLACEPRIVXYZ" in path:
+                body = body.replace("PLACEPRIVXYZ", "")
+            for m in ("PLACELOCKXYZ", "PLACEPRIVXYZ"):
+                if m in body:
+                    problems.append(f"{who} {path} mentions {m}")
+        for pid_ in [p["id"] for p in c.get("/api/places").json().get("places", [])] + hidden_places:
+            d = c.get(f"/api/places/{pid_}")
+            if d.status_code == 200 and ("PLACELOCKXYZ" in d.text or "PLACEPRIVXYZ" in d.text):
+                problems.append(f"{who} /api/places/{pid_}")
+    assert not problems, "\n".join(problems)

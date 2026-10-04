@@ -181,7 +181,7 @@ def list_places():
         events = conn.execute("SELECT COUNT(*) FROM events WHERE place_id=?", (r["id"],)).fetchone()[0]
         people = conn.execute(
             """SELECT COUNT(DISTINCT f.person_id) FROM faces f JOIN photos p ON p.id = f.photo_id
-               WHERE p.place_id = ? AND f.person_id IS NOT NULL""", (r["id"],)).fetchone()[0]
+               WHERE p.place_id = ? AND f.person_id IS NOT NULL AND p.status = 'ok'""", (r["id"],)).fetchone()[0]
         places.append({"id": r["id"], "name": r["name"], "city": r["city"], "admin1": r["admin1"],
                        "admin2": r["admin2"], "country": r["country"], "country_code": r["country_code"],
                        "lat": r["lat"], "lon": r["lon"], "photo_count": r["n"], "event_count": events,
@@ -205,14 +205,16 @@ def list_places():
 def place_detail(place_id: int):
     conn = get_state().conn()
     p = conn.execute("SELECT * FROM places WHERE id=?", (place_id,)).fetchone()
-    if p is None:
+    # A place only locked or private photos were taken at does not exist for anyone else (ids are guessable).
+    if p is None or not conn.execute("SELECT 1 FROM photos WHERE place_id=? AND status='ok' LIMIT 1",
+                                     (place_id,)).fetchone():
         raise HTTPException(404, "place not found")
     events = [_event_dict(conn, e) for e in conn.execute(
-        "SELECT * FROM events WHERE place_id=? ORDER BY start_ts DESC LIMIT 100", (place_id,))]
+        "SELECT * FROM events WHERE place_id=? AND photo_count > 0 ORDER BY start_ts DESC LIMIT 100", (place_id,))]
     people = [{"id": r["id"], "label": person_label(r), "cover_face_id": r["cover_face_id"], "count": r["n"]}
               for r in conn.execute(
         """SELECT pe.*, COUNT(DISTINCT f.photo_id) n FROM persons pe JOIN faces f ON f.person_id = pe.id
-           JOIN photos p ON p.id = f.photo_id WHERE p.place_id = ? AND pe.merged_into IS NULL AND pe.ignored=0
+           JOIN photos p ON p.id = f.photo_id WHERE p.place_id = ? AND pe.merged_into IS NULL AND pe.ignored=0 AND p.status = 'ok'
            GROUP BY pe.id ORDER BY n DESC LIMIT 20""", (place_id,))]
     return {"id": p["id"], "name": p["name"], "label": place_label(p, include_country=True), "city": p["city"],
             "admin1": p["admin1"], "country": p["country"], "lat": p["lat"], "lon": p["lon"],
