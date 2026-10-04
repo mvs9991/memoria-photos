@@ -171,14 +171,17 @@ class SearchEngine:
             f"SELECT id, name, city, admin1, country FROM places WHERE id IN ({','.join('?' * len(ids))})",
             tuple(ids)).fetchall()
         names = {r["name"] for r in rows}
-        cities = {r["city"] for r in rows if r["city"]}
         admins = {r["admin1"] for r in rows if r["admin1"]}
         countries = {r["country"] for r in rows if r["country"]}
         admin_targets = names & admins
         country_targets = names & countries
         out = set(ids)
+        # Downwards only: a place takes in the places *inside* it (a city its neighbourhoods, a state its
+        # cities). It used to widen sideways and up as well ("same city as", "is that city"), so opening a
+        # neighbourhood showed its whole city: Guddalaguntapalem listed 4,832 photos and opened to Ongole's
+        # 6,545. A typed search for a city is unchanged: its name already matches every place in it.
         for pid, name, city, admin1, country in cls._all_places(conn):
-            if (city and (city in names or city in cities)) or (name in cities) \
+            if (city and city in names) \
                     or (admin1 and admin1 in admin_targets) or (country and country in country_targets):
                 out.add(pid)
         return sorted(out)

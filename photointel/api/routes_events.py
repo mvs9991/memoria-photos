@@ -174,16 +174,20 @@ def list_places():
         """SELECT pl.id, pl.name, pl.city, pl.admin1, pl.admin2, pl.country, pl.country_code, pl.lat, pl.lon,
                   COUNT(p.id) n, MAX(p.taken_ts) last_ts
            FROM places pl JOIN photos p ON p.place_id = pl.id
-           WHERE p.status='ok' GROUP BY pl.id ORDER BY n DESC""").fetchall()
+           WHERE p.status='ok' AND p.hidden = 0 AND p.live_component = 0 GROUP BY pl.id ORDER BY n DESC""").fetchall()
+    # Counted, covered and peopled from visible photos only, as opening the place shows them: hidden photos
+    # made the list say a few more than the page held, and one could even be the place's cover.
     places = []
     for r in rows:
         cover = conn.execute(
-            "SELECT id FROM photos WHERE place_id=? AND status='ok' ORDER BY COALESCE(quality_score,0) DESC LIMIT 1",
+            "SELECT id FROM photos WHERE place_id=? AND status='ok' AND hidden = 0 AND live_component = 0 "
+            "ORDER BY COALESCE(quality_score,0) DESC LIMIT 1",
             (r["id"],)).fetchone()
         events = conn.execute("SELECT COUNT(*) FROM events WHERE place_id=?", (r["id"],)).fetchone()[0]
         people = conn.execute(
             """SELECT COUNT(DISTINCT f.person_id) FROM faces f JOIN photos p ON p.id = f.photo_id
-               WHERE p.place_id = ? AND f.person_id IS NOT NULL AND p.status = 'ok'""", (r["id"],)).fetchone()[0]
+               WHERE p.place_id = ? AND f.person_id IS NOT NULL AND p.status = 'ok' AND p.hidden = 0""",
+            (r["id"],)).fetchone()[0]
         places.append({"id": r["id"], "name": r["name"], "city": r["city"], "admin1": r["admin1"],
                        "admin2": r["admin2"], "country": r["country"], "country_code": r["country_code"],
                        "lat": r["lat"], "lon": r["lon"], "photo_count": r["n"], "event_count": events,
