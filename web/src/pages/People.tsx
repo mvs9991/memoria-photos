@@ -158,7 +158,7 @@ export default function People() {
                 : <><strong>{picked.length.toLocaleString()}</strong> selected</>}
             </span>
             <div className="merge-bar-actions">
-              {people.length > 0 && (
+              {people.length > 0 && (picked.length === 0 || allPicked(people)) && (
                 <button className="btn btn-ghost btn-sm" onClick={() => toggleList(people)}
                   title="Pick everyone on this page">
                   {allPicked(people) ? "Deselect all" : `Select all ${people.length.toLocaleString()}`}

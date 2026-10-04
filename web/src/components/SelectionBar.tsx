@@ -128,11 +128,6 @@ export function SelectionBar({ selected, onClear, onDone, extra, allIds, onSelec
     <FloatingBar>
       <div className="review-bar selection-bar" role="toolbar" aria-label="Selected photos">
         <span className="tnum"><strong>{selected.size.toLocaleString()}</strong> selected</span>
-        {allIds && onSelectAll && selected.size < allIds.length && (
-          <button className="btn btn-quiet btn-sm" onClick={() => onSelectAll(allIds)} title="Ctrl+A">
-            Select all {allIds.length.toLocaleString()}
-          </button>
-        )}
         {/* Delete is first, next to the count: at the end of a bar this long it was off the edge of a phone. */}
         {canDelete && (
           <button className="btn btn-quiet btn-sm selection-trash" onClick={() => setTrashing(true)}
@@ -140,6 +135,12 @@ export function SelectionBar({ selected, onClear, onDone, extra, allIds, onSelec
             <Trash2 size={14} /> Delete
           </button>
         )}
+        <button className="btn btn-ghost btn-sm" onClick={() => setExporting(true)} title="Copy the original files somewhere">
+          <FolderOutput size={14} /> Export
+        </button>
+        <button className="btn btn-quiet btn-sm" onClick={() => { setNote(null); onClear(); }}>
+          <X size={14} /> Clear
+        </button>
         <button className="btn btn-primary btn-sm" onClick={() => setPicker(true)}>
           <BookImage size={14} /> Add to album
         </button>
@@ -164,9 +165,6 @@ export function SelectionBar({ selected, onClear, onDone, extra, allIds, onSelec
             <Sparkles size={14} /> Create
           </button>
         )}
-        <button className="btn btn-ghost btn-sm" onClick={() => setExporting(true)} title="Copy the original files somewhere">
-          <FolderOutput size={14} /> Export
-        </button>
         {extra}
         {role !== "guest" && (
           <button className="btn btn-ghost btn-sm" onClick={() => archive.mutate()}
@@ -186,9 +184,6 @@ export function SelectionBar({ selected, onClear, onDone, extra, allIds, onSelec
           </button>
         )}
         {note && <span className="dim selection-note">{note}</span>}
-        <button className="btn btn-quiet btn-sm" onClick={() => { setNote(null); onClear(); }}>
-          <X size={14} /> Clear
-        </button>
         {creating && <CreateDialog photoIds={ids} onClose={() => setCreating(false)} />}
         {exporting && <ExportDialog spec={{ photo_ids: ids }} onClose={() => setExporting(false)}
           title={`Export ${ids.length.toLocaleString()} selected`} />}
@@ -289,7 +284,7 @@ export function SelectToggle({ sel }: { sel: ReturnType<typeof useGridSelect> })
         title="Select photos — or press and hold one, then drag across others. Esc to finish.">
         <CheckSquare size={14} /> {sel.selecting ? "Done" : "Select"}
       </button>
-      {sel.total > 0 && sel.selected.size < sel.total && (
+      {sel.total > 0 && sel.selected.size === 0 && (
         <button className="btn btn-ghost btn-sm" onClick={sel.selectAll}
           title="Select every photo on this page (Ctrl+A)">
           Select all {sel.total.toLocaleString()}

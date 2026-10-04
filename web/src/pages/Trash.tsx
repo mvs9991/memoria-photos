@@ -72,16 +72,13 @@ export default function Trash() {
         <FloatingBar>
           <div className="review-bar selection-bar" role="toolbar" aria-label="Selected files">
             <span className="tnum"><strong>{sel.length.toLocaleString()}</strong> selected</span>
-            {sel.length < allIds.length && (
-              <button className="btn btn-quiet btn-sm" onClick={gs.selectAll}>Select all {allIds.length}</button>
-            )}
             <button className="btn btn-danger btn-sm" onClick={() => setErase({ ids: sel })}>
               <Trash2 size={14} /> Delete permanently
             </button>
+            <button className="btn btn-quiet btn-sm" onClick={selection.clear}><X size={14} /> Clear</button>
             <button className="btn btn-primary btn-sm" onClick={() => restore.mutate(sel)} disabled={restore.isPending}>
               <RotateCcw size={14} /> Restore
             </button>
-            <button className="btn btn-quiet btn-sm" onClick={selection.clear}><X size={14} /> Clear</button>
           </div>
         </FloatingBar>
       )}
