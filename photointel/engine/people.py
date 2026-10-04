@@ -441,21 +441,45 @@ def mark_not_same(conn: sqlite3.Connection, a: int, b: int) -> None:
     conn.commit()
 
 
+_merge_pairs_cache: dict = {}
+
+
+def _merge_inputs_key(conn: sqlite3.Connection, model_id: int, threshold: float) -> tuple:
+    """What the face comparison depends on: which faces exist and who each belongs to, which people are
+    live (not merged away or ignored), and the embeddings. Cheap (three table scans)."""
+    faces = conn.execute("SELECT COUNT(*), COALESCE(MAX(id), 0), TOTAL(COALESCE(person_id, -1) * ((id % 1000003) + 1)) "
+                         "FROM faces WHERE model_id = ?", (model_id,)).fetchone()
+    persons = conn.execute("SELECT COUNT(*), TOTAL(id * (ignored + 1) * (CASE WHEN merged_into IS NULL THEN 1 ELSE 3 END)) "
+                           "FROM persons").fetchone()
+    # the face loader skips photos that are missing and the video half of live photos
+    photos = conn.execute("SELECT TOTAL(CASE WHEN status = 'missing' THEN id ELSE 0 END), "
+                          "TOTAL(CASE WHEN live_component = 1 THEN id ELSE 0 END) FROM photos").fetchone()
+    return (model_id, threshold, tuple(faces), tuple(persons), tuple(photos), db.get_meta(conn, "gen:embeddings", 0))
+
+
 def merge_suggestions(ctx, conn: sqlite3.Connection, threshold: float = 0.50, limit: int = 20) -> list[dict]:
     model_id = db.active_model_id(conn, "face")
     if model_id is None:
         return []
-    ids, mat, meta = load_face_embeddings(conn, model_id)
-    if len(ids) == 0:
-        return []
-    mat = normalize(mat)
-    named = {int(r[0]) for r in conn.execute("SELECT id FROM persons WHERE merged_into IS NULL AND ignored = 0")}
-    rows_by_person: dict[int, list[int]] = defaultdict(list)
-    for i, pid in enumerate(meta["person_id"]):
-        if pid >= 0 and int(pid) in named:
-            rows_by_person[int(pid)].append(i)
-    identity_rows = {k: np.array(v) for k, v in rows_by_person.items() if len(v) >= 2}
-    pairs = suggest_merges(mat, identity_rows, threshold=threshold, device=getattr(ctx, "device", "auto"))
+    # Comparing every person's faces with every other's took ~4 s on a real library, on each visit to
+    # People. The pairs only change when faces, assignments, people or embeddings do, so they are kept
+    # for as long as none of those has; names, covers, counts and "not the same person" are read fresh.
+    key = _merge_inputs_key(conn, model_id, threshold)
+    pairs = _merge_pairs_cache.get(key)
+    if pairs is None:
+        ids, mat, meta = load_face_embeddings(conn, model_id)
+        if len(ids) == 0:
+            return []
+        mat = normalize(mat)
+        named = {int(r[0]) for r in conn.execute("SELECT id FROM persons WHERE merged_into IS NULL AND ignored = 0")}
+        rows_by_person: dict[int, list[int]] = defaultdict(list)
+        for i, pid in enumerate(meta["person_id"]):
+            if pid >= 0 and int(pid) in named:
+                rows_by_person[int(pid)].append(i)
+        identity_rows = {k: np.array(v) for k, v in rows_by_person.items() if len(v) >= 2}
+        pairs = suggest_merges(mat, identity_rows, threshold=threshold, device=getattr(ctx, "device", "auto"))
+        _merge_pairs_cache.clear()
+        _merge_pairs_cache[key] = pairs
     blocked = {(int(a), int(b)) for a, b in conn.execute("SELECT a, b FROM person_not_same")}
     out = []
     for a, b, score in pairs:

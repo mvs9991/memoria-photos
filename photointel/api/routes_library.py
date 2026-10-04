@@ -6,7 +6,7 @@ import logging
 from datetime import datetime, timedelta
 
 from fastapi import APIRouter, Body, HTTPException, Query, Response
-from fastapi.responses import FileResponse
+from fastapi.responses import FileResponse, JSONResponse
 from pydantic import BaseModel
 
 from .. import db
@@ -206,25 +206,38 @@ def photos_index(person: list[int] = Query(default=[]), place: int | None = None
         f"p.live_video_id, p.motion_offset, p.rating, p.stack_id, "
         f"(SELECT COUNT(*) FROM photos s WHERE s.stack_id = p.id) AS stack_size FROM photos p "
         f"WHERE {where} ORDER BY {order_sql} LIMIT ?", (*args, limit)).fetchall()
-    return columnar(rows)
+    # Returned as a ready response: the payload is plain numbers, and letting FastAPI walk ~250k of them
+    # through jsonable_encoder first roughly doubled this request's time on a real library.
+    return JSONResponse(columnar(rows))
 
 
 def columnar(rows) -> dict:
-    """The compact grid payload shared by every photo list (library, albums, events)."""
+    """The compact grid payload shared by every photo list (library, albums, events).
+
+    Same output as building it with photo_flags/_get per row, but the optional columns are looked up
+    once: `key in row.keys()` builds a list of every column name, and doing that several times for each
+    of 30k rows was most of this function's 175 ms."""
     ids, ratios, ts, flags, dur, stars, stack, rots = [], [], [], [], [], [], [], []
+    keys = set(rows[0].keys()) if rows else set()
+    has_rot, has_rating, has_stack = "rotation" in keys, "rating" in keys, "stack_size" in keys
     for r in rows:
         ids.append(r["id"])
         w, h = r["width"] or 4, r["height"] or 3
-        rot = _get(r, "rotation", 0) or 0
+        rot = (r["rotation"] or 0) if has_rot else 0
         if rot in (90, 270):
             w, h = h, w
         rots.append(rot)
         ratios.append(round(max(0.2, min(6.0, w / max(h, 1))), 3))
         ts.append(int(r["taken_ts"] or 0))
-        flags.append(photo_flags(r))
-        dur.append(round(r["duration"], 1) if r["media_type"] == "video" and r["duration"] else 0)
-        stars.append(_get(r, "rating", 0) or 0)
-        stack.append(_get(r, "stack_size", 0) or 0)
+        size = (r["stack_size"] or 0) if has_stack else 0
+        video = r["media_type"] == "video"
+        flags.append((FLAG_FAVORITE if r["favorite"] else 0) | (FLAG_FACES if (r["face_count"] or 0) > 0 else 0)
+                     | (FLAG_VIDEO if video else 0)
+                     | (FLAG_LIVE if r["live_video_id"] or (r["motion_offset"] or 0) > 0 else 0)
+                     | (FLAG_STACK if size > 1 else 0))
+        dur.append(round(r["duration"], 1) if video and r["duration"] else 0)
+        stars.append((r["rating"] or 0) if has_rating else 0)
+        stack.append(size)
     return {"ids": ids, "ratio": ratios, "ts": ts, "flags": flags, "dur": dur, "rating": stars,
             "stack": stack, "rot": rots, "total": len(ids)}
 
