@@ -5,6 +5,9 @@ number is estimated. "Furthest from home" uses the same home the trip detector u
 """
 from __future__ import annotations
 
+from collections import Counter, defaultdict
+from itertools import combinations
+
 import sqlite3
 from collections import Counter
 from datetime import datetime
@@ -63,14 +66,22 @@ def compute(conn: sqlite3.Connection, year: int | None = None) -> dict:
     top_ids = [p["id"] for p in people]
     constellation = []
     if len(top_ids) > 1:
+        # Who appears with whom, among the top people. As a self-join of faces this was 358 ms of a 0.7 s
+        # page on a real library (the most-photographed people have thousands of faces each, and every pair
+        # of their faces in one photo became a row). Reading each top person's photos once through the
+        # (person_id, photo_id) index and counting pairs here gives the same counts in a few milliseconds.
         marks = ",".join("?" * len(top_ids))
-        for r in conn.execute(
-                f"""SELECT a.person_id x, b.person_id y, COUNT(DISTINCT a.photo_id) n
-                    FROM faces a JOIN faces b ON a.photo_id = b.photo_id AND a.person_id < b.person_id
-                    JOIN photos p ON p.id = a.photo_id
-                    WHERE {where} AND a.person_id IN ({marks}) AND b.person_id IN ({marks})
-                    GROUP BY x, y ORDER BY n DESC LIMIT 40""", (*args, *top_ids, *top_ids)):
-            constellation.append({"a": r["x"], "b": r["y"], "photos": r["n"]})
+        in_photo: dict[int, set[int]] = defaultdict(set)
+        for photo_id, person_id in conn.execute(
+                f"SELECT f.photo_id, f.person_id FROM faces f JOIN photos p ON p.id = f.photo_id "
+                f"WHERE {where} AND f.person_id IN ({marks})", (*args, *top_ids)):
+            in_photo[photo_id].add(person_id)
+        pairs: Counter = Counter()
+        for present in in_photo.values():
+            if len(present) > 1:
+                pairs.update(combinations(sorted(present), 2))
+        for (x, y), n in sorted(pairs.items(), key=lambda kv: (-kv[1], kv[0]))[:40]:
+            constellation.append({"a": x, "b": y, "photos": n})
     new_people = []
     if year:
         start, end = args

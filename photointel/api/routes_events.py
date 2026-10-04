@@ -47,7 +47,9 @@ def _event_dict(conn, e, with_places: bool = False) -> dict:
 @router.get("/events")
 def list_events(kind: str | None = Query(None, pattern="^(event|trip)$"), year: int | None = None,
                 person: int | None = None, place: int | None = None, category: str | None = None,
-                limit: int = Query(500, le=2000)):
+                limit: int | None = Query(None, ge=1, le=100000)):
+    # No limit unless asked: the Events page shows them all, and a default of 500 silently hid every older
+    # event (and four trips) on a real library with 752. The whole list is ~0.1 s and ~47 KB compressed.
     conn = get_state().conn()
     where, args = ["1=1"], []
     if kind:
@@ -69,7 +71,7 @@ def list_events(kind: str | None = Query(None, pattern="^(event|trip)$"), year: 
         args.append(person)
     rows = conn.execute(
         f"SELECT e.* FROM events e WHERE {' AND '.join(where)} ORDER BY e.start_ts DESC LIMIT ?",
-        (*args, limit)).fetchall()
+        (*args, limit if limit is not None else -1)).fetchall()
     return {"events": [_event_dict(conn, e) for e in rows]}
 
 
