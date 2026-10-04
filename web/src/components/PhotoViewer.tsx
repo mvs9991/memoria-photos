@@ -75,7 +75,7 @@ export function PhotoViewer({ ids, index, onIndex, onClose }: Props) {
       else if (e.key === "ArrowRight") go(1);
       else if (e.key === "ArrowLeft") go(-1);
       else if (e.key === "i") setShowInfo((v) => !v);
-      else if (e.key === "f") favorite.mutate();
+      else if (e.key === "f") toggleFavorite();
       else if (e.key.toLowerCase() === "r" && !e.ctrlKey && !e.metaKey && photo?.media_type === "image")
         rotate.mutate(e.shiftKey ? -90 : 90);
       else if (e.key === "l" && photo?.live) setPlayingLive(true);
@@ -103,13 +103,30 @@ export function PhotoViewer({ ids, index, onIndex, onClose }: Props) {
     });
   }, [index, ids]);
 
+  // The new value is decided at the moment of the press, from the freshest value we know, and shown at
+  // once. It used to be computed from the *rendered* photo (`!photo.favorite`), which only changes after
+  // the server answers and the photo refetches, so a second press in that window (key auto-repeat, a
+  // double-tap on a phone, a slow connection) worked out the same target again and favourited twice.
   const favorite = useMutation({
-    mutationFn: () => api.setFlags(id, { favorite: !photo?.favorite }),
-    onSuccess: () => {
+    mutationFn: (target: boolean) => api.setFlags(id, { favorite: target }),
+    onMutate: async (target: boolean) => {
+      await qc.cancelQueries({ queryKey: ["photo", id] });
+      const previous = qc.getQueryData<any>(["photo", id]);
+      qc.setQueryData<any>(["photo", id], (p: any) => (p ? { ...p, favorite: target } : p));
+      return { previous };
+    },
+    onError: (_err, _target, ctx) => {
+      if (ctx?.previous !== undefined) qc.setQueryData(["photo", id], ctx.previous);
+    },
+    onSettled: () => {
       qc.invalidateQueries({ queryKey: ["photo", id] });
       qc.invalidateQueries({ queryKey: ["photos"] });
     },
   });
+  const toggleFavorite = () => {
+    const known = qc.getQueryData<any>(["photo", id])?.favorite ?? photo?.favorite;
+    favorite.mutate(!known);
+  };
   const rate = useMutation({
     mutationFn: (rating: number) => api.rate([id], rating),
     onSuccess: () => {
@@ -199,7 +216,7 @@ export function PhotoViewer({ ids, index, onIndex, onClose }: Props) {
         <div className="viewer-top-right">
           {photo && <StarRating value={photo.rating} onChange={(r) => rate.mutate(r)} size={16} />}
           <button className={`btn btn-quiet btn-icon${photo?.favorite ? " is-on" : ""}`}
-            onClick={() => favorite.mutate()} title="Favourite (F)" aria-label="Favourite">
+            onClick={toggleFavorite} title="Favourite (F)" aria-label="Favourite">
             <Heart size={18} fill={photo?.favorite ? "currentColor" : "none"} />
           </button>
           <a className="btn btn-quiet btn-icon" href={downloadUrl(id)} download title="Download original"

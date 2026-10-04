@@ -28,6 +28,7 @@ page.on("response", (r) => { if (r.url().includes("/api/") && r.status() >= 400 
 
 let pass = 0, fail = 0;
 async function step(name, fn) {
+  if (process.env.ONLY && !name.toLowerCase().includes(process.env.ONLY.toLowerCase())) return;
   const before = problems.length;
   try {
     const detail = await fn();
@@ -86,6 +87,24 @@ await step("viewer: favourite toggles and persists (f key)", async () => {
   await page.keyboard.press("Escape");
   ok(mid === before + 1 && after === before, `favourites ${before} -> ${mid} -> ${after}`);
   return `${before} -> ${mid} -> ${after}`;
+});
+
+await step("viewer: rapid favourite presses alternate correctly (no stale-state race)", async () => {
+  const before = (await stats()).favorites;
+  await goto("/photos", ".tile-wrap");
+  await tiles().first().click();
+  await page.waitForSelector(".viewer");
+  for (let i = 0; i < 4; i++) await page.keyboard.press("f");     // four presses with no wait between them
+  await page.waitForTimeout(1500);
+  const after4 = (await stats()).favorites;
+  for (let i = 0; i < 3; i++) await page.keyboard.press("f");
+  await page.waitForTimeout(1500);
+  const after7 = (await stats()).favorites;
+  await page.keyboard.press("f");                                   // leave it as we found it
+  await page.waitForTimeout(1000);
+  await page.keyboard.press("Escape");
+  ok(after4 === before && after7 === before + 1, `favourites ${before} -> (4 presses) ${after4} -> (3 more) ${after7}`);
+  return `${before} -> ${after4} -> ${after7}`;
 });
 
 // ------------------------------------------------------------------ C. albums
