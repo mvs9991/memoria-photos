@@ -981,3 +981,9 @@ transaction open on that API worker's thread-local connection; its snapshot went
 thread failed at once with "database is locked" until a restart (seen live: `/api/jobs` 500 on every call).
 `ApiState.conn()` now rolls back, at a request's first use, anything an earlier request left open, and logs which
 request left it. `reap_stale_jobs` reads before writing and rolls back if it loses the race.
+
+**Tests and the host environment (2026-10-04).** A suite started from a shell with `PHOTOINTEL_GEO`/`_MODELS` set
+(to serve the real library) failed five tests: two read the variables directly, one assumed no place data, and the
+privacy sweep counted a *place* `{id: 1, lat, ...}` as secret photo 1. An autouse fixture now clears every
+`PHOTOINTEL_*` variable; `PHOTOINTEL_TEST_KEEP_ENV=1` keeps them, which is how to run the privacy sweep against real
+place data (done once: 41/41, no leak). The sweep's id detector no longer takes places for photos.

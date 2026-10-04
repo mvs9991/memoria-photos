@@ -220,6 +220,20 @@ TOKENS = ("{photo_id}", "{id}", "{person_id}", "{album_id}", "{event_id}", "{pla
           "{face_id}", "{job_id}", "{root_id}", "{stack_id}", "{uid}", "{token}")
 
 
+def _is_place(x: dict) -> bool:
+    """A place has coordinates too. Counting {"id": 1, "name": "Sultan Bazar", "lat": ...} as photo 1 failed the
+    sweep whenever offline place data was present and a secret photo happened to be id 1."""
+    return "lat" in x and not any(k in x for k in ("filename", "thumb", "taken_ts", "ratio")) and any(
+        k in x for k in ("city", "country", "country_code", "admin1", "label", "name"))
+
+
+def test_the_id_sweep_tells_places_from_photos():
+    assert ids_in({"places": [{"id": 1, "name": "Sultan Bazar", "city": "Hyderabad", "lat": 17.3, "lon": 78.4}]}) == set()
+    assert ids_in({"points": [{"id": 7, "lat": 17.3, "lon": 78.4}]}) == {7}           # a map point is a photo
+    assert ids_in([{"id": 9, "filename": "a.jpg", "name": "x", "lat": 1.0}]) == {9}   # named photo with GPS
+    assert ids_in({"cover_photo_id": 3}) == {3}
+
+
 def ids_in(obj, out=None) -> set[int]:
     """Photo ids named anywhere in a JSON body, whatever the shape."""
     out = set() if out is None else out
@@ -233,7 +247,7 @@ def ids_in(obj, out=None) -> set[int]:
     elif isinstance(obj, list):
         for x in obj:
             if isinstance(x, dict) and isinstance(x.get("id"), int) and "title" not in x and "stage" not in x and any(
-                    k in x for k in ("filename", "thumb", "taken_ts", "ratio", "lat", "score")):
+                    k in x for k in ("filename", "thumb", "taken_ts", "ratio", "lat", "score")) and not _is_place(x):
                 out.add(x["id"])
             ids_in(x, out)
     return out

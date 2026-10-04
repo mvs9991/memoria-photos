@@ -7,6 +7,7 @@ search, API).
 """
 from __future__ import annotations
 
+import os
 import io
 import sys
 import zlib
@@ -154,6 +155,19 @@ class FakeSemanticModel:
 
     def probability(self, sims):
         return 1.0 / (1.0 + np.exp(-(sims * 4 - 1)))
+
+
+@pytest.fixture(autouse=True)
+def _no_host_environment(monkeypatch):
+    """Tests never see the machine's own PHOTOINTEL_* settings. A suite started from a shell that had
+    PHOTOINTEL_GEO set (to serve a real library) gave tests real place names, and five failed for that
+    reason alone. A test that needs one of these sets it itself. PHOTOINTEL_TEST_KEEP_ENV=1 keeps them, to run
+    a sweep (privacy, say) against real place data on purpose."""
+    if os.environ.get("PHOTOINTEL_TEST_KEEP_ENV") == "1":
+        return
+    for name in ("PHOTOINTEL_DATA", "PHOTOINTEL_DEV", "PHOTOINTEL_DEVICE", "PHOTOINTEL_EXPORTS", "PHOTOINTEL_GEO",
+                 "PHOTOINTEL_MODELS", "PHOTOINTEL_RESTIC", "PHOTOINTEL_TAILSCALE"):
+        monkeypatch.delenv(name, raising=False)
 
 
 @pytest.fixture
