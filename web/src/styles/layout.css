@@ -58,7 +58,7 @@
 .is-collapsed .nav-stat { display: none; }
 .is-collapsed .nav-head { justify-content: center; padding-bottom: 12px; }
 .is-collapsed .nav-toggle { display: none; }
-.is-collapsed .nav:hover .nav-toggle { display: inline-flex; }
+@media (hover: hover) { .is-collapsed .nav:hover .nav-toggle { display: inline-flex; } }
 
 .nav-links { display: flex; flex-direction: column; gap: 2px; }
 .nav-link {

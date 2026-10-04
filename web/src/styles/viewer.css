@@ -100,8 +100,8 @@
   transition: opacity var(--t) var(--ease), background var(--t-fast), transform var(--t-fast);
   backdrop-filter: blur(8px);
 }
-.viewer-stage:hover .viewer-nav { opacity: 0.9; }
-.viewer-nav:hover { background: rgba(30, 30, 36, 0.86); opacity: 1 !important; }
+@media (hover: hover) { .viewer-stage:hover .viewer-nav { opacity: 0.9; } }
+@media (hover: hover) { .viewer-nav:hover { background: rgba(30, 30, 36, 0.86); opacity: 1 !important; } }
 .viewer-nav.prev { left: 18px; }
 .viewer-nav.next { right: 18px; }
 
@@ -122,7 +122,7 @@
   transition: opacity var(--t) var(--ease);
   font-size: 11.5px;
 }
-.viewer-stage:hover .viewer-zoom { opacity: 1; }
+@media (hover: hover) { .viewer-stage:hover .viewer-zoom { opacity: 1; } }
 
 /* ---------------- info panel ---------------- */
 .viewer-info {
@@ -181,7 +181,7 @@
   transition: transform var(--t-fast);
 }
 .vi-similar-item img { width: 100%; height: 100%; object-fit: cover; }
-.vi-similar-item:hover { transform: scale(1.06); }
+@media (hover: hover) { .vi-similar-item:hover { transform: scale(1.06); } }
 .vi-code {
   display: block;
   font-family: var(--font-mono);
@@ -219,7 +219,7 @@
   opacity: 0;
   transition: opacity var(--t-fast), background var(--t-fast);
 }
-.vi-tag:hover .vi-tag-x, .vi-tag-x:focus-visible { opacity: 1; }
+@media (hover: hover) { .vi-tag:hover .vi-tag-x, .vi-tag-x:focus-visible { opacity: 1; } }
 .vi-tag-x:hover { background: var(--surface-3); color: var(--text); }
 .vi-tag-add { margin-top: 10px; }
 .vi-tag-add .field { width: 100%; }
@@ -227,7 +227,7 @@
 @media (hover: none) { .vi-tag-x { opacity: 1; } }
 
 .vi-row .vi-fix { margin-left: auto; flex: none; opacity: 0; transition: opacity var(--t-fast); }
-.vi-row:hover .vi-fix, .vi-fix:focus-visible { opacity: 1; }
+@media (hover: hover) { .vi-row:hover .vi-fix, .vi-fix:focus-visible { opacity: 1; } }
 @media (hover: none) { .vi-row .vi-fix { opacity: 1; } }
 .vi-similar-item.is-current { outline: 2px solid var(--accent); outline-offset: -2px; }
 .vi-stack-actions { display: flex; flex-wrap: wrap; gap: 6px; margin-top: 8px; }
@@ -237,3 +237,10 @@
    and follows the finger without easing while a swipe is in progress. */
 .viewer-stage { touch-action: none; }
 .viewer-img-wrap.is-swiping { transition: none; }
+
+/* Touch screens have no hover, so controls that a mouse reveals by hovering are simply shown. (A tap used to
+   leave an emulated hover behind, which showed them by accident — and needed two taps to do anything.) */
+@media (hover: none) {
+  .viewer-nav { opacity: 0.75; }
+  .viewer-zoom { opacity: 1; }
+}

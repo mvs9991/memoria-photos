@@ -354,7 +354,7 @@
   color: var(--text-3);
   transition: color var(--t-fast), transform var(--t-fast);
 }
-.star:hover { color: var(--accent-text); transform: scale(1.12); }
+@media (hover: hover) { .star:hover { color: var(--accent-text); transform: scale(1.12); } }
 .star.on { color: #e9a93b; }
 
 /* ---------------- compare / culling ---------------- */

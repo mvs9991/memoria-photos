@@ -24,7 +24,7 @@
   border: 1px solid var(--hairline);
   transition: border-color var(--t-fast), transform var(--t-fast) var(--ease);
 }
-.stat-tile:hover { border-color: var(--accent-line); transform: translateY(-2px); }
+@media (hover: hover) { .stat-tile:hover { border-color: var(--accent-line); transform: translateY(-2px); } }
 .stat-icon { color: var(--accent); }
 .stat-value { font-size: 21px; font-weight: 600; letter-spacing: -0.02em; }
 .stat-label { font-size: 11.5px; }
@@ -49,7 +49,7 @@
   transition: transform var(--t) var(--ease);
 }
 .mem-strip-item img { width: 100%; height: 100%; object-fit: cover; }
-.mem-strip-item:hover { transform: scale(1.028); }
+@media (hover: hover) { .mem-strip-item:hover { transform: scale(1.028); } }
 
 /* ---------------- event cards ---------------- */
 .event-rail {
@@ -64,9 +64,13 @@
   width: 290px;
   scroll-snap-align: start;
   transition: transform var(--t) var(--ease);
+  /* The Events page lists every event (734 cards, ~8,000 elements on a real library) and a phone shows
+     three: the browser skips laying out and painting the rest until they scroll near. */
+  content-visibility: auto;
+  contain-intrinsic-block-size: auto 200px;
 }
 .event-card-sm { width: 232px; }
-.event-card:hover { transform: translateY(-3px); }
+@media (hover: hover) { .event-card:hover { transform: translateY(-3px); } }
 .event-card-img {
   position: relative;
   aspect-ratio: 3 / 2;
@@ -75,7 +79,7 @@
   background: var(--surface-2);
 }
 .event-card-img img { width: 100%; height: 100%; object-fit: cover; transition: transform 600ms var(--ease); }
-.event-card:hover .event-card-img img { transform: scale(1.05); }
+@media (hover: hover) { .event-card:hover .event-card-img img { transform: scale(1.05); } }
 .event-card-blank {
   width: 100%; height: 100%;
   background: linear-gradient(135deg, var(--surface-2), var(--surface-3));
@@ -122,7 +126,7 @@
   gap: 16px;
 }
 .event-tile { transition: transform var(--t) var(--ease); }
-.event-tile:hover { transform: translateY(-3px); }
+@media (hover: hover) { .event-tile:hover { transform: translateY(-3px); } }
 .event-tile-img {
   position: relative;
   aspect-ratio: 4 / 3;
@@ -131,7 +135,7 @@
   background: var(--surface-2);
 }
 .event-tile-img img { width: 100%; height: 100%; object-fit: cover; transition: transform 600ms var(--ease); }
-.event-tile:hover .event-tile-img img { transform: scale(1.05); }
+@media (hover: hover) { .event-tile:hover .event-tile-img img { transform: scale(1.05); } }
 .event-tile-badge {
   position: absolute;
   left: 10px; top: 10px;
@@ -182,7 +186,7 @@
 .event-hero-inner { position: relative; padding: 26px 28px; color: #fff; width: 100%; }
 .event-hero-title { font-size: clamp(26px, 4vw, 42px); display: flex; align-items: center; gap: 10px; }
 .event-hero-title .btn { opacity: 0.45; color: #fff; }
-.event-hero-title .btn:hover { opacity: 1; background: rgba(255, 255, 255, 0.14); }
+@media (hover: hover) { .event-hero-title .btn:hover { opacity: 1; background: rgba(255, 255, 255, 0.14); } }
 .event-hero-sub { margin-top: 7px; font-size: 13.5px; opacity: 0.9; }
 .event-hero-sub .link { color: #fff; text-decoration: underline; text-underline-offset: 3px; }
 .event-summary {
@@ -205,7 +209,7 @@
   transition: transform var(--t) var(--ease);
 }
 .highlight-item img { width: 100%; height: 100%; object-fit: cover; }
-.highlight-item:hover { transform: scale(1.03); }
+@media (hover: hover) { .highlight-item:hover { transform: scale(1.03); } }
 
 /* ---------------- places ---------------- */
 .places-map { overflow: hidden; margin-bottom: 20px; }
@@ -260,7 +264,7 @@
   gap: 13px;
 }
 .place-tile { transition: transform var(--t) var(--ease); }
-.place-tile:hover { transform: translateY(-2px); }
+@media (hover: hover) { .place-tile:hover { transform: translateY(-2px); } }
 .place-tile-img {
   position: relative;
   aspect-ratio: 5 / 4;
@@ -269,7 +273,7 @@
   background: var(--surface-2);
 }
 .place-tile-img img { width: 100%; height: 100%; object-fit: cover; transition: transform 600ms var(--ease); }
-.place-tile:hover .place-tile-img img { transform: scale(1.05); }
+@media (hover: hover) { .place-tile:hover .place-tile-img img { transform: scale(1.05); } }
 .place-tile-body { padding: 8px 2px 0; }
 .place-tile-name { font-size: 13.5px; font-weight: 600; }
 .place-tile-meta { display: block; font-size: 11.5px; margin-top: 2px; }
@@ -305,7 +309,7 @@
   background: var(--surface-2);
 }
 .tl-month-cover img { width: 100%; height: 100%; object-fit: cover; transition: transform var(--t) var(--ease); }
-.tl-month-cover:hover img { transform: scale(1.06); }
+@media (hover: hover) { .tl-month-cover:hover img { transform: scale(1.06); } }
 .tl-month-bar {
   position: absolute;
   left: 0; bottom: 0;

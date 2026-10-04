@@ -101,7 +101,7 @@
   gap: 10px;
 }
 .person-title .btn { opacity: 0; transition: opacity var(--t-fast); }
-.person-hero:hover .person-title .btn { opacity: 1; }
+@media (hover: hover) { .person-hero:hover .person-title .btn { opacity: 1; } }
 .person-meta { font-size: 13px; margin-top: 5px; }
 .person-actions { display: flex; gap: 8px; margin-top: 13px; flex-wrap: wrap; }
 .rename-form { display: flex; gap: 8px; align-items: center; max-width: 460px; }
@@ -149,7 +149,7 @@
   width: 78px;
   transition: transform var(--t-fast) var(--ease);
 }
-.face-chip:hover { transform: translateY(-2px); }
+@media (hover: hover) { .face-chip:hover { transform: translateY(-2px); } }
 .face-chip-img {
   width: 64px;
   height: 64px;
@@ -251,7 +251,7 @@
   transition: transform var(--t-fast) var(--ease);
 }
 .face-review img { width: 100%; height: 100%; object-fit: cover; }
-.face-review:hover { transform: scale(1.03); }
+@media (hover: hover) { .face-review:hover { transform: scale(1.03); } }
 .face-review.is-selected { outline: 3px solid var(--accent); outline-offset: -3px; }
 .face-review-check {
   position: absolute;
@@ -346,3 +346,6 @@
   margin: 0;
   box-shadow: var(--sh-3);
 }
+
+/* No hover on a touch screen: show the person's edit buttons instead of hiding them behind one. */
+@media (hover: none) { .person-title .btn { opacity: 1; } }
