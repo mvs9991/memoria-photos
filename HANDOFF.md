@@ -987,3 +987,34 @@ request left it. `reap_stale_jobs` reads before writing and rolls back if it los
 privacy sweep counted a *place* `{id: 1, lat, ...}` as secret photo 1. An autouse fixture now clears every
 `PHOTOINTEL_*` variable; `PHOTOINTEL_TEST_KEEP_ENV=1` keeps them, which is how to run the privacy sweep against real
 place data (done once: 41/41, no leak). The sweep's id detector no longer takes places for photos.
+
+### Silent cut-offs and counts that disagreed (2026-10-04, found on the real library)
+
+A count-consistency sweep (each list's count vs. what opening the item shows, real library, read-only) found:
+
+- **Events page showed only the newest 500** (`/api/events` defaulted to `LIMIT 500`; the library has 734 events +
+  18 trips, so 252 events and 4 trips never appeared). No limit by default now (`tests/test_events_all_listed.py`).
+- **Search said "1,000 results" for a person with 6,434 photos**: `total` was the length of what was sent. A filter
+  search now counts every match; the page says "showing the first N" (`tests/test_search_total.py`).
+- **A place's page listed its newest 100 events** (busiest place has 135). **Folders** were capped at 400 and counted
+  hidden photos. **Opening a neighbourhood showed its whole city** (`_expand_places` widened by "same city";
+  Guddalaguntapalem 4,832 → Ongole's 6,545). **The places list** counted hidden photos and could use a hidden photo as
+  a place's cover. All in `tests/test_place_folder_lists.py`. Typed place searches gave identical totals before/after.
+- Still differing, by design: a *city*'s list count is the photos tagged with the city itself, while opening it
+  includes its neighbourhoods (Ongole 1,064 listed, 6,545 shown). Owner decision whether the list should show both.
+  Albums, events and people agree exactly.
+
+### Phone-speed timings (CPU ×4, 30 Mbps, real library; `web/jk_perf.mjs`, gitignored)
+
+| | first measured | now |
+|---|---|---|
+| cold load → photos visible | 4.4 s | 2.8–3.2 s |
+| People → faces visible | 4.4–4.8 s | 2.0–2.2 s |
+| Events page | 5.3 s | 1.75 s |
+| back to Photos | 1.7 s | 0.5 s |
+| tap → viewer image (uncached preview) | up to 14.9 s | 0.2–0.9 s, sharp after 1–3 s |
+| scroll p95 frame / frames > 50 ms in 4 s | 67 ms / 11 | 20 ms / 2 |
+
+The remaining cold-load time is the phone's CPU running the app (≈1.2 s after the Photos code arrives). The cache
+lives on a 5,400 rpm laptop disk (D:); cold thumbnail reads take 1.5–2.4 s. Moving the data folder to the SSD would
+remove that, but C: has 13 GB free — owner decision.
