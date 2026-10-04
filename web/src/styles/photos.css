@@ -52,7 +52,6 @@
   color: transparent;
   transition: background var(--t-fast), border-color var(--t-fast);
 }
-.grid-section-head:hover .section-select,
 .grid-host.is-selecting .section-select,
 .section-select:focus-visible,
 .section-select.some,
@@ -81,7 +80,9 @@
   transition: opacity 340ms var(--ease), transform 480ms var(--ease);
 }
 .tile img.is-loaded { opacity: 1; transform: none; }
-.tile:hover img { transform: scale(1.035); }
+/* Hover effects are for a mouse only. On a phone the first tap counts as a hover when hovering changes
+   what is on screen, so the tap that should have opened a photo only "hovered" it, and it took a second. */
+@media (hover: hover) { .tile:hover img { transform: scale(1.035); } }
 .tile-shade {
   position: absolute;
   inset: 0;
@@ -90,7 +91,7 @@
   transition: opacity var(--t) var(--ease);
   pointer-events: none;
 }
-.tile:hover .tile-shade { opacity: 1; }
+@media (hover: hover) { .tile:hover .tile-shade { opacity: 1; } }
 .tile:focus-visible { outline: 2px solid var(--accent); outline-offset: -2px; }
 .tile.is-selected { outline: 3px solid var(--accent); outline-offset: -3px; }
 
@@ -137,7 +138,8 @@
   opacity: 0;
   transition: opacity var(--t-fast), background var(--t-fast);
 }
-.tile:hover .tile-select, .tile-select.on { opacity: 1; }
+.tile-select.on { opacity: 1; }
+@media (hover: hover) { .tile:hover .tile-select { opacity: 1; } }
 .tile-select.on { background: var(--accent); border-color: var(--accent); color: #17130a; }
 /* While selecting, every tile shows its circle (as Apple Photos does) — a hover-only control
    is invisible on a phone, where there is no hover. */
@@ -279,6 +281,16 @@
   flex: none;
 }
 .tile-wrap .tile { position: absolute; inset: 0; width: 100% !important; height: 100% !important; }
-.tile-wrap:hover .tile-select,
 .tile-wrap .tile-select:focus-visible,
 .tile-wrap .tile-select.on { opacity: 1; }
+
+/* Mouse-only reveals (see the note at .tile:hover img): the select circle on a hovered tile and the
+   select-all control on a hovered section heading. */
+@media (hover: hover) {
+  .tile-wrap:hover .tile-select,
+  .grid-section-head:hover .section-select { opacity: 1; }
+}
+
+/* A photo tile is only ever tapped or held, never double-tap-zoomed: without this a phone waits ~300 ms after
+   each tap to see whether a second one follows. */
+.grid-host .tile-wrap, .grid-host .tile { touch-action: manipulation; }
