@@ -125,7 +125,12 @@
   grid-template-columns: repeat(auto-fill, minmax(min(258px, 100%), 1fr));
   gap: 16px;
 }
-.event-tile { transition: transform var(--t) var(--ease); }
+.event-tile {
+  transition: transform var(--t) var(--ease);
+  /* off-screen cards are not laid out or painted until they scroll near */
+  content-visibility: auto;
+  contain-intrinsic-block-size: auto 260px;
+}
 @media (hover: hover) { .event-tile:hover { transform: translateY(-3px); } }
 .event-tile-img {
   position: relative;

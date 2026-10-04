@@ -4,7 +4,7 @@ import { useQuery } from "@tanstack/react-query";
 import { CalendarRange, MapPin, Plane, Users } from "lucide-react";
 import { api, thumbUrl } from "../lib/api";
 import { EmptyState, ErrorState, Spinner } from "../components/States";
-import { useTitle } from "../lib/hooks";
+import { useGrowOnScroll, useTitle } from "../lib/hooks";
 
 export default function Events() {
   useTitle("Events");
@@ -24,6 +24,8 @@ export default function Events() {
     }
     return [...byYear.entries()].sort((a, b) => b[0] - a[0]);
   }, [data, kind]);
+  const listed = grouped.reduce((n, [, events]) => n + events.length, 0);
+  const grow = useGrowOnScroll(listed, 36, 72, kind);
 
   if (isError) return <ErrorState error={error} onRetry={() => refetch()} />;
   if (isLoading) return <Spinner full label="Loading events" />;
@@ -48,17 +50,29 @@ export default function Events() {
         <EmptyState icon={<CalendarRange size={26} />} title="No events yet"
           hint="Events appear once photos with dates are indexed." />
       ) : (
-        grouped.map(([year, events]) => (
-          <section key={year} className="event-year">
-            <div className="event-year-head">
-              <h2 className="display">{year}</h2>
-              <span className="dim tnum">{events.length} events</span>
-            </div>
-            <div className="event-grid">
-              {events.map((e: any) => <EventCard key={e.id} event={e} />)}
-            </div>
-          </section>
-        ))
+        <>
+          {(() => {
+            // Only the first `grow.shown` cards are drawn; each year still says how many it has.
+            let budget = grow.shown;
+            return grouped.map(([year, events]) => {
+              if (budget <= 0) return null;
+              const drawn = events.slice(0, budget);
+              budget -= drawn.length;
+              return (
+                <section key={year} className="event-year">
+                  <div className="event-year-head">
+                    <h2 className="display">{year}</h2>
+                    <span className="dim tnum">{events.length} events</span>
+                  </div>
+                  <div className="event-grid">
+                    {drawn.map((e: any) => <EventCard key={e.id} event={e} />)}
+                  </div>
+                </section>
+              );
+            });
+          })()}
+          {grow.more && <div ref={grow.sentinel} aria-hidden style={{ height: 1 }} />}
+        </>
       )}
     </div>
   );

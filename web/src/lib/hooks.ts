@@ -93,3 +93,27 @@ export function useCountUp(target: number, ms = 700) {
   }, [target, ms]);
   return v;
 }
+
+/**
+ * How many items of a long list to draw: a first screenful at once, then more each time the returned
+ * sentinel (put it after the list) comes within ~1200 px of view. A page that drew every card at once
+ * (734 events, ~8,000 elements) took over five seconds to appear on a phone-speed CPU.
+ * `resetKey` starts again from the first screenful (a new filter, say).
+ */
+export function useGrowOnScroll(total: number, first = 48, step = 96, resetKey: unknown = null) {
+  const [shown, setShown] = useState(first);
+  const sentinel = useRef<HTMLDivElement | null>(null);
+  useEffect(() => { setShown(first); }, [resetKey, first]);
+  const more = shown < total;
+  useEffect(() => {
+    const el = sentinel.current;
+    if (!more || !el) return;
+    const io = new IntersectionObserver((entries) => {
+      if (entries.some((e) => e.isIntersecting)) setShown((n) => n + step);
+    }, { root: el.closest("[data-scroll-root]"), rootMargin: "1200px 0px" });
+    io.observe(el);
+    return () => io.disconnect();
+  }, [more, shown, step]);
+  return { shown, more, sentinel };
+}
+
