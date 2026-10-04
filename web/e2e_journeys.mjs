@@ -55,6 +55,14 @@ const goto = async (path, ready = ".page, .tile-wrap") => {
   await page.waitForTimeout(700);
 };
 const stats = () => j("/api/stats");
+// Wait for a count to reach what an action should have made it, instead of a fixed pause: a fixed 0.7 s read
+// too early while the server was still warming its search model on the CPU (an action that worked, failed).
+const statsWhen = async (pred, ms = 10000) => {
+  const t = Date.now();
+  let s = await stats();
+  while (!pred(s) && Date.now() - t < ms) { await page.waitForTimeout(250); s = await stats(); }
+  return { s, took: Date.now() - t };
+};
 const photoIds = async (qs = "") => (await j("/api/photos/index" + qs)).ids;
 const tiles = () => page.locator(".tile-wrap");
 
@@ -86,14 +94,14 @@ await step("viewer: favourite toggles and persists (f key)", async () => {
   await tiles().first().click();
   await page.waitForSelector(".viewer");
   await page.keyboard.press("f");
-  await page.waitForTimeout(700);
-  const mid = (await stats()).favorites;
+  const m = await statsWhen((s) => s.favorites === before + 1);
+  const mid = m.s.favorites;
   await page.keyboard.press("f");
-  await page.waitForTimeout(700);
-  const after = (await stats()).favorites;
+  const a = await statsWhen((s) => s.favorites === before);
+  const after = a.s.favorites;
   await page.keyboard.press("Escape");
   ok(mid === before + 1 && after === before, `favourites ${before} -> ${mid} -> ${after}`);
-  return `${before} -> ${mid} -> ${after}`;
+  return `${before} -> ${mid} -> ${after} (saved in ${m.took} / ${a.took} ms)`;
 });
 
 await step("viewer: rapid favourite presses alternate correctly (no stale-state race)", async () => {
@@ -209,10 +217,9 @@ await step("delete 2 photos: confirmed, moved to the Trash, originals gone from 
   const needs = await dlg.getByLabel(/Type the number/).count();
   if (needs) await dlg.getByLabel(/Type the number/).fill("2");
   await dlg.getByRole("button", { name: /Move to Trash/ }).click();
-  await page.waitForTimeout(1500);
-  const s = await stats();
+  const { s, took } = await statsWhen((st) => st.trash === 2);
   ok(s.trash === 2, `trash count is ${s.trash}`);
-  return `trash=${s.trash}`;
+  return `trash=${s.trash} (after ${took} ms)`;
 });
 await step("the Trash page lists them and Restore puts the bytes back unchanged", async () => {
   await goto("/trash", ".page");

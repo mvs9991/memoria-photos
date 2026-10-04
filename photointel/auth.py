@@ -14,6 +14,7 @@ import hmac
 import os
 import secrets
 import sqlite3
+import threading
 import time
 from pathlib import Path
 
@@ -39,11 +40,52 @@ def verify_password(password: str, stored: str) -> bool:
         return False
 
 
+_secret_cache: dict[str, bytes] = {}
+_secret_lock = threading.Lock()
+
+
 def _secret(data_dir: Path) -> bytes:
-    path = Path(data_dir) / "secret.key"
-    if not path.exists():
-        path.write_bytes(os.urandom(32))
-    return path.read_bytes()
+    """The key that signs sessions and tokens: made once, whole, and the same for every caller.
+
+    It used to be "if missing, write 32 random bytes", then read the file back. Two first logins at once
+    could each write their own key (one device signed out again at once) or read it while still empty
+    (a session signed with an empty key, which anyone could forge). Now only one creator can win
+    (O_EXCL), others wait until it is whole, and it is kept in memory instead of read on every request.
+    """
+    cache_key = str(Path(data_dir).resolve())
+    hit = _secret_cache.get(cache_key)
+    if hit:
+        return hit
+    with _secret_lock:
+        hit = _secret_cache.get(cache_key)
+        if hit:
+            return hit
+        path = Path(data_dir) / "secret.key"
+        try:
+            fd = os.open(path, os.O_WRONLY | os.O_CREAT | os.O_EXCL | getattr(os, "O_BINARY", 0), 0o600)
+        except FileExistsError:
+            value = _read_whole_key(path)
+        else:
+            value = os.urandom(32)
+            with os.fdopen(fd, "wb") as f:
+                f.write(value)
+        _secret_cache[cache_key] = value
+        return value
+
+
+def _read_whole_key(path: Path) -> bytes:
+    for _ in range(50):                     # another process (the CLI) may be writing it this instant
+        value = path.read_bytes()
+        if len(value) >= 32:
+            return value
+        time.sleep(0.02)
+    # Still short: a write that died half way, long ago. Replace it (whole, in one step) rather than sign
+    # with a short key; sessions signed with the old one simply ask for the password again.
+    value = os.urandom(32)
+    tmp = path.with_name(f"{path.name}.{os.getpid()}.tmp")
+    tmp.write_bytes(value)
+    os.replace(tmp, path)
+    return value
 
 
 def make_session(data_dir: Path) -> str:
