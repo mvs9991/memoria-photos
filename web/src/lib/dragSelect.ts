@@ -20,7 +20,7 @@
  */
 import { useCallback, useEffect, useRef } from "react";
 
-export const HOLD_MS = 450;
+export const HOLD_MS = 650;       // a slow tap (finger resting a moment) lasts ~0.5 s, so 450 turned plain taps into selection
 const TOUCH_SLOP = 10;       // px a finger may drift during the hold before it counts as a scroll
 const MOUSE_SLOP = 6;        // px of movement that starts a drag when already selecting
 const EDGE = 72;             // px from the scroll container's edge where auto-scroll begins

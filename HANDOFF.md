@@ -728,7 +728,7 @@ loading the search model.
 `SelectionBar.tsx` is what a page uses to get all of it (Select button, hold, drag, Ctrl+A, Esc).
 Behaviour worth knowing before you change it:
 
-- **Touch:** holding still for 450 ms starts selection; moving before that is a scroll and the
+- **Touch:** holding still for 650 ms (it was 450, and a slow tap lasts about that long, so plain taps turned into selection) starts selection; moving before that is a scroll and the
   gesture is dropped. After the hold, `touchmove` is blocked so the page does not scroll under the
   finger. **Mouse:** the same hold, or, once already selecting, a few pixels of movement starts a
   drag at once.
