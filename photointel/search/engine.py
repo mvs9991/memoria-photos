@@ -350,6 +350,15 @@ class SearchEngine:
             return candidates[:limit], {}
         model = self.ctx.semantic_model()
         qvec = normalize(model.encode_texts([f"a photo of {text}", text]).mean(0, keepdims=True))[0]
+        if index.mat.shape[1] != qvec.shape[0]:
+            # The photos were analysed with a model of another size than the one loaded now (the model files
+            # changed, or the server started without the folder holding the usual ones). Comparing them made
+            # every search fail; answer without the visual ranking until the photos are analysed again.
+            if not getattr(self, "_warned_dim", False):
+                log.warning("Search model gives %d-value vectors but the photos hold %d-value ones; searching "
+                            "without visual ranking until they are re-analysed", qvec.shape[0], index.mat.shape[1])
+                self._warned_dim = True
+            return candidates[:limit], {}
         row_of = index.id_to_row()
         rows = np.array([row_of[p] for p in candidates if p in row_of], dtype=np.int64)
         ids = np.array([p for p in candidates if p in row_of], dtype=np.int64)

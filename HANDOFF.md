@@ -1018,3 +1018,11 @@ shrinks a range, edge auto-scroll, a swipe is a scroll, releasing never opens th
 faces (the e2e library has none) and is skipped there. Holds wait 900 ms because `HOLD_MS` is 650.
 `ANALYZE` was tried on a copy of the real database: no query got faster and one got slower (38 → 57 ms), so the
 planner is left without statistics on purpose.
+
+**Mixed load re-run (2026-10-04, after the writer/stuck-transaction fixes; `eval/loadtest_mixed.py`, synthetic
+library, CPU):** ~1,860 API requests in 72 s each without and with an index job; 0 lost writes either way; no
+`BEGIN IMMEDIATE` probe waited ≥ 1 s during the job (previous run: four holds of 1.3–2.5 s); write p95 81–230 ms
+during the job. The job itself failed at once on this run because the library had no face models (setup issue,
+clear message). It did surface one real bug: a search when the stored embeddings and the loaded model differ in
+size answered 500 every time; it now logs a warning and searches without the visual ranking
+(`tests/test_search_model_mismatch.py`).

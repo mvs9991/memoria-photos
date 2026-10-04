@@ -26,6 +26,7 @@ def test_indexing_makes_the_small_thumbnail_too(ctx, library):
 def test_the_backfill_fills_gaps_only_while_allowed(ctx, library):
     Indexer(ctx, workers=2, enable_faces=False, enable_semantic=False).run(roots=[str(library)])
     found = shas(ctx)
+    thumbs._known.clear()
     for s in found[:5]:                                   # photos indexed before small thumbnails existed
         thumbs.small_path(ctx.paths.thumbs, s).unlink()
     conn = ctx.connect()

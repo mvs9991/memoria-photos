@@ -44,16 +44,26 @@ def make_small_from_medium(thumb_root: Path, sha256: str) -> bool:
     return True
 
 
+# Hashes already known to have a small thumbnail, so later batches do not ask the (slow) disk again about
+# every photo before the first one still missing. A thumbnail is never removed except by "clear cache",
+# which empties the folder; the on-demand path makes it again in that case.
+_known: set[str] = set()
+
+
 def missing(conn: sqlite3.Connection, thumb_root: Path, limit: int) -> list[str]:
     """Content hashes of visible photos (newest first) whose small thumbnail does not exist yet."""
     out: list[str] = []
     for (sha,) in conn.execute(
             "SELECT sha256 FROM photos WHERE status = 'ok' AND hidden = 0 AND live_component = 0 "
             "AND sha256 IS NOT NULL ORDER BY taken_ts DESC"):
-        if not small_path(thumb_root, sha).exists():
-            out.append(sha)
-            if len(out) >= limit:
-                break
+        if sha in _known:
+            continue
+        if small_path(thumb_root, sha).exists():
+            _known.add(sha)
+            continue
+        out.append(sha)
+        if len(out) >= limit:
+            break
     return out
 
 
@@ -67,6 +77,7 @@ def backfill(conn: sqlite3.Connection, thumb_root: Path, *, may_run: Callable[[]
         try:
             if make_small_from_medium(thumb_root, sha):
                 made += 1
+                _known.add(sha)
         except Exception:                       # a damaged 512 px file: the on-demand path will cope
             log.debug("small thumbnail for %s failed", sha, exc_info=True)
         time.sleep(pause)                       # leave the disk to whoever comes back

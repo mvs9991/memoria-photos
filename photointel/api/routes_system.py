@@ -353,4 +353,8 @@ def clear_cache(kind: str = Query("previews", pattern="^(previews|faces|thumbs|a
                         removed += 1
                     except OSError:
                         pass
+    if kind in ("thumbs", "all"):
+        from ..engine import thumbs
+
+        thumbs._known.clear()            # the idle backfill should make them again, not assume they exist
     return {"removed": removed}
