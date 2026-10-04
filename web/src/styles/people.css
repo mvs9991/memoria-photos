@@ -14,8 +14,15 @@
   border-radius: var(--r-lg);
   transition: background var(--t-fast) var(--ease), transform var(--t-fast) var(--ease);
   text-align: center;
+  /* A big library has hundreds of people on this page and a phone shows six: let the browser skip laying
+     out and painting the rest until they scroll near (it remembers each tile's real size once seen). */
+  content-visibility: auto;
+  contain-intrinsic-size: auto 180px;
 }
-.person-tile:hover { background: var(--surface); transform: translateY(-2px); }
+/* Mouse only: on a phone a tap that triggers a hover change can count as the hover, needing a second tap. */
+@media (hover: hover) {
+  .person-tile:hover { background: var(--surface); transform: translateY(-2px); }
+}
 .person-face {
   position: relative;
   width: 104px;
@@ -28,7 +35,7 @@
   box-shadow: 0 0 0 1px var(--hairline), var(--sh-1);
   transition: box-shadow var(--t) var(--ease);
 }
-.person-tile:hover .person-face { box-shadow: 0 0 0 2px var(--accent-line), var(--sh-2); }
+@media (hover: hover) { .person-tile:hover .person-face { box-shadow: 0 0 0 2px var(--accent-line), var(--sh-2); } }
 .person-face img { width: 100%; height: 100%; object-fit: cover; }
 .person-face.is-picked { box-shadow: 0 0 0 3px var(--accent); }
 .person-face-blank { color: var(--text-3); display: grid; place-items: center; width: 100%; height: 100%; }

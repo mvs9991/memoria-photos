@@ -9,6 +9,7 @@ import io
 import json
 import logging
 import os
+import threading
 import tempfile
 import time
 from pathlib import Path
@@ -217,8 +218,8 @@ def face_crop(face_id: int, size: int = Query(200, ge=64, le=512)):
         raise HTTPException(404, "face not found")
     guard_locked(face)
     cache = state.ctx.paths.faces / f"{face_id % 100:02d}" / f"{face_id}_{size}.jpg"
-    if cache.exists():
-        return FileResponse(cache, media_type="image/jpeg", headers={"Cache-Control": IMMUTABLE})
+    if cache.exists() and (hit := _cached_file(cache, "image/jpeg")) is not None:
+        return hit
 
     row = _photo_row(face["photo_id"])
     path = abs_path(row)
@@ -255,8 +256,16 @@ def face_crop(face_id: int, size: int = Query(200, ge=64, le=512)):
     box = (int(cx - half), int(cy - half), int(cx + half), int(cy + half))
     crop = src_img.crop(box).resize((size, size), Image.Resampling.LANCZOS)
     cache.parent.mkdir(parents=True, exist_ok=True)
+    # Written aside and swapped in: People asks for many faces at once, and a second request for the same
+    # face arriving mid-write used to serve the half-written file (a broken face).
+    tmp = cache.with_name(f"{cache.name}.{os.getpid()}-{threading.get_ident():x}.tmp")
     try:
-        crop.save(cache, "JPEG", quality=88)
+        crop.save(tmp, "JPEG", quality=88)
+        os.replace(tmp, cache)
     except Exception:
         log.debug("face crop cache write failed", exc_info=True)
+        try:
+            tmp.unlink(missing_ok=True)
+        except OSError:
+            pass
     return _send_image(crop, "JPEG", 88)

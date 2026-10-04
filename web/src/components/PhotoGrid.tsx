@@ -185,21 +185,17 @@ export function PhotoGrid({
     let current: { key: string; label: string; items: GridItem[] } | null = null;
     for (const it of items) {
       let key = "all";
-      let label = "";
       if (grouping !== "none") {
         const d = toDate(it.ts || 0);
-        if (!it.ts) {
-          key = "unknown";
-          label = "No date";
-        } else if (grouping === "day") {
-          key = `${d.getUTCFullYear()}-${d.getUTCMonth()}-${d.getUTCDate()}`;
-          label = formatDay(it.ts);
-        } else {
-          key = `${d.getUTCFullYear()}-${d.getUTCMonth()}`;
-          label = formatMonth(it.ts);
-        }
+        if (!it.ts) key = "unknown";
+        else if (grouping === "day") key = `${d.getUTCFullYear()}-${d.getUTCMonth()}-${d.getUTCDate()}`;
+        else key = `${d.getUTCFullYear()}-${d.getUTCMonth()}`;
       }
       if (!current || current.key !== key) {
+        // The label is only needed once per section: formatting it for every photo (24k on a real
+        // library, each reading the clock) was the grid's biggest JavaScript cost when the page opened.
+        const label = grouping === "none" ? "" : !it.ts ? "No date"
+          : grouping === "day" ? formatDay(it.ts) : formatMonth(it.ts);
         current = { key, label, items: [] };
         groups.push(current);
       }
@@ -411,7 +407,8 @@ function Tile({ id, w, h, flags, dur, rating, stack, rot, index, selected, selec
           aria-label={selected ? `Deselect photo ${id}` : `Select photo ${id}`}
           aria-pressed={selected}
         >
-          <Check size={13} strokeWidth={3} />
+          {/* The tick is transparent until selected: drawing an SVG in every tile anyway cost layout and paint while scrolling. */}
+          {selected && <Check size={13} strokeWidth={3} />}
         </button>
       )}
     </div>
