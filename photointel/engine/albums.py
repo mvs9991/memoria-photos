@@ -250,5 +250,7 @@ def list_tags(conn: sqlite3.Connection) -> list[dict]:
     rows = conn.execute(
         """SELECT t.name, t.category, SUM(pt.source = 'user') AS by_user, COUNT(*) AS n
            FROM tags t JOIN photo_tags pt ON pt.tag_id = t.id
-           WHERE pt.score >= 2.0 GROUP BY t.id ORDER BY (t.category = 'user') DESC, n DESC""").fetchall()
+           JOIN photos p ON p.id = pt.photo_id
+           WHERE pt.score >= 2.0 AND p.status = 'ok' AND p.hidden = 0 AND p.live_component = 0
+           GROUP BY t.id ORDER BY (t.category = 'user') DESC, n DESC""").fetchall()
     return [{"name": r["name"], "category": r["category"], "count": r["n"], "user_count": r["by_user"]} for r in rows]

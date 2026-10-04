@@ -27,10 +27,13 @@ def refresh(conn: sqlite3.Connection, photo_ids: list[int]) -> None:
     """Person counts and covers, and the search index's view of visible photos. The change
     itself is already committed; a failure here only leaves counts stale until the next index."""
     from .people import update_person_stats
-    from .stacks import reassign_covers
+    from .events import drop_unseen
+    from .stacks import detach_unseen, reassign_covers
 
     try:
         reassign_covers(conn, photo_ids)
+        detach_unseen(conn, photo_ids)
+        drop_unseen(conn, photo_ids)
         people: set[int] = set()
         for i in range(0, len(photo_ids), 900):
             chunk = photo_ids[i:i + 900]

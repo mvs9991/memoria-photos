@@ -714,10 +714,13 @@ def stats():
            GROUP BY pl.id ORDER BY n DESC LIMIT 8""")]
     return {
         "photos": total,
-        "photos_by_status": {r[0]: r[1] for r in conn.execute("SELECT status, COUNT(*) FROM photos GROUP BY status")},
+        # 'locked' and 'private' are left out: a count of photos someone cannot open is still news that they exist
+        "photos_by_status": {r[0]: r[1] for r in conn.execute(
+            "SELECT status, COUNT(*) FROM photos WHERE status NOT IN ('locked', 'private') GROUP BY status")},
         "people": one("SELECT COUNT(*) FROM persons WHERE merged_into IS NULL AND ignored=0 AND face_count > 0"),
         "named_people": one("SELECT COUNT(*) FROM persons WHERE merged_into IS NULL AND name IS NOT NULL"),
-        "faces": one("SELECT COUNT(*) FROM faces"),
+        "faces": one("SELECT COUNT(*) FROM faces f JOIN photos p ON p.id = f.photo_id "
+                     "WHERE p.status = 'ok' AND p.hidden = 0 AND p.live_component = 0"),
         "events": one("SELECT COUNT(*) FROM events WHERE kind='event'"),
         "trips": one("SELECT COUNT(*) FROM events WHERE kind='trip'"),
         "albums": one(f"SELECT COUNT(*) FROM albums a WHERE a.hidden = 0 AND "
@@ -726,9 +729,12 @@ def stats():
                       "AND live_component=0"),
         "places": one("SELECT COUNT(DISTINCT place_id) FROM photos WHERE place_id IS NOT NULL AND status='ok' "
                       "AND hidden = 0 AND live_component = 0"),
-        "duplicate_groups": one("SELECT COUNT(*) FROM dup_groups WHERE kind != 'similar'"),
-        "duplicate_photos": one("SELECT COUNT(DISTINCT photo_id) FROM dup_members m JOIN dup_groups g "
-                                "ON g.id=m.group_id WHERE g.kind != 'similar'"),
+        "duplicate_groups": one("SELECT COUNT(*) FROM dup_groups g WHERE g.kind != 'similar' AND "
+                                "(SELECT COUNT(*) FROM dup_members m JOIN photos p ON p.id = m.photo_id "
+                                " WHERE m.group_id = g.id AND p.status NOT IN ('locked', 'private')) > 1"),
+        "duplicate_photos": one("SELECT COUNT(DISTINCT m.photo_id) FROM dup_members m JOIN dup_groups g "
+                                "ON g.id=m.group_id JOIN photos p ON p.id = m.photo_id "
+                                "WHERE g.kind != 'similar' AND p.status NOT IN ('locked', 'private')"),
         "with_gps": one("SELECT COUNT(*) FROM photos WHERE gps_lat IS NOT NULL AND status='ok' AND hidden = 0 "
                         "AND live_component = 0"),
         "favorites": favorites.count(conn, current_user_id()),

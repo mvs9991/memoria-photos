@@ -480,6 +480,52 @@ def _update_event_stats(conn: sqlite3.Connection) -> None:
                      (build_summary(conn, row["id"]), row["id"]))
 
 
+def drop_unseen(conn: sqlite3.Connection, photo_ids: list[int]) -> int:
+    """Photos that left view (locked, private, trashed, hidden) leave their events and trips now,
+    exactly as the next rebuild would drop them, and those events' counts, people, cover and
+    summary are recomputed. Otherwise an event keeps counting a locked photo, uses it as its cover
+    and writes its tags into the summary until post-processing next runs. Photos that are visible
+    are left alone."""
+    gone: list[int] = []
+    for i in range(0, len(photo_ids), 900):
+        chunk = [int(p) for p in photo_ids[i:i + 900]]
+        gone += [int(r[0]) for r in conn.execute(
+            f"SELECT id FROM photos WHERE id IN ({','.join('?' * len(chunk))}) AND (status != 'ok' OR hidden = 1)", chunk)]
+    touched: set[int] = set()
+    for i in range(0, len(gone), 900):
+        chunk = gone[i:i + 900]
+        marks = ",".join("?" * len(chunk))
+        touched |= {int(r[0]) for r in conn.execute(
+            f"SELECT DISTINCT event_id FROM photos WHERE event_id IS NOT NULL AND id IN ({marks})", chunk)}
+        touched |= {int(r[0]) for r in conn.execute(
+            f"SELECT DISTINCT trip_id FROM trip_photos WHERE photo_id IN ({marks})", chunk)}
+        conn.execute(f"UPDATE photos SET event_id = NULL WHERE id IN ({marks})", chunk)
+        conn.execute(f"DELETE FROM trip_photos WHERE photo_id IN ({marks})", chunk)
+    for eid in touched:
+        ev = conn.execute("SELECT kind FROM events WHERE id = ?", (eid,)).fetchone()
+        if ev is None:
+            continue
+        if ev["kind"] == "trip":
+            ids = [int(r[0]) for r in conn.execute("SELECT photo_id FROM trip_photos WHERE trip_id = ?", (eid,))]
+        else:
+            ids = [int(r[0]) for r in conn.execute("SELECT id FROM photos WHERE event_id = ?", (eid,))]
+        if not ids:
+            # Nothing visible is left: the event or trip goes, as the next rebuild would drop it, so its
+            # title, dates and place stop being listed.
+            conn.execute("UPDATE events SET parent_id = NULL WHERE parent_id = ?", (eid,))
+            conn.execute("DELETE FROM trip_photos WHERE trip_id = ?", (eid,))
+            conn.execute("DELETE FROM events WHERE id = ?", (eid,))
+            continue
+        cover = _pick_cover(conn, ids) if ids else None
+        people = conn.execute(
+            f"SELECT COUNT(DISTINCT person_id) FROM faces WHERE person_id IS NOT NULL AND photo_id IN "
+            f"({','.join('?' * min(len(ids), 900))})", ids[:900]).fetchone()[0] if ids else 0
+        conn.execute("UPDATE events SET photo_count = ?, people_count = ?, cover_photo_id = ?, summary = ?, "
+                     "summary_source = 'template' WHERE id = ?",
+                     (len(ids), people, cover, build_summary(conn, eid), eid))
+    return len(touched)
+
+
 def build_summary(conn: sqlite3.Connection, event_id: int) -> str:
     from .people import person_label
     from .tags import top_tags_for_photos

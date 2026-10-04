@@ -39,7 +39,7 @@ def list_groups(kind: str | None = Query(None, pattern="^(exact|near|likely|simi
                 """SELECT m.photo_id, m.relation, m.similarity, m.hamming, p.width, p.height, p.size,
                           p.taken_ts, p.filename, p.folder, p.source_kind, p.quality_score
                    FROM dup_members m JOIN photos p ON p.id = m.photo_id WHERE m.group_id = ?
-                     AND p.status NOT IN ('locked', 'trashed', 'deleted')
+                     AND p.status NOT IN ('locked', 'private', 'trashed', 'deleted')
                    ORDER BY (m.photo_id = ?) DESC, p.size DESC""", (g["id"], g["keep_photo_id"])):
             members.append({
                 "photo_id": m["photo_id"], "relation": m["relation"],
@@ -49,9 +49,22 @@ def list_groups(kind: str | None = Query(None, pattern="^(exact|near|likely|simi
                 "filename": m["filename"], "folder": m["folder"], "source_kind": m["source_kind"],
                 "quality_score": m["quality_score"], "is_keeper": m["photo_id"] == g["keep_photo_id"],
             })
+        hidden_members = conn.execute(
+            "SELECT COUNT(*) FROM dup_members m JOIN photos p ON p.id = m.photo_id "
+            "WHERE m.group_id = ? AND p.status IN ('locked', 'private')", (g["id"],)).fetchone()[0]
+        if hidden_members:
+            # Some members are locked or private. A group they leave with fewer than two copies is not a
+            # duplicate to anyone who cannot open them, and the rest must not count them or name one as the
+            # copy to keep.
+            if len(members) < 2:
+                continue
+            if g["keep_photo_id"] not in {m["photo_id"] for m in members}:
+                members[0]["is_keeper"] = True
+        keep_id = next((m["photo_id"] for m in members if m["is_keeper"]), g["keep_photo_id"])
         reclaimable = sum(m["size"] or 0 for m in members if not m["is_keeper"])
-        groups.append({"id": g["id"], "kind": g["kind"], "member_count": g["member_count"],
-                       "keep_photo_id": g["keep_photo_id"], "review_status": g["review_status"],
+        groups.append({"id": g["id"], "kind": g["kind"],
+                       "member_count": len(members) if hidden_members else g["member_count"],
+                       "keep_photo_id": keep_id, "review_status": g["review_status"],
                        "reclaimable_bytes": reclaimable, "members": members})
     counts = {r[0]: r[1] for r in conn.execute("SELECT kind, COUNT(*) FROM dup_groups GROUP BY kind")}
     # Reclaimable space is a headline figure for the whole library, so it is summed

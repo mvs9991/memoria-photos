@@ -12,6 +12,7 @@ from ..engine.events import event_title
 from ..engine.people import co_occurring, person_label
 from ..metadata import ts_to_naive
 from .deps import get_state
+from .routes_events import _visible_cover
 
 log = logging.getLogger(__name__)
 router = APIRouter()
@@ -56,9 +57,10 @@ def person_detail(person_id: int, photo_limit: int = 500):
 
     events = [{"id": e["id"], "title": event_title(e), "kind": e["kind"], "start_ts": e["start_ts"],
                "end_ts": e["end_ts"], "photo_count": e["photo_count"], "matched": e["n"],
-               "cover_photo_id": e["cover_photo_id"], "category": e["category"]} for e in conn.execute(
+               "cover_photo_id": _visible_cover(conn, e), "category": e["category"]} for e in conn.execute(
         """SELECT e.*, COUNT(DISTINCT p.id) n FROM events e JOIN photos p ON p.event_id = e.id
            JOIN faces f ON f.photo_id = p.id WHERE f.person_id = ? AND e.kind='event'
+             AND p.status = 'ok' AND p.hidden = 0
            GROUP BY e.id ORDER BY e.start_ts DESC LIMIT 60""", (person_id,))]
     # Group by city: a person's summary should say "Hyderabad", not list six of its
     # neighbourhoods. The representative place id is the most-photographed one per city.
@@ -67,6 +69,7 @@ def person_detail(person_id: int, photo_limit: int = 500):
                   COUNT(DISTINCT ph.id) n
            FROM places pl JOIN photos ph ON ph.place_id = pl.id
            JOIN faces f ON f.photo_id = ph.id WHERE f.person_id = ?
+             AND ph.status = 'ok' AND ph.hidden = 0
            GROUP BY pl.id ORDER BY n DESC""", (person_id,)).fetchall()
     by_city: dict[str, dict] = {}
     for pr in place_rows:
@@ -81,7 +84,8 @@ def person_detail(person_id: int, photo_limit: int = 500):
     years = [{"year": int(y["y"]), "count": y["n"]} for y in conn.execute(
         """SELECT strftime('%Y', ph.taken_ts, 'unixepoch') y, COUNT(DISTINCT ph.id) n
            FROM photos ph JOIN faces f ON f.photo_id = ph.id
-           WHERE f.person_id = ? AND ph.taken_ts IS NOT NULL GROUP BY y ORDER BY y""", (person_id,))]
+           WHERE f.person_id = ? AND ph.taken_ts IS NOT NULL AND ph.status = 'ok' AND ph.hidden = 0
+           GROUP BY y ORDER BY y""", (person_id,))]
     best = [int(x[0]) for x in conn.execute(
         """SELECT DISTINCT ph.id FROM photos ph JOIN faces f ON f.photo_id = ph.id
            WHERE f.person_id = ? AND ph.status='ok'
@@ -111,7 +115,7 @@ def person_faces(person_id: int, limit: int = Query(300, le=2000), offset: int =
         f"""SELECT f.id, f.photo_id, f.assign_confidence, f.assign_source, f.quality, f.det_score,
                    f.x1, f.y1, f.x2, f.y2, p.taken_ts
             FROM faces f JOIN photos p ON p.id = f.photo_id
-            WHERE f.person_id = ? ORDER BY {order_sql} LIMIT ? OFFSET ?""",
+            WHERE f.person_id = ? AND p.status = 'ok' ORDER BY {order_sql} LIMIT ? OFFSET ?""",
         (person_id, limit, offset)).fetchall()
     return {"faces": [{"id": r["id"], "photo_id": r["photo_id"], "confidence": r["assign_confidence"],
                        "source": r["assign_source"], "quality": round(r["quality"], 3),

@@ -69,6 +69,27 @@ def reassign_covers(conn: sqlite3.Connection, photo_ids: list[int]) -> int:
     return moved
 
 
+def detach_unseen(conn: sqlite3.Connection, photo_ids: list[int]) -> None:
+    """After reassign_covers: a photo that has left view (locked, private, trashed, hidden) leaves its
+    stack at once, so the stack's size flag and member list stop counting it. A stack down to one
+    frame is dissolved. The next rebuild would do the same."""
+    stacks: set[int] = set()
+    for i in range(0, len(photo_ids), 900):
+        chunk = [int(p) for p in photo_ids[i:i + 900]]
+        rows = conn.execute(
+            f"SELECT id, stack_id FROM photos WHERE id IN ({','.join('?' * len(chunk))}) AND stack_id IS NOT NULL "
+            f"AND (status != 'ok' OR hidden = 1)", chunk).fetchall()
+        for r in rows:
+            stacks.add(int(r["stack_id"]))
+            conn.execute("UPDATE photos SET stack_id = NULL, stack_hidden = 0 WHERE id = ?", (r["id"],))
+    for sid in stacks:
+        left = conn.execute("SELECT id FROM photos WHERE stack_id = ?", (sid,)).fetchall()
+        if len(left) == 1:
+            conn.execute("UPDATE photos SET stack_id = NULL, stack_hidden = 0 WHERE id = ?", (left[0][0],))
+    if stacks:
+        conn.commit()
+
+
 def dismissed(conn: sqlite3.Connection) -> set[str]:
     return set(json.loads(db.get_meta(conn, "stacks_dismissed", "[]") or "[]"))
 
@@ -167,7 +188,8 @@ def _similar(vec: dict, a: int, b: int) -> bool:
 
 def members(conn: sqlite3.Connection, stack_id: int) -> list[int]:
     return [int(r[0]) for r in conn.execute(
-        "SELECT id FROM photos WHERE stack_id = ? ORDER BY stack_hidden, taken_ts, id", (stack_id,))]
+        "SELECT id FROM photos WHERE stack_id = ? AND status = 'ok' AND hidden = 0 "
+        "ORDER BY stack_hidden, taken_ts, id", (stack_id,))]
 
 
 def set_cover(conn: sqlite3.Connection, photo_id: int) -> None:

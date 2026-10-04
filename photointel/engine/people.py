@@ -244,7 +244,8 @@ def update_person_stats(conn: sqlite3.Connection, person_ids: list[int] | None =
         args = tuple(person_ids)
     conn.execute(
         f"""UPDATE persons SET
-              face_count = COALESCE((SELECT COUNT(*) FROM faces f WHERE f.person_id = persons.id), 0),
+              face_count = COALESCE((SELECT COUNT(*) FROM faces f JOIN photos ph ON ph.id = f.photo_id
+                                     WHERE f.person_id = persons.id AND ph.status='ok' AND ph.hidden = 0), 0),
               photo_count = COALESCE((SELECT COUNT(DISTINCT f.photo_id) FROM faces f
                                       JOIN photos ph ON ph.id = f.photo_id
                                       WHERE f.person_id = persons.id AND ph.status='ok' AND ph.hidden = 0), 0),
