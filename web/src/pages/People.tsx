@@ -7,6 +7,7 @@ import { api, faceUrl, thumbUrl } from "../lib/api";
 import { EmptyState, ErrorState, SectionHeader, Spinner } from "../components/States";
 import { useTitle } from "../lib/hooks";
 import { useDragSelect } from "../lib/dragSelect";
+import { FloatingBar } from "../components/SelectionBar";
 
 export default function People() {
   useTitle("People");
@@ -147,53 +148,55 @@ export default function People() {
       )}
 
       {selecting && (
-        <div className="merge-bar" role="toolbar" aria-label="Selected people">
-          <span className="tnum">
-            {picked.length === 0
-              ? (note
-                  ? <>{note.text}. <button className="link-button" onClick={() => hide.mutate({ ids: note.undo, hidden: false })}>Undo</button></>
-                  : "Tap people to pick them — or press and hold one and drag across others")
-              : <><strong>{picked.length.toLocaleString()}</strong> selected</>}
-          </span>
-          <div className="merge-bar-actions">
-            {people.length > 0 && (
-              <button className="btn btn-ghost btn-sm" onClick={() => toggleList(people)}
-                title="Pick everyone on this page">
-                {allPicked(people) ? "Deselect all" : `Select all ${people.length.toLocaleString()}`}
+        <FloatingBar>
+          <div className="merge-bar" role="toolbar" aria-label="Selected people">
+            <span className="tnum">
+              {picked.length === 0
+                ? (note
+                    ? <>{note.text}. <button className="link-button" onClick={() => hide.mutate({ ids: note.undo, hidden: false })}>Undo</button></>
+                    : "Tap people to pick them — or press and hold one and drag across others")
+                : <><strong>{picked.length.toLocaleString()}</strong> selected</>}
+            </span>
+            <div className="merge-bar-actions">
+              {people.length > 0 && (
+                <button className="btn btn-ghost btn-sm" onClick={() => toggleList(people)}
+                  title="Pick everyone on this page">
+                  {allPicked(people) ? "Deselect all" : `Select all ${people.length.toLocaleString()}`}
+                </button>
+              )}
+              {picked.length > 0 && (
+                <button className="btn btn-ghost btn-sm" disabled={hide.isPending}
+                  onClick={() => hide.mutate({ ids: picked, hidden: true })}
+                  title="Take them off this page. Nothing is deleted; the eye icon shows hidden people again.">
+                  <EyeOff size={14} /> Hide {picked.length.toLocaleString()}
+                </button>
+              )}
+              {picked.length > 1 && (
+                <button className="btn btn-primary btn-sm"
+                  onClick={() => {
+                    const first = people.find((p) => p.id === picked[0])?.label ?? "the first one";
+                    // Two is an ordinary merge. More than that is almost always a stray click after
+                    // "Select all", and it would fold many different people into one.
+                    if (picked.length > 2 && !window.confirm(
+                      `Merge ${picked.length.toLocaleString()} people into ${first}?\n\nUse this only if they are all the same person.`)) return;
+                    merge.mutate({ target: picked[0], sources: picked.slice(1) });
+                  }}
+                  title="They are the same person. The first one picked keeps its name.">
+                  <Check size={14} /> Merge into {people.find((p) => p.id === picked[0])?.label}
+                </button>
+              )}
+              {picked.length > 0 && (
+                <button className="btn btn-ghost btn-sm" onClick={() => setExporting(true)}
+                  title="Copy all their photos somewhere">
+                  <FolderOutput size={14} /> Export
+                </button>
+              )}
+              <button className="btn btn-quiet btn-sm" onClick={() => { setPicked([]); setNote(null); setSelecting(false); }}>
+                Done
               </button>
-            )}
-            {picked.length > 0 && (
-              <button className="btn btn-ghost btn-sm" disabled={hide.isPending}
-                onClick={() => hide.mutate({ ids: picked, hidden: true })}
-                title="Take them off this page. Nothing is deleted; the eye icon shows hidden people again.">
-                <EyeOff size={14} /> Hide {picked.length.toLocaleString()}
-              </button>
-            )}
-            {picked.length > 1 && (
-              <button className="btn btn-primary btn-sm"
-                onClick={() => {
-                  const first = people.find((p) => p.id === picked[0])?.label ?? "the first one";
-                  // Two is an ordinary merge. More than that is almost always a stray click after
-                  // "Select all", and it would fold many different people into one.
-                  if (picked.length > 2 && !window.confirm(
-                    `Merge ${picked.length.toLocaleString()} people into ${first}?\n\nUse this only if they are all the same person.`)) return;
-                  merge.mutate({ target: picked[0], sources: picked.slice(1) });
-                }}
-                title="They are the same person. The first one picked keeps its name.">
-                <Check size={14} /> Merge into {people.find((p) => p.id === picked[0])?.label}
-              </button>
-            )}
-            {picked.length > 0 && (
-              <button className="btn btn-ghost btn-sm" onClick={() => setExporting(true)}
-                title="Copy all their photos somewhere">
-                <FolderOutput size={14} /> Export
-              </button>
-            )}
-            <button className="btn btn-quiet btn-sm" onClick={() => { setPicked([]); setNote(null); setSelecting(false); }}>
-              Done
-            </button>
+            </div>
           </div>
-        </div>
+        </FloatingBar>
       )}
 
       {!selecting && (suggestions.data?.suggestions?.length ?? 0) > 0 && (

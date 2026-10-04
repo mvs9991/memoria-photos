@@ -327,3 +327,15 @@
   user-select: none;
   -webkit-touch-callout: none;
 }
+
+/* The slot a select-mode bar lives in: zero height, so showing or hiding the bar never moves the page,
+   and sticky, so the bar still follows the top edge while scrolling. */
+.bar-slot { position: sticky; top: 8px; z-index: 20; height: 0; }
+.bar-slot > .selection-bar,
+.bar-slot > .merge-bar,
+.bar-slot > .review-bar {
+  position: absolute;
+  top: 0; left: 0; right: 0;
+  margin: 0;
+  box-shadow: var(--sh-3);
+}

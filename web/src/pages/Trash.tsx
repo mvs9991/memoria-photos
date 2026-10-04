@@ -14,6 +14,7 @@ import { SelectToggle, useGridSelect } from "../components/SelectionBar";
 import { useViewer } from "../components/ViewerContext";
 import { formatBytes } from "../lib/format";
 import { useTitle } from "../lib/hooks";
+import { FloatingBar } from "../components/SelectionBar";
 
 export default function Trash() {
   useTitle("Trash");
@@ -68,19 +69,21 @@ export default function Trash() {
       </div>
 
       {sel.length > 0 && (
-        <div className="review-bar selection-bar" role="toolbar" aria-label="Selected files">
-          <span className="tnum"><strong>{sel.length.toLocaleString()}</strong> selected</span>
-          {sel.length < allIds.length && (
-            <button className="btn btn-quiet btn-sm" onClick={gs.selectAll}>Select all {allIds.length}</button>
-          )}
-          <button className="btn btn-primary btn-sm" onClick={() => restore.mutate(sel)} disabled={restore.isPending}>
-            <RotateCcw size={14} /> Restore
-          </button>
-          <button className="btn btn-danger btn-sm" onClick={() => setErase({ ids: sel })}>
-            <Trash2 size={14} /> Delete permanently
-          </button>
-          <button className="btn btn-quiet btn-sm" onClick={selection.clear}><X size={14} /> Clear</button>
-        </div>
+        <FloatingBar>
+          <div className="review-bar selection-bar" role="toolbar" aria-label="Selected files">
+            <span className="tnum"><strong>{sel.length.toLocaleString()}</strong> selected</span>
+            {sel.length < allIds.length && (
+              <button className="btn btn-quiet btn-sm" onClick={gs.selectAll}>Select all {allIds.length}</button>
+            )}
+            <button className="btn btn-primary btn-sm" onClick={() => restore.mutate(sel)} disabled={restore.isPending}>
+              <RotateCcw size={14} /> Restore
+            </button>
+            <button className="btn btn-danger btn-sm" onClick={() => setErase({ ids: sel })}>
+              <Trash2 size={14} /> Delete permanently
+            </button>
+            <button className="btn btn-quiet btn-sm" onClick={selection.clear}><X size={14} /> Clear</button>
+          </div>
+        </FloatingBar>
       )}
       {restore.data && restore.data.failed.length > 0 && (
         <p className="danger-text">{restore.data.failed.length} could not be restored: {restore.data.failed[0].reason}</p>

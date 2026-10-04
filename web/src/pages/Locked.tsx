@@ -11,6 +11,7 @@ import { EmptyState, Spinner } from "../components/States";
 import { SelectToggle, useGridSelect } from "../components/SelectionBar";
 import { useViewer } from "../components/ViewerContext";
 import { useTitle } from "../lib/hooks";
+import { FloatingBar } from "../components/SelectionBar";
 
 export default function Locked() {
   useTitle("Locked");
@@ -95,13 +96,15 @@ function Open() {
         </div>
       </div>
       {sel.length > 0 && (
-        <div className="review-bar selection-bar" role="toolbar" aria-label="Selected">
-          <span className="tnum"><strong>{sel.length}</strong> selected</span>
-          <button className="btn btn-ghost btn-sm" onClick={() => unlock.mutate(sel)}>
-            <LockOpen size={14} /> Move out of Locked
-          </button>
-          <button className="btn btn-quiet btn-sm" onClick={selection.clear}><X size={14} /> Clear</button>
-        </div>
+        <FloatingBar>
+          <div className="review-bar selection-bar" role="toolbar" aria-label="Selected">
+            <span className="tnum"><strong>{sel.length}</strong> selected</span>
+            <button className="btn btn-ghost btn-sm" onClick={() => unlock.mutate(sel)}>
+              <LockOpen size={14} /> Move out of Locked
+            </button>
+            <button className="btn btn-quiet btn-sm" onClick={selection.clear}><X size={14} /> Clear</button>
+          </div>
+        </FloatingBar>
       )}
       {photos.isLoading ? <Spinner /> : (
         <PhotoGrid items={items} grouping="month" targetHeight={200}

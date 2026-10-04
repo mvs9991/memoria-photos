@@ -214,6 +214,13 @@ export function PhotoViewer({ ids, index, onIndex, onClose }: Props) {
           </span>
         </div>
         <div className="viewer-top-right">
+          {/* Delete comes first: at the end of a row this long it was pushed off the edge of a phone. */}
+          {canDelete && photo && photo.status !== "trashed" && (
+            <button className="btn btn-quiet btn-icon" onClick={() => setTrashing(true)}
+              title="Move to Trash (Delete) — restorable for 30 days" aria-label="Move to Trash">
+              <Trash2 size={18} />
+            </button>
+          )}
           {photo && <StarRating value={photo.rating} onChange={(r) => rate.mutate(r)} size={16} />}
           <button className={`btn btn-quiet btn-icon${photo?.favorite ? " is-on" : ""}`}
             onClick={toggleFavorite} title="Favourite (F)" aria-label="Favourite">
@@ -246,12 +253,6 @@ export function PhotoViewer({ ids, index, onIndex, onClose }: Props) {
             aria-label="Hide photo">
             <EyeOff size={18} />
           </button>
-          {canDelete && photo && photo.status !== "trashed" && (
-            <button className="btn btn-quiet btn-icon" onClick={() => setTrashing(true)}
-              title="Move to Trash (Delete) — restorable for 30 days" aria-label="Move to Trash">
-              <Trash2 size={18} />
-            </button>
-          )}
           {trashing && <TrashDialog photoIds={[id]} onClose={() => setTrashing(false)}
             onDone={(r) => { if (r.trashed) onClose(); }} />}
           <button className={`btn btn-quiet btn-icon${showInfo ? " is-on" : ""}`}

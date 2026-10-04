@@ -12,6 +12,14 @@ import { ExportDialog } from "./ExportDialog";
 import { CreateDialog } from "./CreateDialog";
 import { TrashDialog, useAllowDelete } from "./TrashDialog";
 
+/** A bar that appears when select mode starts. It floats over the page instead of taking room in it:
+ *  a bar in the page flow pushed the whole grid down by its height the moment the first photo was held,
+ *  so the screen jumped under the finger (and on a desktop drag, selected the wrong tiles). The zero-height
+ *  sticky slot keeps its place in the flow and its stick-to-the-top behaviour, and costs the page nothing. */
+export function FloatingBar({ children }: { children: React.ReactNode }) {
+  return <div className="bar-slot">{children}</div>;
+}
+
 export function SelectionBar({ selected, onClear, onDone, extra, allIds, onSelectAll, active = false }: {
   selected: Set<number>;
   /** select mode is on: show a slim bar even before anything is picked, so the first pick does not
@@ -101,92 +109,96 @@ export function SelectionBar({ selected, onClear, onDone, extra, allIds, onSelec
   if (selected.size === 0) {
     if (!active) return null;
     return (
-      <div className="review-bar selection-bar selection-bar-empty" role="toolbar" aria-label="Select photos">
-        {hintGone
-          ? <span className="dim">Select photos</span>
-          : <span className="dim">Tap photos to select them — or press and hold one, then drag across others</span>}
-        {allIds && onSelectAll && allIds.length > 0 && (
+      <FloatingBar>
+        <div className="review-bar selection-bar selection-bar-empty" role="toolbar" aria-label="Select photos">
+          {hintGone
+            ? <span className="dim">Select photos</span>
+            : <span className="dim">Tap photos to select them — or press and hold one, then drag across others</span>}
+          {allIds && onSelectAll && allIds.length > 0 && (
+            <button className="btn btn-quiet btn-sm" onClick={() => onSelectAll(allIds)} title="Ctrl+A">
+              Select all {allIds.length.toLocaleString()}
+            </button>
+          )}
+          {onDone && <button className="btn btn-ghost btn-sm" onClick={onDone}>Done</button>}
+        </div>
+      </FloatingBar>
+    );
+  }
+  return (
+    <FloatingBar>
+      <div className="review-bar selection-bar" role="toolbar" aria-label="Selected photos">
+        <span className="tnum"><strong>{selected.size.toLocaleString()}</strong> selected</span>
+        {allIds && onSelectAll && selected.size < allIds.length && (
           <button className="btn btn-quiet btn-sm" onClick={() => onSelectAll(allIds)} title="Ctrl+A">
             Select all {allIds.length.toLocaleString()}
           </button>
         )}
-        {onDone && <button className="btn btn-ghost btn-sm" onClick={onDone}>Done</button>}
+        <button className="btn btn-primary btn-sm" onClick={() => setPicker(true)}>
+          <BookImage size={14} /> Add to album
+        </button>
+        <form className="input-inline" onSubmit={(e) => { e.preventDefault(); if (tag.trim()) addTag.mutate(); }}>
+          <Tag size={13} className="dim" />
+          <input value={tag} onChange={(e) => { setTag(e.target.value); setNote(null); }} placeholder="Tag them…"
+            maxLength={60} aria-label="Tag selected photos" />
+        </form>
+        <StarRating value={stars} size={14} onChange={(r) => rate.mutate(r)} label="Rate selected photos" />
+        {selected.size >= 2 && selected.size <= 4 && (
+          <button className="btn btn-ghost btn-sm" onClick={() => setComparing(true)} title="Side by side, to pick the best">
+            <Columns2 size={14} /> Compare
+          </button>
+        )}
+        <button className="btn btn-ghost btn-sm" onClick={() => rotate.mutate()} title="Turn 90° clockwise (the files are not changed)">
+          <RotateCw size={14} /> Rotate
+        </button>
+        <button className="btn btn-ghost btn-sm" onClick={() => setFixing("date")}><CalendarClock size={14} /> Fix date</button>
+        <button className="btn btn-ghost btn-sm" onClick={() => setFixing("place")}><MapPin size={14} /> Set place</button>
+        {role !== "guest" && (
+          <button className="btn btn-ghost btn-sm" onClick={() => setCreating(true)} title="Collage, animation or memory movie">
+            <Sparkles size={14} /> Create
+          </button>
+        )}
+        <button className="btn btn-ghost btn-sm" onClick={() => setExporting(true)} title="Copy the original files somewhere">
+          <FolderOutput size={14} /> Export
+        </button>
+        {extra}
+        {role !== "guest" && (
+          <button className="btn btn-ghost btn-sm" onClick={() => archive.mutate()}
+            title="Out of the timeline; still in search, albums and people">
+            <Archive size={14} /> Archive
+          </button>
+        )}
+        {role !== "guest" && auth.data?.accounts && (
+          <button className="btn btn-ghost btn-sm" onClick={() => makePrivate.mutate()}
+            title="Only you will see them (photos you uploaded)">
+            <EyeOff size={14} /> Make private
+          </button>
+        )}
+        {role === "owner" && (
+          <button className="btn btn-ghost btn-sm" onClick={() => lock.mutate()} title="Move to the PIN-protected Locked folder">
+            <Lock size={14} /> Lock
+          </button>
+        )}
+        {canDelete && (
+          <button className="btn btn-quiet btn-sm selection-trash" onClick={() => setTrashing(true)}
+            title="Move the files to the Trash (restorable for 30 days)">
+            <Trash2 size={14} /> Delete
+          </button>
+        )}
+        {note && <span className="dim selection-note">{note}</span>}
+        <button className="btn btn-quiet btn-sm" onClick={() => { setNote(null); onClear(); }}>
+          <X size={14} /> Clear
+        </button>
+        {creating && <CreateDialog photoIds={ids} onClose={() => setCreating(false)} />}
+        {exporting && <ExportDialog spec={{ photo_ids: ids }} onClose={() => setExporting(false)}
+          title={`Export ${ids.length.toLocaleString()} selected`} />}
+        {trashing && <TrashDialog photoIds={ids} onClose={() => setTrashing(false)}
+          onDone={(r) => { if (r.trashed && !r.skipped.length) onClear(); }} />}
+        {comparing && <CompareView ids={ids} onClose={() => setComparing(false)} />}
+        {fixing && <CorrectionDialog photoIds={ids} mode={fixing} onClose={() => setFixing(null)} />}
+        {picker && <AlbumPicker photoIds={ids} onClose={() => setPicker(false)}
+          onDone={() => setNote(`Added ${ids.length.toLocaleString()} to the album`)} />}
       </div>
-    );
-  }
-  return (
-    <div className="review-bar selection-bar" role="toolbar" aria-label="Selected photos">
-      <span className="tnum"><strong>{selected.size.toLocaleString()}</strong> selected</span>
-      {allIds && onSelectAll && selected.size < allIds.length && (
-        <button className="btn btn-quiet btn-sm" onClick={() => onSelectAll(allIds)} title="Ctrl+A">
-          Select all {allIds.length.toLocaleString()}
-        </button>
-      )}
-      <button className="btn btn-primary btn-sm" onClick={() => setPicker(true)}>
-        <BookImage size={14} /> Add to album
-      </button>
-      <form className="input-inline" onSubmit={(e) => { e.preventDefault(); if (tag.trim()) addTag.mutate(); }}>
-        <Tag size={13} className="dim" />
-        <input value={tag} onChange={(e) => { setTag(e.target.value); setNote(null); }} placeholder="Tag them…"
-          maxLength={60} aria-label="Tag selected photos" />
-      </form>
-      <StarRating value={stars} size={14} onChange={(r) => rate.mutate(r)} label="Rate selected photos" />
-      {selected.size >= 2 && selected.size <= 4 && (
-        <button className="btn btn-ghost btn-sm" onClick={() => setComparing(true)} title="Side by side, to pick the best">
-          <Columns2 size={14} /> Compare
-        </button>
-      )}
-      <button className="btn btn-ghost btn-sm" onClick={() => rotate.mutate()} title="Turn 90° clockwise (the files are not changed)">
-        <RotateCw size={14} /> Rotate
-      </button>
-      <button className="btn btn-ghost btn-sm" onClick={() => setFixing("date")}><CalendarClock size={14} /> Fix date</button>
-      <button className="btn btn-ghost btn-sm" onClick={() => setFixing("place")}><MapPin size={14} /> Set place</button>
-      {role !== "guest" && (
-        <button className="btn btn-ghost btn-sm" onClick={() => setCreating(true)} title="Collage, animation or memory movie">
-          <Sparkles size={14} /> Create
-        </button>
-      )}
-      <button className="btn btn-ghost btn-sm" onClick={() => setExporting(true)} title="Copy the original files somewhere">
-        <FolderOutput size={14} /> Export
-      </button>
-      {extra}
-      {role !== "guest" && (
-        <button className="btn btn-ghost btn-sm" onClick={() => archive.mutate()}
-          title="Out of the timeline; still in search, albums and people">
-          <Archive size={14} /> Archive
-        </button>
-      )}
-      {role !== "guest" && auth.data?.accounts && (
-        <button className="btn btn-ghost btn-sm" onClick={() => makePrivate.mutate()}
-          title="Only you will see them (photos you uploaded)">
-          <EyeOff size={14} /> Make private
-        </button>
-      )}
-      {role === "owner" && (
-        <button className="btn btn-ghost btn-sm" onClick={() => lock.mutate()} title="Move to the PIN-protected Locked folder">
-          <Lock size={14} /> Lock
-        </button>
-      )}
-      {canDelete && (
-        <button className="btn btn-quiet btn-sm selection-trash" onClick={() => setTrashing(true)}
-          title="Move the files to the Trash (restorable for 30 days)">
-          <Trash2 size={14} /> Delete
-        </button>
-      )}
-      {note && <span className="dim selection-note">{note}</span>}
-      <button className="btn btn-quiet btn-sm" onClick={() => { setNote(null); onClear(); }}>
-        <X size={14} /> Clear
-      </button>
-      {creating && <CreateDialog photoIds={ids} onClose={() => setCreating(false)} />}
-      {exporting && <ExportDialog spec={{ photo_ids: ids }} onClose={() => setExporting(false)}
-        title={`Export ${ids.length.toLocaleString()} selected`} />}
-      {trashing && <TrashDialog photoIds={ids} onClose={() => setTrashing(false)}
-        onDone={(r) => { if (r.trashed && !r.skipped.length) onClear(); }} />}
-      {comparing && <CompareView ids={ids} onClose={() => setComparing(false)} />}
-      {fixing && <CorrectionDialog photoIds={ids} mode={fixing} onClose={() => setFixing(null)} />}
-      {picker && <AlbumPicker photoIds={ids} onClose={() => setPicker(false)}
-        onDone={() => setNote(`Added ${ids.length.toLocaleString()} to the album`)} />}
-    </div>
+    </FloatingBar>
   );
 }
 

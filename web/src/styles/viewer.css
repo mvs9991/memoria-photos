@@ -20,6 +20,20 @@
   z-index: 3;
 }
 .viewer-top-left, .viewer-top-right { display: flex; align-items: center; gap: 4px; }
+/* Nine icons do not fit across a phone. The right-hand group takes the room left of the close button and
+   scrolls sideways if it must (it used to be clipped, with the last icons unreachable); when everything
+   fits, the margin keeps it pushed to the right edge as before. */
+.viewer-top-left { flex: none; }
+.viewer-top-right {
+  flex: 1 1 auto;
+  min-width: 0;
+  overflow-x: auto;
+  scrollbar-width: none;
+  -webkit-overflow-scrolling: touch;
+}
+.viewer-top-right::-webkit-scrollbar { display: none; }
+.viewer-top-right > * { flex: none; }
+.viewer-top-right > :first-child { margin-left: auto; }
 .viewer-position { font-size: 12px; padding-left: 6px; }
 .viewer .btn.is-on { color: var(--accent); background: var(--accent-soft); }
 
