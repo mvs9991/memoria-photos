@@ -1026,3 +1026,15 @@ during the job. The job itself failed at once on this run because the library ha
 clear message). It did surface one real bug: a search when the stored embeddings and the loaded model differ in
 size answered 500 every time; it now logs a warning and searches without the visual ranking
 (`tests/test_search_model_mismatch.py`).
+
+### Video playback on the real library (2026-10-04)
+
+1,636 videos: 1,446 H.264 and 10 VP9 stream as they are (first bytes 0.1–0.3 s); 184 HEVC, 9 MPEG-2 (camcorder,
+292 min, 52 GB) and 1 MPEG-4 were transcoded on first play, synchronously: 86 s before an HEVC clip's first byte,
+over 120 s for the others, and a player's parallel range requests each started their own transcode into one shared
+temporary name. Now: HEVC streams as-is (`?direct=1`) when the browser reports it can play HEVC (iPhones, most
+recent Android); if the element errors, or "loads" with no picture (Edge without the HEVC extension does that), the
+viewer falls back to the transcode, which runs once per video (`tests/test_video_direct.py`) and shows a
+"preparing" notice. The transcode itself scales in FFmpeg before rotating the small frame: 76 → 18 s for an 8 s 4K
+clip (decoding alone is 7 s; hardware decode via d3d11va was slower, 18 s). MPEG-2 still takes about a third of
+the clip's length on first play; pre-transcoding all 194 was judged too heavy (hours of CPU on this machine).
