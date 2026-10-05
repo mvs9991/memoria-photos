@@ -115,6 +115,10 @@ def _gps_coord(values, ref) -> float | None:
                 return None
             while len(parts) < 3:
                 parts.append(0.0)
+            # A minute or second of 60 or more, or a negative part, is a corrupt value, not a position:
+            # read as is, (17, 90, 0) became 18.5 degrees and put the photo ~55 km away.
+            if parts[1] >= 60 or parts[2] >= 60 or min(parts) < 0:
+                return None
             deg = parts[0] + parts[1] / 60.0 + parts[2] / 3600.0
         ref = _clean(ref)
         if ref and ref.upper() in ("S", "W"):

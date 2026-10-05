@@ -33,6 +33,17 @@ MONTHS["sept"] = 9
 SEASONS = {"winter": (12, 2), "spring": (3, 5), "summer": (4, 6), "monsoon": (7, 9), "rainy": (7, 9),
            "autumn": (9, 11), "fall": (9, 11)}
 
+# A holiday on a fixed date: (words as tokens, ("MM-DD", "MM-DD") inclusive, label). Movable ones (Diwali,
+# Easter, Eid) are left to the tags and the visual search, which know nothing of calendars and do not guess.
+HOLIDAYS = [
+    (r"new years? eve", ("12-31", "12-31"), "New Year's Eve"),
+    (r"new years? day|new year", ("01-01", "01-01"), "New Year's Day"),
+    (r"christmas eve", ("12-24", "12-24"), "Christmas Eve"),
+    (r"christmas|xmas", ("12-24", "12-26"), "Christmas"),
+    (r"valentines? day|valentines", ("02-14", "02-14"), "Valentine's Day"),
+    (r"halloween", ("10-31", "10-31"), "Halloween"),
+]
+
 NEGATORS = {"not", "no", "without", "except", "excluding", "exclude", "minus", "non"}
 IMPERATIVES = {"show", "give", "find", "get", "let", "bring", "send", "fetch", "pull", "gimme", "tell"}
 NUMBER_WORDS = {"one": 1, "two": 2, "three": 3, "four": 4, "five": 5, "six": 6, "seven": 7, "eight": 8,
@@ -63,6 +74,8 @@ class DateRange:
     month_only: int | None = None      # e.g. "in January" with no year
     alts: list = field(default_factory=list)   # more (start, end) windows: "2020 and 2022" is either year
     exclude: bool = False              # "not in 2019": everything outside the window(s)
+    months: list = field(default_factory=list)   # "between march and may": these months, any year
+    day_span: tuple | None = None      # ("12-24", "12-26"): these days of the year ("christmas"), any year
 
 
 @dataclass
@@ -102,18 +115,20 @@ class ParsedQuery:
     colors: list[str] = field(default_factory=list)          # dominant colours, for a colour-only query
     tags_exclude: list[str] = field(default_factory=list)      # "without dogs"
     places_exclude: list[int] = field(default_factory=list)    # "not in paris"
+    people_count: tuple | None = None                          # (least, most) faces: "with 3 people", "5+ people"
     unmatched: list[str] = field(default_factory=list)
     interpretation: list[dict] = field(default_factory=list)
     source: str = "rules"
 
     def is_empty(self) -> bool:
         return not any([self.persons_all, self.persons_any, self.place_ids, self.event_ids, self.tags,
-                        self.date.start, self.date.end, self.date.month_only,
+                        self.date.start, self.date.end, self.date.month_only, self.date.months, self.date.day_span,
                         self.persons_exclude, self.no_people, self.exclude_videos, self.force_no_screenshots,
                         self.source_kinds, self.sort_explicit, self.result_type != "photos", self.semantic_text, self.only_favorites,
                         self.only_screenshots, self.only_selfies, self.trips_only, self.only_videos,
                         self.only_live, self.album_ids, self.user_tags, self.text_phrases, self.min_rating,
-                        self.colors, self.tags_exclude, self.places_exclude])
+                        self.colors, self.tags_exclude, self.places_exclude,
+                        self.people_count])
 
     def chip(self, kind: str, label: str, detail: str | None = None) -> None:
         self.interpretation.append({"kind": kind, "label": label, "detail": detail})
@@ -396,7 +411,7 @@ def parse(query: str, conn: sqlite3.Connection, me_person_id: int | None = None,
         first = min(date_tokens) if date_tokens else None
         if first is not None:
             k = first - 1
-            while k >= 0 and tokens[k] in ("in", "from", "during", "of", "the"):
+            while k >= 0 and tokens[k] in ("in", "from", "during", "of", "the", "at", "on"):
                 k -= 1
             if k >= 0 and tokens[k] in NEGATORS:
                 date.exclude = True
@@ -404,6 +419,23 @@ def parse(query: str, conn: sqlite3.Connection, me_person_id: int | None = None,
                 date_tokens = date_tokens | set(range(k, first))
         q.date = date
         consumed |= date_tokens
+
+    # ---- how many people: "with 3 people", "more than 5 people", "at least 4 faces". Counted as detected
+    # faces, which includes strangers in the background: the chip says "faces" so the answer is not mistaken.
+    count_words = "|".join(w for w in NUMBER_WORDS if w not in ("a", "an"))
+    cm = re.search(rf"\b(?:(more than|over|at least)\s+)?(\d{{1,2}}|{count_words})\s+(?:people|persons|faces)\b",
+                   " ".join(t if i not in consumed else "~" for i, t in enumerate(tokens)))
+    if cm:
+        n = int(cm.group(2)) if cm.group(2).isdigit() else NUMBER_WORDS[cm.group(2)]
+        if cm.group(1) in ("more than", "over"):
+            q.people_count = (n + 1, None)
+        elif cm.group(1) == "at least":
+            q.people_count = (n, None)
+        else:
+            q.people_count = (n, n)
+        lo, hi = q.people_count
+        q.chip("filter", f"{lo} face{'s' if lo != 1 else ''}" if hi == lo else f"{lo}+ faces")
+        consumed |= _token_span(tokens, cm.group(0))
 
     # ---- flags --------------------------------------------------------------------------
     for idx, tok in enumerate(tokens):
@@ -650,6 +682,37 @@ def _parse_dates(tokens: list[str], consumed: set[int], now: datetime) -> tuple[
     if re.search(r"\btoday\b", text):
         used |= _token_span(tokens, "today")
         return rng(datetime(now.year, now.month, now.day), now, "today"), used
+
+    # "2 years ago", "a month ago": that calendar year or month
+    m = re.search(r"\b(\d{1,2}|a|an|one|two|three|four|five|six|seven|eight|nine|ten|eleven|twelve)\s+"
+                  r"(year|month)s?\s+ago\b", text)
+    if m:
+        n = int(m.group(1)) if m.group(1).isdigit() else NUMBER_WORDS[m.group(1)]
+        used |= _token_span(tokens, m.group(0))
+        if m.group(2) == "year":
+            y = now.year - n
+            return rng(datetime(y, 1, 1), datetime(y, 12, 31, 23, 59, 59), f"{y} ({n} year{'s' if n != 1 else ''} ago)"), used
+        y, mo = divmod(now.year * 12 + now.month - 1 - n, 12)
+        return rng(datetime(y, mo + 1, 1), _month_end(y, mo + 1), f"{calendar.month_name[mo + 1]} {y}"), used
+    # "between march and may", "march to may", "from june till august": those months in any year
+    month_names = "|".join(sorted(MONTHS, key=len, reverse=True))
+    m = re.search(rf"\b(?:between|from)?\s*({month_names})\s+(?:and|to|till|until|-)\s+({month_names})\b"
+                  r"(?!\s+(?:19|20)\d{2})", text)
+    if m and (m.group(0).lstrip().startswith(("between", "from")) or re.search(r"\b(to|till|until)\b", m.group(0))):
+        a, b = MONTHS[m.group(1)], MONTHS[m.group(2)]
+        used |= _token_span(tokens, m.group(0).strip())
+        months = list(range(a, b + 1)) if a <= b else [*range(a, 13), *range(1, b + 1)]   # nov to feb wraps
+        return DateRange(None, None, f"{calendar.month_name[a]}–{calendar.month_name[b]}", months=months), used
+    # holidays by date: "christmas", "new year's eve", "christmas 2023"
+    for words, span, label in HOLIDAYS:
+        hm = re.search(rf"\b(?:{words})\b(?:\s+((?:19|20)\d{{2}}))?", text)
+        if hm:
+            used |= _token_span(tokens, hm.group(0))
+            if hm.group(1):
+                y = int(hm.group(1))
+                (m1, d1), (m2, d2) = (tuple(int(x) for x in s.split("-")) for s in span)
+                return rng(datetime(y, m1, d1), datetime(y, m2, d2, 23, 59, 59), f"{label} {y}"), used
+            return DateRange(None, None, label, day_span=span), used
 
     # explicit: "12 august 2025", "august 12 2025", "2025-08-12"
     m = re.search(r"\b(\d{4})-(\d{1,2})-(\d{1,2})\b", text)

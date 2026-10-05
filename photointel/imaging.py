@@ -20,6 +20,7 @@ from .config import RAW_EXTENSIONS, VIDEO_EXTENSIONS
 # Accept truncated files where possible (partial download / sync) — we log them via `truncated`.
 ImageFile.LOAD_TRUNCATED_IMAGES = True
 Image.MAX_IMAGE_PIXELS = 400_000_000  # allow panoramas, still guard against decompression bombs
+HUGE_PIXELS = 50_000_000              # above this, shrink before converting (see decode)
 warnings.simplefilter("ignore", Image.DecompressionBombWarning)
 
 try:  # HEIC / HEIF / AVIF
@@ -177,6 +178,13 @@ def decode(path: Path | str, max_side: int = 1600, data: bytes | None = None) ->
                 img.draft("RGB", (max(1, int(raw_w * scale)), max(1, int(raw_h * scale))))
         img.load()
         info = dict(img.info)
+        if raw_w * raw_h > HUGE_PIXELS:
+            # A huge PNG/TIFF/HEIC (a stitched panorama, a scan) is shrunk by a whole factor before the colour
+            # conversion and the turn, each of which made a full-size copy: about 1.9 GB for a 25,000-pixel
+            # square greyscale PNG, per worker. Ordinary photos are below this and decode exactly as before.
+            factor = max(1, max(img.size) // (2 * max_side))
+            if factor > 1:
+                img = img.reduce(factor)
         img = _to_rgb(img)
         if orientation != 1:
             img = _apply_orientation(img, orientation)

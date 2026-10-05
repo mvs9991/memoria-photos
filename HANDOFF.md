@@ -905,7 +905,7 @@ the future, everything collapsing into one event, fuzzy duplicate thresholds too
 
 ## 10. Working notes
 
-- Run the suite with `.venv/Scripts/python.exe -m pytest -q`. 796 tests, ~12 min, no GPU needed —
+- Run the suite with `.venv/Scripts/python.exe -m pytest -q`. 802 tests, ~12 min, no GPU needed —
   the neural nets are replaced by deterministic fakes.
 - Test fixtures seed randomness from `zlib.crc32` of the **file name**, not `hash()` (salted per
   process) and not the full path (contains pytest's per-run tmp counter). Both made failures
@@ -1166,8 +1166,15 @@ A route-by-route review as a family member, a guest and a share-link visitor. Ea
 - The optional Claude layer dropped accented names (Noël, Kandukūr): it looked them up unfolded.
 - A filter plus a visual word reported the page size as the total.
 - Checked and fine: FTS syntax in queries never 500s; dates near year boundaries; "2018 and 2020".
-- Not done (noted by the review): "between march and may", "2 years ago", "christmas" as a date, "photos with 3
-  people"; a person named Paris/Rose/Sunny always wins over the place/word.
+- Added afterwards: "2 years ago" / "3 months ago" (that calendar year or month); "between march and may", "november
+  to february" (those months in any year, `DateRange.months`); fixed-date holidays ("christmas", "christmas 2023",
+  "new year's eve", "valentine's day", "halloween"; `DateRange.day_span`; movable ones like Diwali are left to tags and
+  the visual search); "with 3 people", "more than 5 people", "at least four faces" (counted as detected faces, which
+  include strangers in the background; the chip says "faces"). All of them can be negated ("not at christmas").
+- Still open: a person named Paris/Rose/Sunny always wins over the place/word.
+- Also: GPS minutes or seconds of 60+ are corrupt and dropped (were read as a position ~55 km away); an image over
+  50 MP (PNG/TIFF/HEIC panoramas, scans) is shrunk by a whole factor before its colour conversion: a 400 MP greyscale
+  PNG decoded with 639 MB peak instead of 2,158 MB, 0.5 s instead of 1.5 s (`tests/test_huge_image_decode.py`).
 
 ### Indexing review (2026-10-05, `tests/test_pipeline_review.py`; each failed before its fix)
 

@@ -147,3 +147,41 @@ def test_llm_answer_with_accented_names_resolves(conn):
     conn.commit()
     q = _to_parsed_query(conn, "x", {"people_all": ["Noël"], "places": ["Kandukūr"]})
     assert q.persons_all == [pid] and q.place_ids, (q.persons_all, q.place_ids)
+
+
+def test_years_ago_month_spans_and_holidays_are_dates(conn):
+    q = parse("photos from 2 years ago", conn, now=NOW)
+    assert (q.date.start, q.date.end) == (naive_to_ts(datetime(2024, 1, 1)), naive_to_ts(datetime(2024, 12, 31, 23, 59, 59)))
+    assert parse("3 months ago", conn, now=NOW).date.label == "October 2025"
+    assert parse("between november and february", conn, now=NOW).date.months == [11, 12, 1, 2]
+    assert parse("christmas", conn, now=NOW).date.day_span == ("12-24", "12-26")
+    q = parse("christmas 2023", conn, now=NOW)
+    assert q.date.start == naive_to_ts(datetime(2023, 12, 24)) and not q.semantic_text
+    assert parse("not at christmas", conn, now=NOW).date.exclude
+
+
+def test_a_month_span_and_a_holiday_filter_the_photos(ctx, client):
+    def months(q):
+        got = client.get("/api/search", params={"q": q, "limit": 2000}).json()["photos"]
+        return {datetime.utcfromtimestamp(p["ts"]).month for p in got if p["ts"]}
+    every = {datetime.utcfromtimestamp(r[0]).month for r in ctx.connect().execute(
+        "SELECT taken_ts FROM photos WHERE status = 'ok' AND hidden = 0 AND live_component = 0 AND taken_ts IS NOT NULL")}
+    assert months("photos between june and august") == every & {6, 7, 8} != set()
+    assert months("photos from march to april") == every & {3, 4} != set()
+    assert months("photos at christmas") == set()
+
+
+def test_a_number_of_people_filters_by_faces(ctx, client):
+    assert parse("more than 5 people at the beach", ctx.connect(), now=NOW).people_count == (6, None)
+    c = ctx.connect()
+    ids = [r[0] for r in c.execute("SELECT id FROM photos WHERE status = 'ok' AND hidden = 0 AND live_component = 0 "
+                                   "ORDER BY id LIMIT 3")]
+    c.execute("UPDATE photos SET face_count = 0")
+    c.execute("UPDATE photos SET face_count = 3 WHERE id IN (?, ?)", ids[:2])
+    c.execute("UPDATE photos SET face_count = 7 WHERE id = ?", (ids[2],))
+    c.commit()
+    c.close()
+    got = lambda q: sorted(p["id"] for p in client.get("/api/search", params={"q": q}).json()["photos"])
+    assert got("photos with 3 people") == sorted(ids[:2])        # was: a visual search for "people"
+    assert got("photos with at least 3 people") == sorted(ids)
+    assert got("more than 5 people") == [ids[2]]

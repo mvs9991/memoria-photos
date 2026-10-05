@@ -96,6 +96,13 @@ class SearchEngine:
         if q.date.month_only:
             date_where.append("CAST(strftime('%m', p.taken_ts, 'unixepoch') AS INT) = ?")
             args.append(q.date.month_only)
+        if q.date.months:
+            date_where.append(f"CAST(strftime('%m', p.taken_ts, 'unixepoch') AS INT) IN "
+                              f"({','.join('?' * len(q.date.months))})")
+            args.extend(q.date.months)
+        if q.date.day_span:
+            date_where.append("strftime('%m-%d', p.taken_ts, 'unixepoch') BETWEEN ? AND ?")
+            args.extend(q.date.day_span)
         if date_where:
             clause = " AND ".join(date_where)
             # "not in 2019": a photo with no date is not *in* 2019 either, so it stays
@@ -161,6 +168,13 @@ class SearchEngine:
                          "AND p.face_count <= 2")
         if q.require_faces:
             where.append("p.face_count > 0")
+        if q.people_count:
+            lo, hi = q.people_count
+            where.append("p.face_count >= ?")
+            args.append(lo)
+            if hi is not None:
+                where.append("p.face_count <= ?")
+                args.append(hi)
         sql = f"SELECT p.id FROM photos p WHERE {' AND '.join(where)}"
         if limit:
             sql += f" LIMIT {int(limit)}"
@@ -215,10 +229,10 @@ class SearchEngine:
         structured = bool(q.persons_all or q.persons_any or q.place_ids or q.event_ids
                           or q.persons_exclude or q.no_people or q.exclude_videos or q.source_kinds
                           or q.force_no_screenshots
-                          or q.date.start or q.date.end or q.date.month_only or q.only_favorites
+                          or q.date.start or q.date.end or q.date.month_only or q.date.months or q.date.day_span or q.only_favorites
                           or q.only_screenshots or q.only_selfies or q.only_videos or q.only_live
                           or q.album_ids or q.user_tags or q.text_phrases or q.min_rating or q.colors
-                          or q.tags_exclude or q.places_exclude)
+                          or q.tags_exclude or q.places_exclude or q.people_count)
         # "someone playing tennis" matches the broad tag "playing" and leaves "tennis"
         # as a residue. Using the tag as a hard filter there throws away the word that
         # actually identifies the photo, so with nothing structured to anchor the query
