@@ -905,7 +905,7 @@ the future, everything collapsing into one event, fuzzy duplicate thresholds too
 
 ## 10. Working notes
 
-- Run the suite with `.venv/Scripts/python.exe -m pytest -q`. 819 tests, ~12 min, no GPU needed —
+- Run the suite with `.venv/Scripts/python.exe -m pytest -q`. 821 tests, ~12 min, no GPU needed —
   the neural nets are replaced by deterministic fakes.
 - Test fixtures seed randomness from `zlib.crc32` of the **file name**, not `hash()` (salted per
   process) and not the full path (contains pytest's per-run tmp counter). Both made failures
@@ -1238,3 +1238,25 @@ Rejected after measuring: batched name suggestions, a partial index for selfies,
 ignored both), stack size via JOIN, place covers without the window function. Still slow, not fixed: `/photos/index`
 SQL (~180 ms of row fetching for 25k rows), `/stats` 216 ms, `/memories` 169 ms. Thumbnails, originals and video
 were not measured (the copy had no thumbnail cache).
+
+### Answers kept until the database changes (`api/cache.py`, 2026-10-05)
+
+Whole-library GET answers (stats, places, tags, memories, timeline, insights, collections, people, events, map
+points, folders, name suggestions, the photo index, event/person/place/album detail, albums, duplicates) are kept
+under a token that moves on *any* commit: `PRAGMA data_version` read on a connection of its own that never writes,
+so commits from request threads and from index-job processes both count. The token is read before computing,
+so a commit landing meanwhile only causes a recompute next time. The key also holds the arguments, account, role,
+Locked-folder state, `repr(settings)` (who "me" is lives there) and, for memories/insights/person (ages), the
+date. An answer that set the `no_store` note (a locked or private photo) is never kept. Search-box suggestions
+keep their place and tag count tables the same way (`value_until_db_changes`): 125 → 14 ms a keystroke.
+
+Measured on a copy of the real library, repeat visits: Photos grid 776 → 41 ms, collections 1.7 s → 10 ms,
+timeline 0.86 s → 11 ms, stats 1.0 s → 9 ms, duplicates 217 → 11 ms (first visits unchanged; the copies were
+measured while the test suite was loading the disk, so first-visit numbers are high). When idle the database is
+written by the 15-minute health check and the hourly index, so an answer lives at most that long; during an index
+job heartbeats invalidate it every few seconds, which is no slower than before.
+
+**When adding a cached route:** it must depend only on the database, the key's inputs and settings; it must not be
+called from other Python code (a hit returns a `Response`, not a dict); time-dependent ones need `by_day=True`.
+Tests get a fresh cache per test (`tests/conftest.py::_fresh_answer_cache`), which also closes the watcher
+connection that would otherwise hold each test library's file open on Windows.

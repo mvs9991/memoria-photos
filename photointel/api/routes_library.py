@@ -20,6 +20,7 @@ from ..engine.places import place_label
 from ..metadata import ts_to_naive
 from ..rotation import rotate_box
 from ..engine import favorites
+from .cache import until_db_changes
 from .deps import current_user_id, get_state, guard_locked, shown_path, visible_ids
 
 log = logging.getLogger(__name__)
@@ -173,6 +174,7 @@ def _get(r, key: str, default=None):
 
 
 @router.get("/photos/index")
+@until_db_changes()
 def photos_index(person: list[int] = Query(default=[]), place: int | None = None, event: int | None = None,
                  year: int | None = None, month: int | None = None, tag: str | None = None,
                  source: str | None = None, favorite: bool = False, camera: str | None = None,
@@ -434,6 +436,7 @@ def remove_tag(body: TagBody):
 
 
 @router.get("/tags")
+@until_db_changes()
 def list_tags():
     return {"tags": albums_mod.list_tags(get_state().conn())}
 
@@ -704,6 +707,7 @@ def describe_photo(photo_id: int, detailed: bool = False):
 
 
 @router.get("/timeline")
+@until_db_changes()
 def timeline(person: int | None = None, place: int | None = None, tag: str | None = None):
     """Year -> month buckets with counts and a cover photo, plus the events in each month."""
     state = get_state()
@@ -739,6 +743,7 @@ def timeline(person: int | None = None, place: int | None = None, tag: str | Non
 
 
 @router.get("/stats")
+@until_db_changes()
 def stats():
     state = get_state()
     conn = state.conn()
@@ -804,6 +809,7 @@ def stats():
 
 
 @router.get("/memories")
+@until_db_changes(by_day=True)
 def memories(limit: int = 12):
     """Home screen: on this day, recent events, trips, rediscovered moments."""
     state = get_state()

@@ -170,6 +170,16 @@ def _no_host_environment(monkeypatch):
         monkeypatch.delenv(name, raising=False)
 
 
+@pytest.fixture(autouse=True)
+def _fresh_answer_cache():
+    """Each test starts with no kept answers and leaves no database file held open by the cache's watcher."""
+    from photointel.api import cache
+
+    cache.close_all()
+    yield
+    cache.close_all()
+
+
 @pytest.fixture
 def ctx(tmp_path, monkeypatch) -> AppContext:
     data = tmp_path / "data"

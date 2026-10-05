@@ -8,6 +8,7 @@ from fastapi.responses import JSONResponse
 from pydantic import BaseModel
 
 from .. import db
+from .cache import until_db_changes
 from .deps import get_state
 
 router = APIRouter()
@@ -20,6 +21,7 @@ RELATION_LABEL = {
 
 
 @router.get("/duplicates")
+@until_db_changes()
 def list_groups(kind: str | None = Query(None, pattern="^(exact|near|likely|similar)$"),
                 status: str = Query("pending", pattern="^(pending|reviewed|all)$"),
                 limit: int = Query(200, le=1000), offset: int = 0):

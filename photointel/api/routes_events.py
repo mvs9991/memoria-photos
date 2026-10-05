@@ -10,6 +10,7 @@ from ..engine.events import build_summary, date_range_label, event_title
 from ..engine.people import person_label
 from ..engine.places import place_label
 from ..metadata import ts_to_naive
+from .cache import until_db_changes
 from .deps import get_state
 from .routes_library import columnar
 
@@ -46,6 +47,7 @@ def _event_dict(conn, e, with_places: bool = False) -> dict:
 
 
 @router.get("/events")
+@until_db_changes()
 def list_events(kind: str | None = Query(None, pattern="^(event|trip)$"), year: int | None = None,
                 person: int | None = None, place: int | None = None, category: str | None = None,
                 limit: int | None = Query(None, ge=1, le=100000)):
@@ -77,6 +79,7 @@ def list_events(kind: str | None = Query(None, pattern="^(event|trip)$"), year: 
 
 
 @router.get("/events/{event_id}")
+@until_db_changes()
 def event_detail(event_id: int):
     conn = get_state().conn()
     e = conn.execute("SELECT * FROM events WHERE id=?", (event_id,)).fetchone()
@@ -170,6 +173,7 @@ def resummarise(event_id: int, use_llm: bool = False):
 # ----------------------------------------------------------------------------- places
 
 @router.get("/places")
+@until_db_changes()
 def list_places():
     """Hierarchy country -> region -> place with counts and covers."""
     conn = get_state().conn()
@@ -216,6 +220,7 @@ def list_places():
 
 
 @router.get("/places/{place_id}")
+@until_db_changes()
 def place_detail(place_id: int):
     conn = get_state().conn()
     p = conn.execute("SELECT * FROM places WHERE id=?", (place_id,)).fetchone()
@@ -239,6 +244,7 @@ def place_detail(place_id: int):
 
 
 @router.get("/map/points")
+@until_db_changes()
 def map_points(limit: int = Query(20000, le=100000), person: int | None = None):
     """GPS points for the map, with place ids for clustering/labels."""
     conn = get_state().conn()

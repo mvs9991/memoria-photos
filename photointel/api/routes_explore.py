@@ -10,6 +10,7 @@ from pydantic import BaseModel
 from .. import db
 from ..engine import albums as albums_mod
 from ..engine import insights as insights_mod
+from .cache import until_db_changes
 from .deps import get_state, shown_path
 from .routes_library import COLLECTIONS, photo_filter_sql
 
@@ -17,6 +18,7 @@ router = APIRouter()
 
 
 @router.get("/collections")
+@until_db_changes()
 def collections():
     conn = get_state().conn()
     hidden = conn.execute("SELECT COUNT(*), MAX(id) FROM photos WHERE status = 'ok' AND hidden = 1 "
@@ -53,6 +55,7 @@ def collections():
 
 
 @router.get("/folders/browse")
+@until_db_changes()
 def browse_folders(root_id: int | None = None, path: str = ""):
     """Roots, or the immediate subfolders of `path` in a root, with counts and covers."""
     conn = get_state().conn()
@@ -103,6 +106,7 @@ def browse_folders(root_id: int | None = None, path: str = ""):
 @router.get("/insights")
 # Bounded because the year reaches datetime(), which raises for anything outside
 # 1-9999 — a 500 for a mistyped URL. 1826 is the year of the first photograph.
+@until_db_changes(by_day=True)
 def insights(year: int | None = Query(None, ge=1826, le=2200)):
     return insights_mod.compute(get_state().conn(), year)
 

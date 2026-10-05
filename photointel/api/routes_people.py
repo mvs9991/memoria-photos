@@ -12,6 +12,7 @@ from ..engine import people as people_mod
 from ..engine.events import event_title
 from ..engine.people import co_occurring, person_label
 from ..metadata import ts_to_naive
+from .cache import until_db_changes
 from .deps import current_role, get_state, visible_ids
 from .routes_events import _visible_cover
 
@@ -20,6 +21,7 @@ router = APIRouter()
 
 
 @router.get("/people")
+@until_db_changes()
 def list_people(include_hidden: bool = False, include_ignored: bool = False, min_photos: int = 1,
                 sort: str = Query("photos", pattern="^(photos|name|recent)$")):
     conn = get_state().conn()
@@ -50,6 +52,7 @@ def list_people(include_hidden: bool = False, include_ignored: bool = False, min
 
 
 @router.get("/people/{person_id}")
+@until_db_changes(by_day=True)
 def person_detail(person_id: int, photo_limit: int = 500):
     state = get_state()
     conn = state.conn()
@@ -304,6 +307,7 @@ def merge_suggestions(limit: int = 20):
 
 
 @router.get("/people/suggestions/names")
+@until_db_changes()
 def name_suggestions():
     """Names Google Photos used for people Memoria found (from Takeout sidecars). Never applied
     automatically: each comes with its evidence for the user to accept or dismiss."""

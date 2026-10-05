@@ -8,6 +8,7 @@ from fastapi.responses import JSONResponse
 
 from .. import db
 from ..engine.people import person_label
+from .cache import value_until_db_changes
 from .deps import get_state
 
 log = logging.getLogger(__name__)
@@ -65,22 +66,34 @@ def suggestions(q: str = Query("", max_length=80), limit: int = 8):
                              ORDER BY photo_count DESC LIMIT ?""", (like, limit)):
         out.append({"type": "person", "id": r["id"], "label": person_label(r),
                     "detail": f"{r['photo_count']:,} photos", "cover_face_id": r["cover_face_id"]})
-    for r in conn.execute("""SELECT pl.id, pl.name, pl.city, pl.country, COUNT(p.id) n FROM places pl
-                             JOIN photos p ON p.place_id = pl.id
-                               AND p.status = 'ok' AND p.hidden = 0 AND p.live_component = 0
-                             WHERE LOWER(pl.name) LIKE ? ESCAPE '\\' OR LOWER(COALESCE(pl.city,'')) LIKE ? ESCAPE '\\'
-                                OR LOWER(COALESCE(pl.admin1,'')) LIKE ? ESCAPE '\\' OR LOWER(COALESCE(pl.country,'')) LIKE ? ESCAPE '\\'
-                             GROUP BY pl.id ORDER BY n DESC LIMIT ?""", (like, like, like, like, limit)):
-        out.append({"type": "place", "id": r["id"], "label": r["name"],
-                    "detail": f"{r['n']:,} photos · {r['country'] or ''}".strip(" ·")})
+    # Places and tags with their photo counts are counted once and kept until the database changes: counting
+    # them for every key typed in the search box was ~95 ms a keystroke on a 31k-photo library.
+    places, tags = value_until_db_changes("suggest-places", lambda: _place_counts(conn)),         value_until_db_changes("suggest-tags", lambda: _tag_counts(conn))
+    for pid, name, city, admin1, country, n in [p for p in places if any(term in (x or "").lower() for x in p[1:5])][:limit]:
+        out.append({"type": "place", "id": pid, "label": name,
+                    "detail": f"{n:,} photos · {country or ''}".strip(" ·")})
     for r in conn.execute("""SELECT id, kind, auto_title, user_title, photo_count, cover_photo_id FROM events
                              WHERE LOWER(COALESCE(user_title, auto_title)) LIKE ? ESCAPE '\\'
                              ORDER BY start_ts DESC LIMIT ?""", (like, limit)):
         out.append({"type": "event", "id": r["id"], "label": r["user_title"] or r["auto_title"],
                     "detail": f"{r['photo_count']:,} photos", "cover_photo_id": r["cover_photo_id"]})
-    for r in conn.execute("""SELECT t.name, COUNT(*) n FROM tags t JOIN photo_tags pt ON pt.tag_id = t.id
-                             JOIN photos p ON p.id = pt.photo_id AND p.status = 'ok' AND p.hidden = 0
-                             WHERE t.name LIKE ? ESCAPE '\\' AND pt.score >= 2.0 GROUP BY t.id ORDER BY n DESC LIMIT ?""",
-                          (like, limit)):
-        out.append({"type": "tag", "label": r["name"], "detail": f"{r['n']:,} photos"})
+    for name, n in [t for t in tags if term in t[0].lower()][:limit]:
+        out.append({"type": "tag", "label": name, "detail": f"{n:,} photos"})
     return {"suggestions": out[: limit * 2]}
+
+
+def _place_counts(conn) -> list[tuple]:
+    """(id, name, city, admin1, country, visible photos) for every place with a photo, most photos first."""
+    return [tuple(r) for r in conn.execute(
+        """SELECT pl.id, pl.name, pl.city, pl.admin1, pl.country, COUNT(p.id) n FROM places pl
+           JOIN photos p ON p.place_id = pl.id AND p.status = 'ok' AND p.hidden = 0 AND p.live_component = 0
+           GROUP BY pl.id ORDER BY n DESC, pl.id""")]
+
+
+def _tag_counts(conn) -> list[tuple]:
+    """(name, visible photos it clearly applies to) for every tag, most photos first."""
+    return [tuple(r) for r in conn.execute(
+        """SELECT t.name, COUNT(*) n FROM tags t JOIN photo_tags pt ON pt.tag_id = t.id
+           JOIN photos p ON p.id = pt.photo_id AND p.status = 'ok' AND p.hidden = 0
+           WHERE pt.score >= 2.0 GROUP BY t.id ORDER BY n DESC, t.id""")]
+

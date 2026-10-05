@@ -6,6 +6,7 @@ from pydantic import BaseModel
 
 from ..engine import albums as albums_mod
 from ..engine import favorites
+from .cache import until_db_changes
 from .deps import current_user_id, get_state
 from .routes_library import columnar
 
@@ -27,6 +28,7 @@ def _resolver(conn):
 
 
 @router.get("/albums")
+@until_db_changes()
 def list_albums():
     conn = get_state().conn()
     return {"albums": albums_mod.list_albums(conn, resolve=_resolver(conn), user_id=current_user_id())}
@@ -52,6 +54,7 @@ def create_album(body: AlbumCreate):
 
 
 @router.get("/albums/{album_id}")
+@until_db_changes()
 def album_detail(album_id: int):
     conn = get_state().conn()
     a = albums_mod.can_see(conn, album_id, current_user_id())
