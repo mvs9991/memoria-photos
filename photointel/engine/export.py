@@ -26,6 +26,7 @@ from typing import Callable, Iterator
 
 from ..metadata import naive_to_ts, ts_to_naive
 from . import albums as albums_mod
+from ..pipeline.scanner import long_path
 from .people import person_label
 from .xmp import ExportError, _check_destination, refuse_inside_roots, sidecars_for
 
@@ -219,7 +220,7 @@ def plan(conn: sqlite3.Connection, spec: ExportSpec) -> Plan:
             else:
                 sub = ""
             rel_dir = "/".join(x for x in (label, sub) if x)
-            result.items.append(Item(pid, root / r["rel_path"], rel_dir, r["filename"], int(r["size"] or 0),
+            result.items.append(Item(pid, Path(long_path(str(root / r["rel_path"]))), rel_dir, r["filename"], int(r["size"] or 0),
                                      r["sha256"], float(r["mtime"] or 0),
                                      float(r["taken_ts"]) if r["taken_ts"] else None))
             n_bytes += int(r["size"] or 0)

@@ -62,6 +62,20 @@ class IndexLock:
                 log.warning("Indexing is already running in this process")
                 return False
             _LOCAL_LOCKS.add(key)
+        try:
+            self._fh = open(self.path.with_suffix(".lock.os"), "a+b")
+            if os.name == "nt":
+                import msvcrt
+                msvcrt.locking(self._fh.fileno(), msvcrt.LK_NBLCK, 1)
+            else:
+                import fcntl
+                fcntl.flock(self._fh.fileno(), fcntl.LOCK_EX | fcntl.LOCK_NB)
+        except OSError:
+            self._fh = None
+            log.warning("Another indexing run holds the lock; not starting a second one")
+            with _LOCAL_LOCKS_GUARD:
+                _LOCAL_LOCKS.discard(key)
+            return False
         owner = self._owner_alive()
         if owner:
             log.warning("Another indexing run is already active (pid %s); not starting a second one", owner)
@@ -82,6 +96,9 @@ class IndexLock:
             return
         with _LOCAL_LOCKS_GUARD:
             _LOCAL_LOCKS.discard(str(self.path.resolve()))
+        if getattr(self, "_fh", None) is not None:
+            self._fh.close()                    # closing the handle releases the OS lock
+            self._fh = None
         try:
             if self.path.exists() and self.path.read_text(encoding="utf-8").startswith(str(os.getpid())):
                 self.path.unlink()

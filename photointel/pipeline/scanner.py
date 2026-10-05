@@ -46,6 +46,16 @@ def _is_link_dir(entry: os.DirEntry) -> bool:
         return False
 
 
+LONG_PREFIX = "\\\\?\\"
+
+
+def long_path(p: str) -> str:
+    """Windows refuses paths over 260 characters unless LongPathsEnabled is set; the extended form works anyway."""
+    if os.name != "nt" or p.startswith(LONG_PREFIX) or p.startswith("\\\\"):
+        return p
+    return LONG_PREFIX + (p if os.path.isabs(p) else os.path.abspath(p)).replace("/", os.sep)  # abspath would strip a trailing dot
+
+
 def iter_files(root: Path, exclude: list[Path], on_error: Callable[[str, Exception], None] | None = None
                ) -> Iterator[tuple[str, int, float, float]]:
     """Yield (relative posix path, size, mtime, ctime) for supported images under root.
@@ -54,9 +64,10 @@ def iter_files(root: Path, exclude: list[Path], on_error: Callable[[str, Excepti
     Symlinked directories are not followed to avoid cycles.
     """
     root = root.resolve()
-    exclude_norm = {os.path.normcase(str(p.resolve())) for p in exclude}
-    stack = [str(root)]
-    root_len = len(str(root)) + 1
+    exclude_norm = {os.path.normcase(long_path(str(p.resolve()))) for p in exclude}
+    base = long_path(str(root))
+    stack = [base]
+    root_len = len(base.rstrip("\\/")) + 1     # a drive as a root ("D:\") already ends in a separator
     while stack:
         current = stack.pop()
         try:
@@ -64,7 +75,7 @@ def iter_files(root: Path, exclude: list[Path], on_error: Callable[[str, Excepti
                 entries = list(it)
         except OSError as exc:
             if on_error:
-                on_error(current, exc)
+                on_error(str(root) + current[len(base):], exc)
             continue
         dirs = []
         for entry in entries:
@@ -98,7 +109,7 @@ def iter_files(root: Path, exclude: list[Path], on_error: Callable[[str, Excepti
                 yield rel, int(st.st_size), float(st.st_mtime), float(ctime)
             except OSError as exc:
                 if on_error:
-                    on_error(entry.path, exc)
+                    on_error(str(root) + entry.path[len(base):], exc)
         stack.extend(sorted(dirs, reverse=True))
 
 
@@ -134,9 +145,13 @@ def scan_root(conn: sqlite3.Connection, root_id: int, root_path: Path, exclude: 
     changed: list[tuple] = []
     restored: list[tuple] = []
 
+    unread: list[str] = []          # rel paths that could not be listed or stat'ed this time
+
     def on_error(path: str, exc: Exception) -> None:
         stats.errors += 1
         log.warning("Scan error at %s: %s", path, exc)
+        rel = os.path.relpath(path, root_path.resolve())
+        unread.append("" if rel == "." else rel.replace(os.sep, "/"))
 
     def flush() -> None:
         if inserts:
@@ -175,6 +190,15 @@ def scan_root(conn: sqlite3.Connection, root_id: int, root_path: Path, exclude: 
             stats.new += 1
         else:
             pid, psize, pmtime, pstatus = prev
+            if pstatus == "trashed":
+                # A different file now sits where a trashed photo was (a camera reusing IMG_0001): it is a new
+                # photo. The trashed row steps off the path (Restore writes the path back) and keeps its state.
+                conn.execute("UPDATE photos SET rel_path = ? WHERE id = ?", (f"{rel}|trashed-{pid}", pid))
+                folder, _, filename = rel.rpartition("/")
+                inserts.append((root_id, rel, folder, filename, os.path.splitext(filename)[1].lower(), size, mtime,
+                                ctime, now, now, 1 if filename.startswith(PHONE_TRASH_PREFIX) else 0))
+                stats.new += 1
+                continue
             seen_ids.append(pid)
             if psize != size or abs(pmtime - mtime) > 1.0:
                 changed.append((size, mtime, ctime, now, pid))
@@ -203,7 +227,8 @@ def scan_root(conn: sqlite3.Connection, root_id: int, root_path: Path, exclude: 
     seen_set = set(seen_ids)
     # Trashed and erased photos are gone on purpose; the trash keeps their state.
     missing = [(pid,) for rel, (pid, _, _, status) in existing.items()
-               if pid not in seen_set and status not in ("missing", "trashed", "deleted")]
+               if pid not in seen_set and status not in ("missing", "trashed", "deleted")
+               and not any(u == "" or rel == u or rel.startswith(u + "/") for u in unread)]
     # (a locked photo whose file vanished becomes 'missing' like any other; unlocking restores it)
     if existing and stats.seen == 0:
         # An empty root that used to contain photos is almost always an unmounted drive/share.

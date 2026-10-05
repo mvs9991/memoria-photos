@@ -18,6 +18,7 @@ import time
 import numpy as np
 
 from .. import db, imaging
+from ..pipeline.scanner import long_path
 
 log = logging.getLogger(__name__)
 
@@ -98,7 +99,7 @@ def ocr_photos(ctx, conn: sqlite3.Connection, everything: bool = False, limit: i
         if should_stop and should_stop():
             break
         try:
-            img = imaging.decode(os.path.join(r["root"], r["rel_path"]), max_side=OCR_MAX_SIDE).image
+            img = imaging.decode(long_path(os.path.join(r["root"], r["rel_path"])), max_side=OCR_MAX_SIDE).image
             text = engine.read(np.asarray(img, dtype=np.uint8))
         except Exception as exc:
             failed += 1

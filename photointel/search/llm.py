@@ -23,7 +23,7 @@ from dataclasses import asdict
 from datetime import datetime, timedelta
 
 from ..metadata import naive_to_ts
-from .parser import DateRange, ParsedQuery, get_vocabulary
+from .parser import DateRange, ParsedQuery, _key, get_vocabulary
 
 log = logging.getLogger(__name__)
 
@@ -158,25 +158,25 @@ def _to_parsed_query(conn: sqlite3.Connection, query: str, data: dict) -> Parsed
     q = ParsedQuery(raw=query, source="llm")
 
     for name in data.get("people_all") or []:
-        pid = vocab.persons.get(str(name).lower())
+        pid = vocab.persons.get(_key(str(name)))
         if pid:
             q.persons_all.append(pid)
             q.person_labels[pid] = vocab.person_labels.get(pid, str(name))
             q.chip("person", q.person_labels[pid])
     for name in data.get("people_any") or []:
-        pid = vocab.persons.get(str(name).lower())
+        pid = vocab.persons.get(_key(str(name)))
         if pid and pid not in q.persons_all:
             q.persons_any.append(pid)
             q.person_labels[pid] = vocab.person_labels.get(pid, str(name))
             q.chip("person", q.person_labels[pid], "any of")
     for name in data.get("places") or []:
-        ids = vocab.places.get(str(name).lower())
+        ids = vocab.places.get(_key(str(name)))
         if ids:
             q.place_ids.extend(ids)
             q.place_label = str(name)
             q.chip("place", str(name))
     for title in data.get("events") or []:
-        ids = vocab.events.get(str(title).lower())
+        ids = vocab.events.get(_key(str(title)))
         if ids:
             q.event_ids.extend(ids)
             q.event_label = str(title)

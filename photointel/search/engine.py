@@ -80,6 +80,7 @@ class SearchEngine:
             args.extend(q.event_ids)
             args.extend(q.event_ids)
         windows = [(q.date.start, q.date.end), *q.date.alts]
+        date_where: list[str] = []
         if q.date.start is not None or q.date.end is not None:
             parts = []
             for lo, hi in windows:
@@ -91,10 +92,14 @@ class SearchEngine:
                     bits.append("p.taken_ts <= ?")
                     args.append(hi)
                 parts.append("(" + " AND ".join(bits) + ")")
-            where.append("(" + " OR ".join(parts) + ")")
+            date_where.append("(" + " OR ".join(parts) + ")")
         if q.date.month_only:
-            where.append("CAST(strftime('%m', p.taken_ts, 'unixepoch') AS INT) = ?")
+            date_where.append("CAST(strftime('%m', p.taken_ts, 'unixepoch') AS INT) = ?")
             args.append(q.date.month_only)
+        if date_where:
+            clause = " AND ".join(date_where)
+            # "not in 2019": a photo with no date is not *in* 2019 either, so it stays
+            where.append(f"(p.taken_ts IS NULL OR NOT ({clause}))" if q.date.exclude else clause)
         if q.tags:
             for tag in q.tags:
                 where.append("EXISTS (SELECT 1 FROM photo_tags pt JOIN tags t ON t.id = pt.tag_id "
@@ -115,6 +120,14 @@ class SearchEngine:
         for phrase in q.text_phrases:
             where.append("p.id IN (SELECT rowid FROM photo_text_fts WHERE photo_text_fts MATCH ?)")
             args.append('"' + phrase.replace('"', '""') + '"')
+        for tag in q.tags_exclude:
+            where.append("NOT EXISTS (SELECT 1 FROM photo_tags pt JOIN tags t ON t.id = pt.tag_id "
+                         "WHERE pt.photo_id = p.id AND t.name = ? AND pt.score >= 2.0)")
+            args.append(str(tag))
+        if q.places_exclude:
+            ex = self._expand_places(conn, set(q.places_exclude))
+            where.append(f"COALESCE(p.place_id, -1) NOT IN ({','.join('?' * len(ex))})")
+            args.extend(ex)
         if q.only_videos:
             where.append("p.media_type = 'video'")
         if q.exclude_videos:
@@ -204,7 +217,8 @@ class SearchEngine:
                           or q.force_no_screenshots
                           or q.date.start or q.date.end or q.date.month_only or q.only_favorites
                           or q.only_screenshots or q.only_selfies or q.only_videos or q.only_live
-                          or q.album_ids or q.user_tags or q.text_phrases or q.min_rating or q.colors)
+                          or q.album_ids or q.user_tags or q.text_phrases or q.min_rating or q.colors
+                          or q.tags_exclude or q.places_exclude)
         # "someone playing tennis" matches the broad tag "playing" and leaves "tennis"
         # as a residue. Using the tag as a hard filter there throws away the word that
         # actually identifies the photo, so with nothing structured to anchor the query
@@ -238,6 +252,8 @@ class SearchEngine:
             ranked, scores = self._semantic_rank(conn, q.semantic_text, candidates, limit,
                                                  structured=structured)
             res.photo_ids, res.scores = ranked, scores
+            if structured:       # every candidate is kept, only ordered: the count is all of them, not a page
+                res.total = len(set(candidates))
             # A tag that almost nothing matched shouldn't shrink the answer to nothing:
             # fall back to ranking the whole library visually.
             if not structured and len(ranked) < 20:

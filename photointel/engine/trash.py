@@ -161,11 +161,16 @@ def restore(ctx, conn: sqlite3.Connection, photo_ids: list[int]) -> dict:
                     os.rename(tr, orig)
                 except OSError:
                     log.warning("Sidecar %s left in the trash", tr)
-        if target != Path(main_orig):          # the old name was taken: follow the file
-            row = conn.execute("SELECT r.path FROM photos p JOIN roots r ON r.id = p.root_id WHERE p.id = ?",
-                               (pid,)).fetchone()
-            if row is not None:
-                rel = target.relative_to(Path(row[0])).as_posix()
+        # Always follow the file: the old name may have been taken, and the row may have stepped off its path
+        # while trashed (a new file arrived under the same name and became a photo of its own).
+        row = conn.execute("SELECT r.path FROM photos p JOIN roots r ON r.id = p.root_id WHERE p.id = ?",
+                           (pid,)).fetchone()
+        if row is not None:
+            try:
+                rel = os.path.relpath(target, row[0]).replace(os.sep, "/")
+            except ValueError:                 # another drive: cannot happen for a file put back in its root
+                rel = None
+            if rel and not rel.startswith(".."):
                 conn.execute("UPDATE photos SET rel_path = ?, filename = ? WHERE id = ?", (rel, target.name, pid))
         conn.execute("UPDATE photos SET status = ? WHERE id = ?", (entry["prev_status"], pid))
         conn.execute("UPDATE trash SET state = 'restored', finished_at = ? WHERE id = ?", (time.time(), entry["id"]))

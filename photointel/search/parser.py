@@ -62,6 +62,7 @@ class DateRange:
     label: str = ""
     month_only: int | None = None      # e.g. "in January" with no year
     alts: list = field(default_factory=list)   # more (start, end) windows: "2020 and 2022" is either year
+    exclude: bool = False              # "not in 2019": everything outside the window(s)
 
 
 @dataclass
@@ -99,6 +100,8 @@ class ParsedQuery:
     source_kinds: list[str] = field(default_factory=list)      # whatsapp, phone, camera, download, edited
     sort_explicit: bool = False                                # "best", "oldest", "latest"...
     colors: list[str] = field(default_factory=list)          # dominant colours, for a colour-only query
+    tags_exclude: list[str] = field(default_factory=list)      # "without dogs"
+    places_exclude: list[int] = field(default_factory=list)    # "not in paris"
     unmatched: list[str] = field(default_factory=list)
     interpretation: list[dict] = field(default_factory=list)
     source: str = "rules"
@@ -110,10 +113,15 @@ class ParsedQuery:
                         self.source_kinds, self.sort_explicit, self.result_type != "photos", self.semantic_text, self.only_favorites,
                         self.only_screenshots, self.only_selfies, self.trips_only, self.only_videos,
                         self.only_live, self.album_ids, self.user_tags, self.text_phrases, self.min_rating,
-                        self.colors])
+                        self.colors, self.tags_exclude, self.places_exclude])
 
     def chip(self, kind: str, label: str, detail: str | None = None) -> None:
         self.interpretation.append({"kind": kind, "label": label, "detail": detail})
+
+
+def _key(text: str) -> str:
+    """How a name is looked up: the same tokens a query is split into ("D'Souza" -> "d souza")."""
+    return " ".join(_tokenize(text))
 
 
 class Vocabulary:
@@ -127,9 +135,9 @@ class Vocabulary:
             if r["birth_date"]:
                 self.birth_dates[r["id"]] = r["birth_date"]
             if r["name"]:
-                self.persons[fold(r["name"])] = r["id"]
+                self.persons[_key(r["name"])] = r["id"]
                 self.person_labels[r["id"]] = r["name"]
-                first = fold(r["name"].split()[0])
+                first = (_key(r["name"]).split() or [""])[0]
                 self.persons.setdefault(first, r["id"])
             label = f"person {r['display_no']}" if r["display_no"] else f"person {r['id']}"
             self.persons.setdefault(label, r["id"])
@@ -141,13 +149,13 @@ class Vocabulary:
             self.place_labels[r["id"]] = r["name"]
             for key in (r["name"], r["city"], r["admin1"], r["admin2"], r["country"]):
                 if key:
-                    self.places.setdefault(fold(key), []).append(r["id"])
+                    self.places.setdefault(_key(key), []).append(r["id"])
 
         self.events: dict[str, list[int]] = {}
         for r in conn.execute("SELECT id, auto_title, user_title FROM events"):
             for key in (r["user_title"], r["auto_title"]):
                 if key:
-                    self.events.setdefault(fold(key), []).append(r["id"])
+                    self.events.setdefault(_key(key), []).append(r["id"])
 
         self.tags: set[str] = {fold(r[0]) for r in conn.execute("SELECT name FROM tags")}
         self.user_tags: set[str] = {r[0].lower() for r in conn.execute(
@@ -156,7 +164,7 @@ class Vocabulary:
         # Only albums that hold photos. A smart album *is* a search; matching its name would
         # turn "screenshots" into "photos in the album Screenshots", which holds no rows.
         for r in conn.execute("SELECT id, name FROM albums WHERE hidden = 0 AND kind = 'manual'"):
-            self.albums.setdefault(fold(r["name"]), []).append(r["id"])
+            self.albums.setdefault(_key(r["name"]), []).append(r["id"])
         self.tag_aliases = {
             "wedding": "wedding", "weddings": "wedding", "marriage": "wedding", "birthday": "birthday",
             "birthdays": "birthday", "beaches": "beach", "sea": "beach", "ocean": "beach",
@@ -212,7 +220,7 @@ def get_vocabulary(conn: sqlite3.Connection, generation: int | None = None, ttl:
 
 
 def _tokenize(text: str) -> list[str]:
-    text = fold(text).replace("'s", "")
+    text = re.sub(r"['\u2019]s\b", "", fold(text))
     return [t for t in re.split(r"[^a-z0-9\-]+", text) if t]
 
 
@@ -220,7 +228,7 @@ def _negated(tokens: list[str], idx: int) -> bool:
     """Is the term at `idx` directly negated: "not X", "without X", "no X", "except any X"?"""
     if idx >= 1 and tokens[idx - 1] in NEGATORS:
         return True
-    return idx >= 2 and tokens[idx - 1] in ("any", "the", "a", "an", "of") and tokens[idx - 2] in NEGATORS
+    return idx >= 2 and tokens[idx - 1] in ("any", "the", "a", "an", "of", "in", "at", "from") and tokens[idx - 2] in NEGATORS
 
 
 def _neg_span(tokens: list[str], idx: int) -> set[int]:
@@ -342,8 +350,16 @@ def parse(query: str, conn: sqlite3.Connection, me_person_id: int | None = None,
         if kind == "person" and _negated(tokens, pos):
             negated_persons.append(value)
             consumed.add(pos - 1) if tokens[pos - 1] in NEGATORS else consumed.update((pos - 2, pos - 1))
+    for (kind, phrase, value), pos in zip(matched_terms, matched_start):
+        if kind in ("tag", "place") and _negated(tokens, pos):
+            if kind == "tag":
+                q.tags_exclude.append(value)
+            else:
+                q.places_exclude.extend(value)
+            q.chip(kind, phrase.title(), "excluded")
+            consumed.update(_neg_span(tokens, pos))
     matched_terms = [t for t, pos in zip(matched_terms, matched_start)
-                     if not (t[0] == "person" and _negated(tokens, pos))]
+                     if not (t[0] in ("person", "tag", "place") and _negated(tokens, pos))]
 
     # ---- stars: "5 stars", "4 star photos", "rated" ------------------------------------------
     stars = re.search(r"\b([1-5]|one|two|three|four|five)\s*(?:-\s*)?stars?\b", " ".join(tokens))
@@ -376,6 +392,16 @@ def parse(query: str, conn: sqlite3.Connection, me_person_id: int | None = None,
     if age_range is not None:
         date, date_tokens = age_range, set()
     if date:
+        # "not in 2019", "except december": the window is left out rather than required.
+        first = min(date_tokens) if date_tokens else None
+        if first is not None:
+            k = first - 1
+            while k >= 0 and tokens[k] in ("in", "from", "during", "of", "the"):
+                k -= 1
+            if k >= 0 and tokens[k] in NEGATORS:
+                date.exclude = True
+                date.label = f"not {date.label}" if date.label else "excluded dates"
+                date_tokens = date_tokens | set(range(k, first))
         q.date = date
         consumed |= date_tokens
 
@@ -459,7 +485,8 @@ def parse(query: str, conn: sqlite3.Connection, me_person_id: int | None = None,
             q.chip("person", q.person_labels[pid], "excluded")
     if person_ids:
         # "A and B" / "A with B" / "together" -> photos containing all of them
-        conjunction = bool(re.search(r"\b(and|with|together|both)\b", joined)) and len(person_ids) > 1
+        conjunction = (bool(re.search(r"\b(and|with|together|both)\b", joined)) and len(person_ids) > 1
+                       and not re.search(r"\b(or|either)\b", joined))   # "with A or B": either
         if conjunction or len(person_ids) == 1:
             q.persons_all.extend(person_ids)
         else:
@@ -548,6 +575,7 @@ def _extract_text_phrases(query: str) -> tuple[str, list[str]]:
 
 def _parse_dates(tokens: list[str], consumed: set[int], now: datetime) -> tuple[DateRange | None, set[int]]:
     used: set[int] = set()
+    tokens = [("~" if i in consumed else t) for i, t in enumerate(tokens)]   # June the person is not June the month
     text = " ".join(tokens)
 
     def rng(start: datetime, end: datetime, label: str) -> DateRange:
@@ -562,8 +590,9 @@ def _parse_dates(tokens: list[str], consumed: set[int], now: datetime) -> tuple[
             y = now.year - 1
             return rng(datetime(y, 1, 1), datetime(y, 12, 31, 23, 59, 59), str(y)), used
         if unit == "month":
-            first = (now.replace(day=1) - timedelta(days=1)).replace(day=1)
-            last = now.replace(day=1) - timedelta(seconds=1)
+            month1 = now.replace(day=1, hour=0, minute=0, second=0, microsecond=0)
+            first = (month1 - timedelta(days=1)).replace(day=1)
+            last = month1 - timedelta(seconds=1)
             return rng(first, last, first.strftime("%B %Y")), used
         if unit == "week":
             return rng(now - timedelta(days=7), now, "last week"), used

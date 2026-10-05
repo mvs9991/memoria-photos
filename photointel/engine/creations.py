@@ -19,6 +19,7 @@ from PIL import Image, ImageOps
 from .. import imaging
 from ..metadata import ts_to_naive
 from ..rotation import rotate_image
+from ..pipeline.scanner import long_path
 from .uploads import _claim, ensure_upload_root
 
 
@@ -34,7 +35,7 @@ def _load(conn: sqlite3.Connection, photo_ids: list[int], side: int, images_only
         if r is None or (images_only and r["media_type"] != "image"):
             continue
         try:
-            img = imaging.decode(Path(r["root"]) / r["rel_path"], max_side=side).image
+            img = imaging.decode(long_path(str(Path(r["root"]) / r["rel_path"])), max_side=side).image
         except (imaging.DecodeError, OSError):
             continue
         out.append((rotate_image(img.convert("RGB"), r["rotation"] or 0), r["taken_ts"]))

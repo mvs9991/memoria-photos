@@ -905,7 +905,7 @@ the future, everything collapsing into one event, fuzzy duplicate thresholds too
 
 ## 10. Working notes
 
-- Run the suite with `.venv/Scripts/python.exe -m pytest -q`. 756 tests, ~12 min, no GPU needed —
+- Run the suite with `.venv/Scripts/python.exe -m pytest -q`. 794 tests, ~12 min, no GPU needed —
   the neural nets are replaced by deterministic fakes.
 - Test fixtures seed randomness from `zlib.crc32` of the **file name**, not `hash()` (salted per
   process) and not the full path (contains pytest's per-run tmp counter). Both made failures
@@ -1153,3 +1153,36 @@ A route-by-route review as a family member, a guest and a share-link visitor. Ea
   Timeline/Map keep their person picker when empty and month links keep the person; editor preview blobs freed;
   scrubber scrolls instantly; private imported albums listed once; type-ahead debounced and capped at 80 chars.
 - Checked: `e2e_gestures.mjs` 20/20 and `shots.mjs` with no console errors on the e2e library.
+
+### Search review (2026-10-05, `tests/test_search_review.py`; each failed before its fix)
+
+- "last month" kept the current time of day (lost most of the first day, took part of the next month's).
+- "with A or B" required both people. A person named June was also read as the month.
+- A negated tag, place or date was *required*: "beach without dogs", "not at the beach", "not in paris" and
+  "not in 2019" now exclude (`tags_exclude`, `places_exclude`, `DateRange.exclude`; an undated photo is not "in 2019").
+- Names with `'` or `.` never matched (D'Souza, St. Louis, Mom's 60th): vocabulary keys now go through the same
+  tokenizer as the query (`parser._key`). A curly apostrophe (iPhone) turned "Alice’s birthday" into a search for "s".
+- The optional Claude layer dropped accented names (Noël, Kandukūr): it looked them up unfolded.
+- A filter plus a visual word reported the page size as the total.
+- Checked and fine: FTS syntax in queries never 500s; dates near year boundaries; "2018 and 2020".
+- Not done (noted by the review): "between march and may", "2 years ago", "christmas" as a date, "photos with 3
+  people"; a person named Paris/Rose/Sunny always wins over the place/word.
+
+### Indexing review (2026-10-05, `tests/test_pipeline_review.py`; each failed before its fix)
+
+Confirmed first: no code path modifies, moves or deletes an original (every write goes to the data directory, temp
+folders, export targets or newly claimed upload/edit files; renames only in `engine/trash.py`).
+
+- A drive that dropped *during* analysis filed every photo it was reading as `error`, for good (only
+  `--retry-errors` brought them back). A read `OSError` is now transient: logged, and tried again next run.
+- A folder that could not be listed (access denied, a network hiccup) marked all its photos missing.
+- A new file saved under a trashed photo's name took over the trashed row (its rating, albums, faces). The trashed
+  row now steps off the path (`rel_path|trashed-<id>`); Restore always writes the path back.
+- Two index runs could both take the lock (checked, then written): now an OS file lock held for the run.
+- A root inside another root was indexed twice. A file whose GPS changed kept its old place.
+- Paths past 260 characters, or folders ending in a dot, were skipped silently: `scanner.long_path` (`\?\`) for
+  scanning, analysis, viewing, editing, exports, OCR and Live pairing (not the Trash, which then reports the file
+  as not found rather than mixing path forms in its restore plan).
+- Files dated before 1970 failed to index; a `+00:00` EXIF offset was read as "none"; `FB_IMG_<epoch ms>` names were
+  dated in UTC while every other source uses local time.
+- A drive used as a root (`D:\`) cut the first letter off every relative path (found while applying the above; not covered by a test, since it needs a whole drive as a root).

@@ -15,6 +15,7 @@ import sqlite3
 import time
 
 from .. import db, video
+from ..pipeline.scanner import long_path
 
 log = logging.getLogger(__name__)
 
@@ -74,7 +75,7 @@ def backfill_motion_offsets(conn: sqlite3.Connection, limit: int | None = None) 
     found = checked = 0
     updates = []
     for r in rows:
-        path = os.path.join(r["root"], r["rel_path"])
+        path = long_path(os.path.join(r["root"], r["rel_path"]))
         offset = 0
         try:
             with open(path, "rb") as f:

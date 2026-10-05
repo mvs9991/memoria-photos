@@ -23,6 +23,7 @@ from PIL import Image, ImageEnhance, ImageOps
 from .. import imaging
 from ..metadata import ts_to_naive
 from ..rotation import rotate_image
+from ..pipeline.scanner import long_path
 from .uploads import _claim, ensure_upload_root
 
 FILTERS = ("none", "mono", "sepia", "vivid", "fade", "warm", "cool")
@@ -107,7 +108,7 @@ def _source(conn: sqlite3.Connection, photo_id: int):
                        (photo_id,)).fetchone()
     if row is None or row["status"] != "ok":
         raise EditError("photo not found")
-    path = Path(row["root"]) / row["rel_path"]
+    path = Path(long_path(str(Path(row["root"]) / row["rel_path"])))
     if not path.exists():
         raise EditError("the original file is missing")
     return row, path

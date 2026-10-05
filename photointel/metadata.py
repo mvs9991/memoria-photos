@@ -98,6 +98,8 @@ def parse_offset(s: str | None) -> int | None:
     if not m:
         return None
     mins = int(m.group(2)) * 60 + int(m.group(3))
+    if int(m.group(3)) >= 60 or mins > 14 * 60:
+        return None
     return mins if m.group(1) == "+" else -mins
 
 
@@ -225,7 +227,7 @@ def date_from_filename(filename: str) -> tuple[datetime | None, str | None, str 
         g = m.groups()
         if kind == "epoch_ms":
             try:
-                dt = datetime.fromtimestamp(int(g[0]) / 1000, tz=timezone.utc).replace(tzinfo=None)
+                dt = datetime.fromtimestamp(int(g[0]) / 1000)   # wall clock here, like file times
             except (ValueError, OSError, OverflowError):
                 continue
             if _plausible(dt):
@@ -280,6 +282,13 @@ def naive_to_ts(dt: datetime) -> float:
 
 def ts_to_naive(ts: float) -> datetime:
     return datetime(1970, 1, 1) + timedelta(seconds=ts)
+
+
+def _file_time(t: float) -> datetime:
+    try:
+        return datetime.fromtimestamp(t)
+    except (OSError, OverflowError, ValueError):      # Windows refuses times before 1970
+        return ts_to_naive(t)
 
 
 # ---- main extraction ---------------------------------------------------------------------
@@ -358,10 +367,12 @@ def extract(exif: Image.Exif | None, xmp, filename: str, folder: str, mtime: flo
         # File times: mtime survives copies on most systems; ctime on Windows is creation time.
         cands = [t for t in (mtime, ctime) if t]
         t = min(cands) if cands else mtime
-        dt = datetime.fromtimestamp(t)
+        dt = _file_time(t)
         source, conf = "mtime", "low"
 
-    tz = parse_offset(exif_ifd.get(TAG_OFFSET_ORIGINAL)) or parse_offset(exif_ifd.get(TAG_OFFSET))
+    tz = parse_offset(exif_ifd.get(TAG_OFFSET_ORIGINAL))
+    if tz is None:                                   # +00:00 is an offset, not a missing one
+        tz = parse_offset(exif_ifd.get(TAG_OFFSET))
     out["taken_ts"] = naive_to_ts(dt)
     out["taken_local"] = dt.strftime("%Y-%m-%d %H:%M:%S")
     out["tz_offset_min"] = tz
@@ -393,7 +404,7 @@ def extract_video(vinfo, filename: str, folder: str, mtime: float, ctime: float 
             dt, source, conf = fdt, "folder", "low"
     if dt is None:
         cands = [t for t in (mtime, ctime) if t]
-        dt = datetime.fromtimestamp(min(cands) if cands else mtime)
+        dt = _file_time(min(cands) if cands else mtime)
         source, conf = "mtime", "low"
     make = vinfo.make
     model = vinfo.model

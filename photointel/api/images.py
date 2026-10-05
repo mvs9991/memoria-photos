@@ -22,6 +22,7 @@ from .. import imaging
 from ..engine import thumbs
 from ..config import RAW_EXTENSIONS
 from ..rotation import rotate_image
+from ..pipeline.scanner import long_path
 from .deps import get_state, guard_locked
 
 log = logging.getLogger(__name__)
@@ -50,7 +51,7 @@ def abs_path(row) -> Path:
         moved = trashed_path(get_state().conn(), int(row["id"]))
         if moved is not None:
             return moved
-    return Path(row["root"]) / row["rel_path"]
+    return Path(long_path(str(Path(row["root"]) / row["rel_path"])))   # past 260 characters too
 
 
 def _send_image(img: Image.Image, fmt: str = "JPEG", quality: int = 85) -> Response:

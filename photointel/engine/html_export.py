@@ -18,6 +18,7 @@ from .. import db, imaging
 from ..metadata import ts_to_naive
 from ..video import playable_in_browser
 from ..rotation import rotate_image
+from ..pipeline.scanner import long_path
 from .places import place_label
 
 THUMB = 480
@@ -48,7 +49,7 @@ def export_album(conn: sqlite3.Connection, photo_ids: list[int], title: str, out
         r = rows.get(pid)
         if r is None:
             continue
-        src = Path(r["root"]) / r["rel_path"]
+        src = Path(long_path(str(Path(r["root"]) / r["rel_path"])))
         try:
             dec = imaging.decode(src, max_side=PHOTO)
         except (imaging.DecodeError, OSError):

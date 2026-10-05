@@ -27,6 +27,7 @@ import numpy as np
 from .. import db, hashing, imaging, metadata, quality, video
 from ..engine import corrections, thumbs
 from ..config import VIDEO_EXTENSIONS
+from .scanner import long_path
 from ..context import AppContext
 
 log = logging.getLogger(__name__)
@@ -67,6 +68,7 @@ class Result:
     faces: list | None = None
     embedding: np.ndarray | None = None
     timings: dict = field(default_factory=dict)
+    transient: bool = False
 
 
 class CancelledError(Exception):
@@ -118,10 +120,14 @@ class Indexer:
         conn = self.ctx.connect()
         try:
             results = []
+            ids = {r: ensure_root(conn, r) for r in roots}
+            registered = [Path(p[0]) for p in conn.execute("SELECT path FROM roots")]
             for r in roots:
-                root_id = ensure_root(conn, r)
+                root_id = ids[r]
+                here = Path(r).resolve()
+                nested = [o for o in registered if here in o.parents]   # scanned as roots of their own
                 self._report("scan", 0, 0, f"Scanning {r}")
-                stats = scan_root(conn, root_id, Path(r), exclude=[self.ctx.paths.data],
+                stats = scan_root(conn, root_id, Path(r), exclude=[self.ctx.paths.data, *nested],
                                   progress=lambda n: self._report("scan", n, 0, f"Found {n:,} files"),
                                   should_stop=lambda: self._check_cancel(conn))
                 # Before anything is analysed (and so could be seen): new files in the upload folder of
@@ -154,7 +160,7 @@ class Indexer:
             if not (need_meta or need_faces or need_sem):
                 continue
             tasks.append(Task(
-                photo_id=r["id"], abs_path=os.path.join(r["root"], r["rel_path"]), rel_path=r["rel_path"],
+                photo_id=r["id"], abs_path=long_path(os.path.join(r["root"], r["rel_path"])), rel_path=r["rel_path"],
                 folder=r["folder"], filename=r["filename"], ext=r["ext"], size=r["size"], mtime=r["mtime"],
                 ctime=r["ctime"], sha256=r["sha256"], need_meta=need_meta, need_faces=need_faces, need_semantic=need_sem,
             ))
@@ -380,6 +386,9 @@ class Indexer:
             return res
         except Exception as exc:
             res.error, res.error_stage = f"{type(exc).__name__}: {exc}", stage
+            # The file could not be opened at all (drive unplugged, share dropped, file locked): that says
+            # nothing about the photo, so it must be tried again rather than filed as a broken photo.
+            res.transient = stage == "read" and isinstance(exc, OSError)
             log.debug("CPU stage failed for %s\n%s", t.abs_path, traceback.format_exc())
             return res
 
@@ -550,6 +559,11 @@ class Indexer:
         t = r.task
         now = time.time()
         pid = t.photo_id
+        if r.transient:
+            conn.execute("INSERT INTO processing_errors(photo_id, path, stage, error, created_at) VALUES (?,?,?,?,?)",
+                         (pid, t.abs_path, "read", (r.error or "")[:2000], now))
+            self.stats["errors"] += 1
+            return
         if r.meta is not None:
             m = r.meta
             # Move detection: a new path whose content matches a photo that went missing.
@@ -584,9 +598,14 @@ class Indexer:
             location_cols = ""
             if m.get("gps_lat") is not None:
                 location_cols = ", location_source='gps', location_confidence='high'"
+            # SET expressions see the old row: a file whose GPS changed (or went) must be geocoded again.
+            moved_gps = "NOT (gps_lat IS ? AND gps_lon IS ?)"
             conn.execute(
-                f"UPDATE photos SET {', '.join(c + '=?' for c in cols)}, meta_version=?, status=?, error=?{location_cols} WHERE id=?",
-                (*vals, META_VERSION, "error" if r.error else "ok", r.error, pid),
+                f"UPDATE photos SET place_id = CASE WHEN {moved_gps} THEN NULL ELSE place_id END, "
+                f"landmark_id = CASE WHEN {moved_gps} THEN NULL ELSE landmark_id END, "
+                f"{', '.join(c + '=?' for c in cols)}, meta_version=?, status=?, error=?{location_cols} WHERE id=?",
+                (m.get("gps_lat"), m.get("gps_lon"), m.get("gps_lat"), m.get("gps_lon"),
+                 *vals, META_VERSION, "error" if r.error else "ok", r.error, pid),
             )
             # A private photo stays private, and a locked one locked, through re-analysis.
             conn.execute("UPDATE photos SET status = CASE WHEN private_to IS NOT NULL THEN 'private' ELSE 'locked' END "
