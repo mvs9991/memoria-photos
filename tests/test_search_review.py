@@ -185,3 +185,19 @@ def test_a_number_of_people_filters_by_faces(ctx, client):
     assert got("photos with 3 people") == sorted(ids[:2])        # was: a visual search for "people"
     assert got("photos with at least 3 people") == sorted(ids)
     assert got("more than 5 people") == [ids[2]]
+
+
+def test_a_tag_nothing_clearly_matched_falls_back_to_the_visual_search(ctx, client, monkeypatch):
+    from photointel.search import engine as engine_mod
+
+    c = ctx.connect()
+    c.execute("INSERT INTO tags(name, category) VALUES ('zebra', 'animal')")     # a tag no photo scores on
+    model = db.register_model(c, "semantic", "test-sem", "1", 4, {})
+    db.set_active_model(c, "semantic", model)
+    c.commit()
+    c.close()
+    # Stand-in for the visual model (none in tests): it "ranks" whatever it is given in order.
+    monkeypatch.setattr(engine_mod.SearchEngine, "_semantic_rank",
+                        lambda self, conn, text, cands, limit, structured=False: (list(cands)[:limit], {}))
+    got = client.get("/api/search", params={"q": "zebra"}).json()
+    assert got["photos"], got["interpretation"]          # was: nothing at all

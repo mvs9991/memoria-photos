@@ -14,7 +14,8 @@ router = APIRouter()
 
 
 @router.get("/search")
-def search(q: str = Query(..., min_length=1), limit: int = Query(500, le=2000), llm: bool | None = None):
+def search(q: str = Query(..., min_length=1), limit: int = Query(500, ge=1, le=2000), llm: bool | None = None):
+    q = q[:500]           # longer is not a search; the parser's name matching grows with every word
     state = get_state()
     conn = state.conn()
     res = state.search.search(conn, q, limit=limit, use_llm=llm)

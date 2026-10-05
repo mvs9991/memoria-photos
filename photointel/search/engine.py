@@ -262,7 +262,10 @@ class SearchEngine:
             widened = self._widen_by_tag(conn, q, candidates)
             if widened:
                 candidates = widened
-        if q.semantic_text and candidates:
+        # A tag nothing clearly matched (no candidates at all) still deserves the visual fallback below, which
+        # only the "a few candidates" case reached: "zebra" with no photo tagged zebra answered nothing.
+        visual_only = not candidates and not structured and bool(db.active_model_id(conn, "semantic"))
+        if q.semantic_text and (candidates or visual_only):
             ranked, scores = self._semantic_rank(conn, q.semantic_text, candidates, limit,
                                                  structured=structured)
             res.photo_ids, res.scores = ranked, scores
