@@ -151,6 +151,8 @@ def test_the_scheduler_asks_for_a_scheduled_run(ctx, monkeypatch):
     captured: list[dict] = []
     monkeypatch.setattr(jobs, "spawn_index_job", lambda c, params: captured.append(params) or 1)
     monkeypatch.setattr(scheduler, "TICK_SECONDS", 0.05)
+    monkeypatch.setattr(scheduler, "WARM", threading.Event())
+    scheduler.WARM.set()                                # the server has loaded its models
     ctx.settings.auto_index_minutes = 1
     conn = ctx.connect()
     db.set_meta(conn, "last_auto_index", 0)             # long overdue
@@ -182,3 +184,32 @@ def test_the_command_line_flag_reaches_the_runner(ctx, library, capsys):
               str(library)])
     printed = json.loads(capsys.readouterr().out)
     assert printed["post"] == {"skipped": "nothing changed"}
+
+
+def test_the_first_scheduled_index_waits_for_the_servers_own_start_up(ctx, monkeypatch):
+    """Both loading the same model from a hard drive at once took minutes each (see scheduler.WARM)."""
+    captured: list[dict] = []
+    monkeypatch.setattr(jobs, "spawn_index_job", lambda c, params: captured.append(params) or 1)
+    monkeypatch.setattr(scheduler, "TICK_SECONDS", 0.05)
+    monkeypatch.setattr(scheduler, "WARM", threading.Event())          # still warming up
+    ctx.settings.auto_index_minutes = 1
+    conn = ctx.connect()
+    db.set_meta(conn, "last_auto_index", 0)
+    conn.commit()
+    conn.close()
+    stop = threading.Event()
+    t = threading.Thread(target=scheduler.run, args=(ctx, stop), daemon=True)
+    t.start()
+    try:
+        time.sleep(1.0)
+        want = {"kind": "index", "scheduled": True}
+        assert want not in captured, "the index started while the server was still loading its models"
+        scheduler.WARM.set()
+        deadline = time.time() + 10
+        while want not in captured and time.time() < deadline:
+            time.sleep(0.05)
+        assert want in captured, "the index never started once the server was ready"
+    finally:
+        stop.set()
+        t.join(timeout=5)
+

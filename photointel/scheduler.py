@@ -119,6 +119,14 @@ def _upkeep(ctx, conn, now: float, busy: bool, backup_running: bool) -> None:
         log.exception("HTTPS renewal failed")
 
 
+# Set once the server has loaded its models (api.app._warm_models). The first scheduled index waits for it, up to
+# WARM_GRACE_S: right after a start the hourly index ran at the first tick, so the server and the index job each
+# loaded the same 800 MB model from the hard drive at once (8 minutes each on the real library), reading the
+# photos' embeddings took 578 s, and a commit waited past the 60 s lock timeout.
+WARM = threading.Event()
+WARM_GRACE_S = 600
+
+
 def run(ctx, stop: threading.Event) -> None:
     from .engine.backup import last_backup
     from .pipeline import jobs
@@ -139,6 +147,8 @@ def run(ctx, stop: threading.Event) -> None:
                                   active is not None, backup_running,
                                   float(attempt) if attempt else None):
                     if action == "index":
+                        if not WARM.is_set() and now - started < WARM_GRACE_S:
+                            continue            # after the server's own start-up reads; due again next tick
                         db.set_meta(conn, "last_auto_index", now)
                         conn.commit()
                         # "scheduled": skip the heavy post-processing when nothing changed.

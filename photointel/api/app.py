@@ -24,6 +24,15 @@ WEB_DIST = Path(__file__).resolve().parent.parent.parent / "web" / "dist"
 
 def _warm_models(ctx: AppContext) -> None:
     """Load the semantic model in the background so the first search is not a 15s wait."""
+    try:
+        _warm_models_now(ctx)
+    finally:
+        from .. import scheduler
+
+        scheduler.WARM.set()                    # the first scheduled index may start now
+
+
+def _warm_models_now(ctx: AppContext) -> None:
     # PyTorch first, here and not on the main thread: about 2 GB of libraries, which on a cold hard drive took
     # minutes, and the site did not answer at all until they were in. Anything else that needs it meanwhile waits
     # on vectors._torch's lock, so it is still only ever imported by one thread at a time.
