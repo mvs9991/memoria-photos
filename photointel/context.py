@@ -53,6 +53,9 @@ class AppContext:
     @property
     def device(self) -> str:
         if self._device is None:
+            from .vectors import _torch
+
+            _torch()                        # imported by one thread at a time (see vectors._torch)
             from .vision.device import configure_torch_threads, pick_device
 
             self._device = pick_device(self.settings.device)
@@ -68,6 +71,9 @@ class AppContext:
     def face_engine(self):
         with self._lock:
             if self._face_engine is None:
+                from .vectors import _torch
+
+                _torch()
                 from .vision.faces import FaceEngine
 
                 self._face_engine = FaceEngine(self.face_model_dir, device=self.device,
@@ -77,6 +83,9 @@ class AppContext:
     def semantic_model(self):
         with self._lock:
             if self._semantic is None:
+                from .vectors import _torch
+
+                _torch()
                 from .vision.semantic import SemanticModel
 
                 self._semantic = SemanticModel(self.settings.semantic_model, self.settings.semantic_pretrained,

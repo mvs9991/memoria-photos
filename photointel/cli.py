@@ -3,6 +3,7 @@ from __future__ import annotations
 
 import argparse
 import json
+import os
 import logging
 import sys
 import time
@@ -111,6 +112,14 @@ def _serve_together(app, servers) -> None:
 def cmd_run(ctx: AppContext, args) -> None:
     from . import service
 
+    # One keeper per library: starting it again (the launcher double-clicked, sign-in and boot start both set
+    # up) made a second one that found the port taken and kept retrying in the background.
+    mine = {os.getpid(), os.getppid()}          # this process, and the venv launcher that started it
+    others = [pid for pid, role, _ in service.find_processes(ctx.paths.data) if role == "run" and pid not in mine]
+    if others:
+        print(f"Memoria is already running for this library (process {others[0]}); not starting a second one.")
+        return
+
     extra = []
     if args.host:
         extra += ["--host", args.host]
@@ -196,14 +205,6 @@ def cmd_offsite(ctx: AppContext, args) -> None:
         sys.exit(1)
     finally:
         conn.close()
-
-
-def cmd_stop(ctx: AppContext, args) -> None:
-    from . import service
-
-    stopped = service.stop(ctx.paths.data)
-    print(f"Stopped Memoria ({len(stopped)} process{'es' if len(stopped) != 1 else ''})." if stopped
-          else "Memoria was not running for this library.")
 
 
 def cmd_autostart(ctx: AppContext, args) -> None:
@@ -561,6 +562,16 @@ def main(argv: list[str] | None = None) -> None:
     sub.add_parser("status", help="library summary")
 
     args = parser.parse_args(argv)
+    if args.cmd == "stop":
+        # Without opening the library: opening runs its migrations, which need a write, and an index job
+        # holding the write lock made `stop` fail with "database is locked" (so nothing was stopped).
+        from . import service
+        from .config import resolve_data_dir
+
+        stopped = service.stop(resolve_data_dir(args.data))
+        print(f"Stopped Memoria ({len(stopped)} process{'es' if len(stopped) != 1 else ''})." if stopped
+              else "Memoria was not running for this library.")
+        return
     ctx = AppContext(args.data)
     setup_logging(ctx.paths, level=logging.DEBUG if args.verbose else logging.INFO)
     handlers = {"add-root": cmd_add_root, "index": cmd_index, "serve": cmd_serve, "status": cmd_status,
@@ -568,7 +579,7 @@ def main(argv: list[str] | None = None) -> None:
                 "export-xmp": cmd_export_xmp,
                 "set-password": cmd_set_password, "import-gpx": cmd_import_gpx, "export": cmd_export,
                 "trash": cmd_trash, "backup": cmd_backup, "accounts": cmd_accounts, "run": cmd_run,
-                "autostart": cmd_autostart, "stop": cmd_stop, "health": cmd_health, "offsite": cmd_offsite}
+                "autostart": cmd_autostart, "health": cmd_health, "offsite": cmd_offsite}
     t0 = time.time()
     handlers[args.cmd](ctx, args)
     log.debug("%s finished in %.1fs", args.cmd, time.time() - t0)

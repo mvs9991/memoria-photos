@@ -24,6 +24,12 @@ WEB_DIST = Path(__file__).resolve().parent.parent.parent / "web" / "dist"
 
 def _warm_models(ctx: AppContext) -> None:
     """Load the semantic model in the background so the first search is not a 15s wait."""
+    # PyTorch first, here and not on the main thread: about 2 GB of libraries, which on a cold hard drive took
+    # minutes, and the site did not answer at all until they were in. Anything else that needs it meanwhile waits
+    # on vectors._torch's lock, so it is still only ever imported by one thread at a time.
+    from ..vectors import _torch
+
+    _torch()
     try:
         t0 = time.time()
         ctx.semantic_model()
@@ -125,12 +131,6 @@ def _small_thumb_backfill(ctx: AppContext, stop: threading.Event) -> None:
 
 
 def create_app(ctx: AppContext) -> FastAPI:
-    # PyTorch's native libraries are loaded here, on the main thread, before any worker or background thread
-    # exists. Loaded lazily, the first one to need them could be a request thread while the model warm-up
-    # thread was loading them too: a test run once died with a Windows access violation inside torch's import.
-    from ..vectors import _torch
-
-    _torch()
     set_state(ApiState(ctx))
     threading.Thread(target=_warm_models, args=(ctx,), daemon=True, name="warm-models").start()
     threading.Thread(target=_trash_sweeper, args=(ctx, threading.Event()), daemon=True, name="trash-sweeper").start()

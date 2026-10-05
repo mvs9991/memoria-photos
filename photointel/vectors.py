@@ -18,13 +18,19 @@ import numpy as np
 log = logging.getLogger(__name__)
 
 
-def _torch():
-    try:
-        import torch
+_torch_lock = threading.Lock()
 
-        return torch
-    except Exception:  # pragma: no cover
-        return None
+
+def _torch():
+    """PyTorch, imported by one thread at a time: two threads loading its native libraries at once once ended a
+    test run with a Windows access violation. Whoever comes second waits here until the first has finished."""
+    with _torch_lock:
+        try:
+            import torch
+
+            return torch
+        except Exception:  # pragma: no cover
+            return None
 
 
 def load_photo_embeddings(conn: sqlite3.Connection, model_id: int, only_active: bool = True
