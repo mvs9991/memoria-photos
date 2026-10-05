@@ -210,7 +210,20 @@ def list_jobs(limit: int = 20):
     conn = get_state().conn()
     jobs_mod.reap_stale_jobs(conn)
     rows = conn.execute("SELECT * FROM jobs ORDER BY id DESC LIMIT ?", (limit,)).fetchall()
-    return {"jobs": [dict(r) for r in rows], "active": jobs_mod.active_job(conn)}
+    return {"jobs": [_job_view(dict(r)) for r in rows], "active": _job_view(jobs_mod.active_job(conn))}
+
+
+def _job_view(job: dict | None) -> dict | None:
+    """A job as this caller may see it. Its settings, messages and errors name the server's folders (roots,
+    export and backup targets), so anyone but an owner sees only what it is doing and how far along it is."""
+    if job is None:
+        return None
+    from .deps import current_role
+
+    if current_role() == "owner":
+        return job
+    return {k: job.get(k) for k in ("id", "kind", "status", "stage", "progress_done", "progress_total",
+                                     "created_at", "started_at", "finished_at")}
 
 
 @router.post("/jobs/{job_id}/cancel")

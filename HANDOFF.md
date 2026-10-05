@@ -905,7 +905,7 @@ the future, everything collapsing into one event, fuzzy duplicate thresholds too
 
 ## 10. Working notes
 
-- Run the suite with `.venv/Scripts/python.exe -m pytest -q`. 794 tests, ~12 min, no GPU needed —
+- Run the suite with `.venv/Scripts/python.exe -m pytest -q`. 796 tests, ~12 min, no GPU needed —
   the neural nets are replaced by deterministic fakes.
 - Test fixtures seed randomness from `zlib.crc32` of the **file name**, not `hash()` (salted per
   process) and not the full path (contains pytest's per-run tmp counter). Both made failures
@@ -1137,8 +1137,9 @@ A route-by-route review as a family member, a guest and a share-link visitor. Ea
   album's owner. Share links of an album you cannot see can no longer be listed or revoked.
 - **Photo details** counted and named a locked duplicate. **Server paths** (stats, photo details, folder browser,
   export location, upload and edit results) are shown to non-owners as the last folder name only.
-- Not fixed, noted: event start/end/place are not recomputed when a photo is locked (counts and covers are);
-  `/api/jobs` is readable by guests.
+- Also fixed after the review: an event's start, end and place are recomputed when a photo leaves view (locked,
+  hidden, trashed), not only its count and cover; `/api/jobs` shows non-owners only kind, status and progress (its
+  settings and messages name the server's folders).
 
 ### Frontend review (2026-10-05)
 

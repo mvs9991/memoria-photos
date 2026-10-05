@@ -358,3 +358,23 @@ def test_typing_an_underscore_or_percent_in_search_suggests_only_what_contains_i
     assert labels("_") == ["bob_smith"]   # was: every named person ('_' is any one letter in LIKE)
     assert labels("%") == []
     assert labels("ann") == ["Ann"]
+
+
+def test_hiding_an_events_first_photo_moves_its_start(ctx, client):
+    import time
+
+    c = ctx.connect()
+    rows = c.execute("SELECT MIN(id), taken_ts FROM photos WHERE status = 'ok' AND hidden = 0 AND live_component = 0 "
+                     "AND taken_ts IS NOT NULL GROUP BY taken_ts ORDER BY taken_ts LIMIT 4").fetchall()
+    assert rows[0][1] < rows[1][1]
+    ids = [r[0] for r in rows]
+    now = time.time()
+    eid = c.execute("INSERT INTO events(kind, start_ts, end_ts, photo_count, people_count, auto_title, created_at, "
+                    "updated_at) VALUES ('event', ?, ?, 4, 0, 'Picnic', ?, ?)",
+                    (rows[0][1], rows[-1][1], now, now)).lastrowid
+    c.execute(f"UPDATE photos SET event_id = ? WHERE id IN ({','.join(map(str, ids))})", (eid,))
+    c.commit()
+    client.post("/api/photos/hide", json={"photo_ids": [ids[0]], "hidden": True})
+    start = c.execute("SELECT start_ts FROM events WHERE id = ?", (eid,)).fetchone()[0]
+    c.close()
+    assert start == rows[1][1], "the event is still dated by the photo that left it"

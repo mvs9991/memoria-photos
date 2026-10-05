@@ -193,3 +193,14 @@ def test_guests_are_not_told_server_paths(ctx, fam, library):
         body = guest.get(path).text                                     # ... and shown here
         for secret in (str(ctx.paths.data), str(library)):
             assert secret.replace("\\", "\\\\") not in body, path
+
+
+def test_guests_are_not_shown_job_settings_or_messages(ctx, fam):
+    owner, priya, guest = fam
+    conn = ctx.connect()
+    conn.execute("INSERT INTO jobs(kind, status, params, message, error, created_at) VALUES "
+                 "('export', 'done', '{\"folder\": \"X:/secret/exports\"}', 'Copied to X:/secret/exports', NULL, 0)")
+    conn.commit()
+    body = guest.get("/api/jobs").text
+    assert "secret" not in body, body                 # was: the export folder, in params and message
+    assert "secret" in owner.get("/api/jobs").text

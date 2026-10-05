@@ -539,9 +539,24 @@ def drop_unseen(conn: sqlite3.Connection, photo_ids: list[int]) -> int:
             continue
         cover = _pick_cover(conn, ids)
         people = _people_count(conn, ids)
-        conn.execute("UPDATE events SET photo_count = ?, people_count = ?, cover_photo_id = ?, summary = ?, "
-                     "summary_source = 'template' WHERE id = ?",
-                     (len(ids), people, cover, build_summary(conn, eid), eid))
+        # Its dates and place too: locking the first or last photo of an event left the event dated (and placed)
+        # by that photo until the next rebuild.
+        lo = hi = None
+        places: Counter = Counter()
+        for chunk, q in db.chunks(ids):
+            r = conn.execute(f"SELECT MIN(taken_ts), MAX(taken_ts) FROM photos WHERE id IN ({q})", chunk).fetchone()
+            if r[0] is not None:
+                lo = r[0] if lo is None else min(lo, r[0])
+                hi = r[1] if hi is None else max(hi, r[1])
+            places.update({int(x[0]): int(x[1]) for x in conn.execute(
+                f"SELECT place_id, COUNT(*) FROM photos WHERE id IN ({q}) AND place_id IS NOT NULL GROUP BY place_id",
+                chunk)})
+        place_id = places.most_common(1)[0][0] if places else None
+        conn.execute("UPDATE events SET photo_count = ?, people_count = ?, cover_photo_id = ?, "
+                     "start_ts = COALESCE(?, start_ts), end_ts = COALESCE(?, end_ts), place_id = ? WHERE id = ?",
+                     (len(ids), people, cover, lo, hi, place_id, eid))
+        conn.execute("UPDATE events SET summary = ?, summary_source = 'template' WHERE id = ?",
+                     (build_summary(conn, eid), eid))     # after the dates and place it describes
     return len(touched)
 
 
