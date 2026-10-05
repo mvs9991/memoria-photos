@@ -87,8 +87,10 @@ def run_post_stages(ctx, conn: sqlite3.Connection, stages: list[str] | None = No
                 out[stage] = events_mod.detect_events(ctx, conn)
             elif stage == "locations":
                 out[stage] = places_mod.infer_locations(ctx, conn)
-                # Re-title events now that more photos have a location.
-                events_mod.detect_events(ctx, conn)
+                # Re-title events now that more photos have a location; when none gained one (most runs on the
+                # real library), the events stage just before already left them right.
+                if any(out[stage].values()):
+                    events_mod.detect_events(ctx, conn)
             elif stage == "duplicates":
                 out[stage] = dup_mod.find_duplicates(ctx, conn)
             elif stage == "stacks":
@@ -117,7 +119,6 @@ def run_post_stages(ctx, conn: sqlite3.Connection, stages: list[str] | None = No
 def rebuild_fts(conn: sqlite3.Connection, batch: int = 5000) -> dict:
     """Rebuild the keyword index (filenames, folders, tags, places, people, events, captions)."""
     t0 = time.time()
-    conn.execute("DELETE FROM photo_fts")
     rows = conn.execute(
         """SELECT p.id, p.filename, p.folder, p.caption, p.camera_make, p.camera_model, p.source_kind,
                   p.description, p.ocr_text,
@@ -155,11 +156,23 @@ def rebuild_fts(conn: sqlite3.Connection, batch: int = 5000) -> dict:
         written = " ".join(x for x in (r["description"], r["ocr_text"]) if x)
         if written:
             text_payload.append((int(r["id"]), written))
-    for i in range(0, len(payload), batch):
-        conn.executemany("INSERT INTO photo_fts(rowid, text) VALUES (?,?)", payload[i:i + batch])
-    conn.execute("DELETE FROM photo_text_fts")
-    conn.executemany("INSERT INTO photo_text_fts(rowid, text) VALUES (?,?)", text_payload)
+    changed = _sync_fts(conn, "photo_fts", payload, batch) + _sync_fts(conn, "photo_text_fts", text_payload, batch)
     conn.commit()
-    db.bump_generation(conn, "fts")
-    conn.commit()
-    return {"indexed": len(payload), "seconds": round(time.time() - t0, 2)}
+    if changed:
+        db.bump_generation(conn, "fts")
+        conn.commit()
+    return {"indexed": len(payload), "changed": changed, "seconds": round(time.time() - t0, 2)}
+
+
+def _sync_fts(conn: sqlite3.Connection, table: str, payload: list[tuple[int, str]], batch: int) -> int:
+    """Make `table` hold exactly `payload`, writing only the rows that differ. Deleting and inserting every row
+    rewrote the whole index on every run (every hour), even when one photo had changed."""
+    have = dict(conn.execute(f"SELECT rowid, text FROM {table}"))
+    want = dict(payload)
+    stale = [(rid,) for rid, text in have.items() if want.get(rid) != text]
+    fresh = [(rid, text) for rid, text in want.items() if have.get(rid) != text]
+    for i in range(0, len(stale), batch):
+        conn.executemany(f"DELETE FROM {table} WHERE rowid = ?", stale[i:i + batch])
+    for i in range(0, len(fresh), batch):
+        conn.executemany(f"INSERT INTO {table}(rowid, text) VALUES (?,?)", fresh[i:i + batch])
+    return len(stale) + len(fresh)

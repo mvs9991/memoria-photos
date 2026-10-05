@@ -7,7 +7,7 @@ import {
   Layers, MapPin, Minus, Pencil, Plus, ScanText, Tag, Users, X, Sparkles, HardDrive,
 } from "lucide-react";
 import { TrashDialog, useAllowDelete } from "./TrashDialog";
-import { useRole } from "../lib/hooks";
+import { invalidateGrids, useRole } from "../lib/hooks";
 import { BROWSER_VIDEO_CODECS, api, canPlayHevc, downloadUrl, faceUrl, motionUrl, originalUrl, thumbUrl, videoUrl } from "../lib/api";
 import { clock, exposureLabel, formatBytes, formatDateTime, megapixels } from "../lib/format";
 import { AlbumPicker } from "./AlbumPicker";
@@ -38,6 +38,7 @@ interface Props {
 export function PhotoViewer({ ids, index, onIndex, onClose }: Props) {
   const id = ids[index];
   const qc = useQueryClient();
+  const viewer = useViewer();
   // On a phone the details panel would cover the photo, so it starts closed there.
   const [showInfo, setShowInfo] = useState(() => {
     const saved = localStorage.getItem("viewer-info");
@@ -82,6 +83,9 @@ export function PhotoViewer({ ids, index, onIndex, onClose }: Props) {
     const onKey = (e: KeyboardEvent) => {
       if (["INPUT", "TEXTAREA"].includes((e.target as HTMLElement)?.tagName)) return;   // typing a tag
       if (picker || trashing || editing) return;
+      // Any other dialog over the viewer (Fix date / Set place, shortcuts) owns the keyboard: an arrow key used
+      // to move the viewer on while the dialog stayed open, and its Apply then changed the next photo.
+      if (document.querySelectorAll('[role="dialog"],[role="alertdialog"]').length > 1) return;
       if (e.key === "Delete" && canDelete && photo && photo.status !== "trashed") { setTrashing(true); return; }
       if (e.key === "Escape") { zoom > 1 ? (setZoom(1), setOffset({ x: 0, y: 0 })) : onClose(); }
       else if (e.key === "ArrowRight") go(1);
@@ -89,11 +93,11 @@ export function PhotoViewer({ ids, index, onIndex, onClose }: Props) {
       else if (e.key === "i") setShowInfo((v) => !v);
       else if (e.key === "f") toggleFavorite();
       else if (e.key.toLowerCase() === "r" && !e.ctrlKey && !e.metaKey && photo?.media_type === "image")
-        rotate.mutate(e.shiftKey ? -90 : 90);
+        rotate.mutate({ pid: id, deg: e.shiftKey ? -90 : 90 });
       else if (e.key === "l" && photo?.live) setPlayingLive(true);
       else if (/^[1-5]$/.test(e.key) && photo) {
         const n = Number(e.key);
-        rate.mutate(photo.rating === n ? 0 : n);
+        rate.mutate({ pid: id, rating: photo.rating === n ? 0 : n });
       }
       else if (e.key === "+" || e.key === "=") setZoom((z) => Math.min(6, z * 1.4));
       else if (e.key === "-") setZoom((z) => Math.max(1, z / 1.4));
@@ -141,44 +145,47 @@ export function PhotoViewer({ ids, index, onIndex, onClose }: Props) {
   // once. It used to be computed from the *rendered* photo (`!photo.favorite`), which only changes after
   // the server answers and the photo refetches, so a second press in that window (key auto-repeat, a
   // double-tap on a phone, a slow connection) worked out the same target again and favourited twice.
+  // Each change carries the id of the photo it was made on. Its callbacks run with the options of the latest
+  // render, so `id` there is whichever photo is showing *now*: press R and then -> at once, and the next photo's
+  // cache was refreshed instead of the rotated one (which then showed unrotated when you came back).
   const favorite = useMutation({
-    mutationFn: (target: boolean) => api.setFlags(id, { favorite: target }),
-    onMutate: async (target: boolean) => {
-      await qc.cancelQueries({ queryKey: ["photo", id] });
-      const previous = qc.getQueryData<any>(["photo", id]);
-      qc.setQueryData<any>(["photo", id], (p: any) => (p ? { ...p, favorite: target } : p));
+    mutationFn: ({ pid, target }: { pid: number; target: boolean }) => api.setFlags(pid, { favorite: target }),
+    onMutate: async ({ pid, target }) => {
+      await qc.cancelQueries({ queryKey: ["photo", pid] });
+      const previous = qc.getQueryData<any>(["photo", pid]);
+      qc.setQueryData<any>(["photo", pid], (p: any) => (p ? { ...p, favorite: target } : p));
       return { previous };
     },
-    onError: (_err, _target, ctx) => {
-      if (ctx?.previous !== undefined) qc.setQueryData(["photo", id], ctx.previous);
+    onError: (_err, { pid }, ctx) => {
+      if (ctx?.previous !== undefined) qc.setQueryData(["photo", pid], ctx.previous);
     },
-    onSettled: () => {
-      qc.invalidateQueries({ queryKey: ["photo", id] });
-      qc.invalidateQueries({ queryKey: ["photos"] });
+    onSettled: (_r, _e, { pid }) => {
+      qc.invalidateQueries({ queryKey: ["photo", pid] });
+      invalidateGrids(qc);
     },
   });
   const toggleFavorite = () => {
     const known = qc.getQueryData<any>(["photo", id])?.favorite ?? photo?.favorite;
-    favorite.mutate(!known);
+    favorite.mutate({ pid: id, target: !known });
   };
   const rate = useMutation({
-    mutationFn: (rating: number) => api.rate([id], rating),
-    onSuccess: () => {
-      qc.invalidateQueries({ queryKey: ["photo", id] });
-      qc.invalidateQueries({ queryKey: ["photos"] });
+    mutationFn: ({ pid, rating }: { pid: number; rating: number }) => api.rate([pid], rating),
+    onSuccess: (_r, { pid }) => {
+      qc.invalidateQueries({ queryKey: ["photo", pid] });
+      invalidateGrids(qc);
     },
   });
   const rotate = useMutation({
-    mutationFn: (deg: number) => api.rotate([id], deg),
-    onSuccess: () => {
-      qc.invalidateQueries({ queryKey: ["photo", id] });
-      qc.invalidateQueries({ queryKey: ["photos"] });
+    mutationFn: ({ pid, deg }: { pid: number; deg: number }) => api.rotate([pid], deg),
+    onSuccess: (_r, { pid }) => {
+      qc.invalidateQueries({ queryKey: ["photo", pid] });
+      invalidateGrids(qc);
     },
   });
   const hide = useMutation({
-    mutationFn: () => api.setFlags(id, { hidden: true }),
+    mutationFn: (pid: number) => api.setFlags(pid, { hidden: true }),
     onSuccess: () => {
-      qc.invalidateQueries({ queryKey: ["photos"] });
+      invalidateGrids(qc);
       go(1);
     },
   });
@@ -255,7 +262,7 @@ export function PhotoViewer({ ids, index, onIndex, onClose }: Props) {
               <Trash2 size={18} />
             </button>
           )}
-          {photo && <StarRating value={photo.rating} onChange={(r) => rate.mutate(r)} size={16} />}
+          {photo && <StarRating value={photo.rating} onChange={(r) => rate.mutate({ pid: id, rating: r })} size={16} />}
           <button className={`btn btn-quiet btn-icon${photo?.favorite ? " is-on" : ""}`}
             onClick={toggleFavorite} title="Favourite (F)" aria-label="Favourite">
             <Heart size={18} fill={photo?.favorite ? "currentColor" : "none"} />
@@ -274,7 +281,7 @@ export function PhotoViewer({ ids, index, onIndex, onClose }: Props) {
           {editing && photo && <Suspense fallback={null}><Editor photoId={id} video={photo.media_type === "video"} duration={photo.duration}
             onClose={() => setEditing(false)} /></Suspense>}
           {photo?.media_type === "image" && (
-            <button className="btn btn-quiet btn-icon" onClick={() => rotate.mutate(90)}
+            <button className="btn btn-quiet btn-icon" onClick={() => rotate.mutate({ pid: id, deg: 90 })}
               title="Rotate (R) — only in Memoria; the file is not changed" aria-label="Rotate">
               <RotateCw size={18} />
             </button>
@@ -283,7 +290,7 @@ export function PhotoViewer({ ids, index, onIndex, onClose }: Props) {
             aria-label="Add to album">
             <BookImage size={18} />
           </button>
-          <button className="btn btn-quiet btn-icon" onClick={() => hide.mutate()} title="Hide from library"
+          <button className="btn btn-quiet btn-icon" onClick={() => hide.mutate(id)} title="Hide from library"
             aria-label="Hide photo">
             <EyeOff size={18} />
           </button>
@@ -349,7 +356,7 @@ export function PhotoViewer({ ids, index, onIndex, onClose }: Props) {
                 src={showHi ? hiSrc : loSrc} alt={photo?.filename ?? ""}
                 className={`viewer-img${showHi ? "" : " is-lo"}`} draggable={false} fetchPriority="high"
                 // the thumbnail is small: stretch it to where the full image will sit, so nothing jumps
-                style={!showHi && aspect ? { width: `min(100%, calc((100vh - 92px) * ${aspect.toFixed(4)}))`, height: "auto" } : undefined} />
+                style={!showHi && aspect ? { width: `min(100%, calc((100dvh - 92px) * ${aspect.toFixed(4)}))`, height: "auto" } : undefined} />
             )}
             {playingLive && (
               <video key={`live-${id}-${liveNoDirect === id ? "t" : "d"}`}
@@ -402,10 +409,14 @@ export function PhotoViewer({ ids, index, onIndex, onClose }: Props) {
         </div>
 
         {picker && <AlbumPicker photoIds={[id]} onClose={() => setPicker(false)} />}
-        {showInfo && photo && <InfoPanel photo={photo} similar={similar?.photos ?? []} onOpenSimilar={(sid) => {
+        {/* Keyed by photo: its dialogs and typed text belong to the photo they were opened on. */}
+        {showInfo && photo && <InfoPanel key={photo.id} photo={photo} similar={similar?.photos ?? []} onOpenSimilar={(sid) => {
           const pos = ids.indexOf(sid);
           if (pos >= 0) onIndex(pos);
-          else onIndex(index);
+          else {      // not in this page's list (most are not, on a person, event or album page): browse the similar ones
+            const list = (similar?.photos ?? []).map((s: { id: number }) => s.id);
+            viewer.open(list, Math.max(0, list.indexOf(sid)));
+          }
         }} />}
       </div>
     </div>
@@ -704,7 +715,7 @@ function StackStrip({ photoId, stack }: { photoId: number; stack: { id: number; 
   const qc = useQueryClient();
   const viewer = useViewer();
   const refresh = () => {
-    qc.invalidateQueries({ queryKey: ["photos"] });
+    invalidateGrids(qc);
     stack.members.forEach((m) => qc.invalidateQueries({ queryKey: ["photo", m] }));
   };
   const cover = useMutation({ mutationFn: () => api.stackCover(stack.id, photoId), onSuccess: refresh });

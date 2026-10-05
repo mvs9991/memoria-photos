@@ -102,7 +102,7 @@ export default function PersonDetail() {
               <input autoFocus className="field" value={name} placeholder="Name this person"
                 onChange={(e) => setName(e.target.value)} aria-label="Person name" />
               <button className="btn btn-primary" type="submit"><Check size={15} /> Save</button>
-              <button className="btn btn-quiet" type="button" onClick={() => setRenaming(false)}>
+              <button className="btn btn-quiet" type="button" onClick={() => setRenaming(false)} aria-label="Cancel renaming">
                 <X size={15} />
               </button>
             </form>

@@ -125,6 +125,10 @@ def guard_locked(row) -> None:
     if ("private_to" in keys and row["private_to"] is not None and row["private_to"] != current_user_id()) \
             or ("status" in keys and row["status"] == "private" and "private_to" not in keys):
         raise HTTPException(404, "photo not found")
+    # The Trash is the owner's: a photo in it is gone for everyone else (its thumbnail, original and
+    # download stayed open to family and guests).
+    if "status" in keys and row["status"] == "trashed" and current_role() != "owner":
+        raise HTTPException(404, "photo not found")
     if locked or ("private_to" in keys and row["private_to"] is not None):
         # Shown, but never kept: not by the browser, not by the phone's offline copy.
         notes = _response_notes.get()
@@ -136,3 +140,35 @@ def current_user_id() -> int | None:
     """The signed-in account's id, or None for a library without accounts."""
     u = _current_user.get()
     return int(u["id"]) if u else None
+
+
+def shown_path(path) -> str:
+    """A server path as this caller may see it: whole for an owner, only its last part for anyone else
+    (Settings already blanked the folders for them, but stats, photo details and the folder browser did not)."""
+    if path is None:
+        return ""
+    if current_role() == "owner":
+        return str(path)
+    import os
+
+    return os.path.basename(str(path).rstrip("/\\")) or ""
+
+
+def visible_ids(conn: sqlite3.Connection, photo_ids) -> list[int]:
+    """The ids, of those sent, that this caller may act on: the library's photos (hidden ones too, which the
+    Hidden view shows), a locked one only for an owner with the Locked folder open, a private one only for
+    its account. Bulk routes took any id they were sent: a family member could rotate, rate, tag, hide or
+    archive a locked or someone's private photo, and the counts they returned confirmed it existed."""
+    from .. import db
+
+    allow_locked = int(locked_open() and current_role() == "owner")
+    me = current_user_id()
+    out: list[int] = []
+    for chunk, marks in db.chunks(list(dict.fromkeys(int(i) for i in photo_ids))):
+        out += [int(r[0]) for r in conn.execute(
+            f"SELECT id FROM photos WHERE id IN ({marks}) AND ("
+            "(status IN ('ok', 'missing') AND locked = 0 AND private_to IS NULL)"
+            " OR (status = 'locked' AND ? = 1)"
+            " OR (private_to IS NOT NULL AND private_to = ?))", (*chunk, allow_locked, me if me is not None else -1))]
+    return out
+

@@ -13,6 +13,7 @@ export default function Timeline() {
   const { data, isLoading, isError, error, refetch } = useQuery({
     queryKey: ["timeline", person],
     queryFn: () => api.timeline(person ? { person } : {}),
+    placeholderData: (previous) => previous,     // switching person keeps the page (and its picker) up
   });
   const people = useQuery({ queryKey: ["people", { sort: "photos" }], queryFn: () => api.people({ sort: "photos" }) });
 
@@ -29,7 +30,7 @@ export default function Timeline() {
   if (isError) return <ErrorState error={error} onRetry={() => refetch()} />;
   if (isLoading) return <Spinner full label="Building timeline" />;
   const years = data?.years ?? [];
-  if (!years.length) {
+  if (!years.length && !person) {
     return <EmptyState icon={<CalendarRange size={26} />} title="Nothing on the timeline yet"
       hint="Index some photos with dates to see them here." />;
   }
@@ -51,6 +52,7 @@ export default function Timeline() {
         </select>
       </div>
 
+      {!years.length && <p className="dim">No dated photos of this person.</p>}
       <div className="timeline">
         {years.map((y: any) => (
           <section key={y.year} className="tl-year">
@@ -63,7 +65,7 @@ export default function Timeline() {
                 const evs = eventsByMonth.get(`${y.year}-${m.month}`) ?? [];
                 return (
                   <div key={m.month} className="tl-month">
-                    <Link to={`/photos?year=${y.year}&month=${m.month}`} className="tl-month-cover"
+                    <Link to={`/photos?year=${y.year}&month=${m.month}${person ? `&person=${person}` : ""}`} className="tl-month-cover"
                       aria-label={`${monthName(m.month)} ${y.year} — ${m.count.toLocaleString()} photos`}>
                       {m.cover_photo_id ? <img src={thumbUrl(m.cover_photo_id, "sm")} alt="" loading="lazy" />
                         : <div className="event-card-blank" />}

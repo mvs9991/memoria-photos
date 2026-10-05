@@ -66,6 +66,10 @@ def export_location():
     ctx = get_state().ctx
     base = default_export_dir(ctx)
     suggested = base / time.strftime("%Y-%m-%d %H%M")
+    from .deps import current_role
+
+    if current_role() != "owner":       # only an owner exports to a folder; the server's folders are theirs
+        return {"base": "", "suggested": "", "configured": False}
     return {"base": str(base), "suggested": str(suggested),
             "configured": bool((getattr(ctx.settings, "export_dir", "") or "").strip())}
 

@@ -237,6 +237,10 @@ def update_person_stats(conn: sqlite3.Connection, person_ids: list[int] | None =
     # this after a hide precisely so the counts follow, but it only ever filtered on status, so
     # hiding a photo changed nobody's count: 5 people were listed with no visible photo and 5 used a
     # hidden photo's face as their cover on a real library.
+    if person_ids and len(person_ids) > 900:     # SQLite binds at most ~32k values in one statement
+        for chunk, _ in db.chunks(person_ids):
+            update_person_stats(conn, chunk)
+        return
     where = ""
     args: tuple = ()
     if person_ids:
@@ -445,12 +449,14 @@ def assign_faces(conn: sqlite3.Connection, face_ids: list[int], person_id: int |
 
 
 def reject_faces(conn: sqlite3.Connection, face_ids: list[int], person_id: int) -> dict:
+    if not face_ids:
+        return {"rejected": 0}
     now = time.time()
     conn.executemany("INSERT OR IGNORE INTO face_rejections(face_id, person_id, created_at) VALUES (?,?,?)",
                      [(int(f), int(person_id), now) for f in face_ids])
-    q = ",".join("?" * len(face_ids))
-    conn.execute(f"UPDATE faces SET person_id=NULL, assign_source=NULL, assign_confidence=NULL "
-                 f"WHERE id IN ({q}) AND person_id = ?", (*face_ids, person_id))
+    for chunk, q in db.chunks(face_ids):
+        conn.execute(f"UPDATE faces SET person_id=NULL, assign_source=NULL, assign_confidence=NULL "
+                     f"WHERE id IN ({q}) AND person_id = ?", (*chunk, person_id))
     db.audit(conn, "faces_rejected", "person", person_id, {"faces": face_ids[:2000]})
     update_person_stats(conn)
     db.bump_generation(conn, "people")

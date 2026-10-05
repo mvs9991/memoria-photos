@@ -91,7 +91,10 @@ def test_uploads_are_filed_under_who_sent_them(ctx, library, app, family):
     Image.new("RGB", (64, 48), (1, 2, 3)).save(buf, "JPEG")
     priya = login(app, "Priya", "priya-pass")
     r = priya.post("/api/upload", files=[("files", ("a.jpg", buf.getvalue(), "image/jpeg"))]).json()["results"][0]
-    assert r["status"] == "added" and "\\Priya\\" in r["path"] or "/Priya/" in r["path"]
+    assert r["status"] == "added"
+    assert "path" not in r                    # the server's folders are not shown to a family member
+    stored = ctx.connect().execute("SELECT path FROM uploads WHERE who = 'Priya'").fetchone()[0]
+    assert "\\Priya\\" in stored or "/Priya/" in stored
 
 
 def test_a_password_change_ends_only_that_accounts_sessions(ctx, library, app, family):

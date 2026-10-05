@@ -13,6 +13,8 @@ import { thumbUrl, videoUrl } from "../lib/api";
 export interface SlideItem {
   id: number;
   video?: boolean;
+  /** the user's turn: part of the image URL, so a photo rotated since it was cached shows turned */
+  rot?: number;
 }
 
 const SPEEDS = [3, 5, 8, 15];
@@ -46,10 +48,16 @@ export function Slideshow({ items, start = 0, onClose, frame = false, onExhauste
   const [now, setNow] = useState(() => new Date());
   const hideTimer = useRef<number | undefined>(undefined);
 
+  // Keyed on what the list holds, not on the array: pages pass `items={list.map(...)}`, a new array on every
+  // render of theirs, and any re-render (a job finishing, stats refreshing) reshuffled a running show.
+  const itemsRef = useRef(items);
+  itemsRef.current = items;
+  const signature = items.map((i) => `${i.id}:${i.rot ?? 0}`).join(",");
   useEffect(() => {
-    setOrder(shuffle ? shuffled(items) : items);
+    const list = itemsRef.current;
+    setOrder(shuffle ? shuffled(list) : list);
     if (frame) setIndex(0);
-  }, [items, shuffle, frame]);
+  }, [signature, shuffle, frame]);
 
   const current = order[index];
 
@@ -68,12 +76,12 @@ export function Slideshow({ items, start = 0, onClose, frame = false, onExhauste
     if (current.video) show();
     else {
       const img = new Image();
-      img.src = thumbUrl(current.id, "l");
+      img.src = thumbUrl(current.id, "l", current.rot);
       img.decode().then(show, show);
     }
     // Warm the one after, so the next transition is instant.
     const after = order[index + 1];
-    if (after && !after.video) new Image().src = thumbUrl(after.id, "l");
+    if (after && !after.video) new Image().src = thumbUrl(after.id, "l", after.rot);
     return () => { cancelled = true; };
     // eslint-disable-next-line react-hooks/exhaustive-deps
   }, [index, order]);
@@ -82,8 +90,10 @@ export function Slideshow({ items, start = 0, onClose, frame = false, onExhauste
     if (!order.length) return;
     const next = index + delta;
     if (next >= order.length) {
-      if (onExhausted) onExhausted();
-      else setIndex(0);
+      // Keep going round while a frame fetches its next batch: if the batch failed, or came back in the same
+      // order (so nothing re-rendered), waiting for it left the frame on its last slide for good.
+      onExhausted?.();
+      setIndex(0);
     } else setIndex((next + order.length) % order.length);
   }, [index, order.length, onExhausted]);
 
@@ -154,10 +164,10 @@ export function Slideshow({ items, start = 0, onClose, frame = false, onExhauste
           const on = n === slots.front;
           return it.video ? (
             <video key={`${n}-${it.id}`} className={`slide${on ? " on" : ""}`} src={videoUrl(it.id)}
-              poster={thumbUrl(it.id, "l")} autoPlay={on} muted playsInline
+              poster={thumbUrl(it.id, "l", it.rot)} autoPlay={on} muted playsInline
               onEnded={() => on && playing && go(1)} />
           ) : (
-            <img key={`${n}-${it.id}`} className={`slide slide-kb${on ? " on" : ""}`} src={thumbUrl(it.id, "l")}
+            <img key={`${n}-${it.id}`} className={`slide slide-kb${on ? " on" : ""}`} src={thumbUrl(it.id, "l", it.rot)}
               alt="" draggable={false} style={{ animationDuration: `${speed + 2}s` }} />
           );
         })}

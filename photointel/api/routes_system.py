@@ -6,6 +6,7 @@ import os
 import platform
 import shutil
 import sys
+import threading
 import time
 from pathlib import Path
 
@@ -303,29 +304,59 @@ _CACHE_BYTES_TTL = 60.0
 _cache_bytes_memo: dict = {}
 
 
+_cache_bytes_lock = threading.Lock()
+_cache_bytes_running: dict = {}
+
+
 def _dir_bytes(root) -> int:
-    """Size of a folder tree, tolerating files that vanish mid-walk (a cache clear, a thumbnail rewrite)."""
+    """Size of a folder tree, tolerating files that vanish mid-walk (a cache clear, a thumbnail rewrite).
+
+    With scandir: on Windows a directory listing already carries each file's size, so this reads no file. A
+    stat per file (os.walk + os.stat) took 152 s for one /api/health on the real library's hard drive."""
     total = 0
-    for dirpath, _dirs, names in os.walk(root, onerror=lambda _e: None):
-        for name in names:
-            try:
-                total += os.stat(os.path.join(dirpath, name)).st_size
-            except OSError:
-                pass
+    stack = [str(root)]
+    while stack:
+        try:
+            with os.scandir(stack.pop()) as it:
+                for entry in it:
+                    try:
+                        if entry.is_dir(follow_symlinks=False):
+                            stack.append(entry.path)
+                        else:
+                            total += entry.stat(follow_symlinks=False).st_size
+                    except OSError:
+                        pass
+        except OSError:
+            pass
     return total
 
 
-def _cache_bytes(folders) -> int:
-    """Walking every thumbnail of a large library took 11 s on each /api/health call (and a file deleted
-    during the walk made it a 500). The figure is only shown on Settings, so a minute-old one is fine."""
+def _cache_bytes(folders, wait: float = 2.0) -> int | None:
+    """The cache's size, measured in the background and remembered for a minute. A request waits at most
+    `wait` seconds for a fresh figure, then gets the last one (None before the first is known): Settings asks
+    every 20 s, and each call used to walk the whole cache itself, one behind the other."""
     key = tuple(str(f) for f in folders)
     hit = _cache_bytes_memo.get(key)
-    now = time.monotonic()
-    if hit and now - hit[0] < _CACHE_BYTES_TTL:
+    if hit and time.monotonic() - hit[0] < _CACHE_BYTES_TTL:
         return hit[1]
-    value = sum(_dir_bytes(f) for f in folders if os.path.isdir(f))
-    _cache_bytes_memo[key] = (now, value)
-    return value
+    with _cache_bytes_lock:
+        done = _cache_bytes_running.get(key)
+        if done is None:
+            done = _cache_bytes_running[key] = threading.Event()
+
+            def measure() -> None:
+                try:
+                    value = sum(_dir_bytes(f) for f in folders if os.path.isdir(f))
+                    _cache_bytes_memo[key] = (time.monotonic(), value)
+                finally:
+                    with _cache_bytes_lock:
+                        _cache_bytes_running.pop(key, None)
+                    done.set()
+
+            threading.Thread(target=measure, name="cache-size", daemon=True).start()
+    done.wait(wait)
+    hit = _cache_bytes_memo.get(key)
+    return hit[1] if hit else None
 
 
 @router.get("/health")

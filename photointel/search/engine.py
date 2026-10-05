@@ -478,10 +478,14 @@ class SearchEngine:
     # ------------------------------------------------------------------ fallbacks
     def _keyword_fallback(self, conn: sqlite3.Connection, query: str, t0: float) -> SearchResult:
         res = SearchResult(result_type="photos", query=query)
-        terms = " ".join(f'"{t}"' for t in query.split() if t.strip())
+        terms = " ".join('"' + t.replace('"', '""') + '"' for t in query.split() if t.strip())
         try:
+            # Only what may be shown: the index is rebuilt by post-processing, so a photo locked, made private,
+            # trashed or hidden since then still matched here and came back to anyone who searched.
             rows = conn.execute(
-                "SELECT rowid FROM photo_fts WHERE photo_fts MATCH ? ORDER BY rank LIMIT 500", (terms,)).fetchall()
+                "SELECT f.rowid FROM photo_fts f JOIN photos p ON p.id = f.rowid WHERE photo_fts MATCH ? "
+                "AND p.status = 'ok' AND p.hidden = 0 AND p.live_component = 0 ORDER BY f.rank LIMIT 500",
+                (terms,)).fetchall()
         except sqlite3.OperationalError:
             rows = []
         res.photo_ids = [int(r[0]) for r in rows]

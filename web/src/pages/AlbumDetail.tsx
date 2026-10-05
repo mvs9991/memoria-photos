@@ -67,7 +67,7 @@ export default function AlbumDetail() {
               <input className="field" autoFocus value={name} onChange={(e) => setName(e.target.value)}
                 maxLength={120} aria-label="Album name" />
               <button className="btn btn-primary" type="submit"><Check size={15} /> Save</button>
-              <button className="btn btn-quiet" type="button" onClick={() => setRenaming(false)}><X size={15} /></button>
+              <button className="btn btn-quiet" type="button" onClick={() => setRenaming(false)} aria-label="Cancel renaming"><X size={15} /></button>
             </form>
           ) : (
             <h1 className="display person-title">
@@ -116,7 +116,7 @@ export default function AlbumDetail() {
             gallery</button> — resized copies with an index.html that opens in any browser.</p>} />
       )}
       {dialog === "web" && <HtmlExportDialog albumId={albumId} albumName={data.name} onClose={() => setDialog(null)} />}
-      {dialog === "slideshow" && <Slideshow items={items.map((i) => ({ id: i.id, video: (i.flags & FLAG.video) > 0 }))}
+      {dialog === "slideshow" && <Slideshow items={items.map((i) => ({ id: i.id, video: (i.flags & FLAG.video) > 0, rot: i.rot }))}
         onClose={() => setDialog(null)} />}
 
       <SelectionBar {...sel.barProps}

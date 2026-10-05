@@ -261,7 +261,7 @@ export function PhotoGrid({
     const scroller = scrollerRef.current;
     const host = hostRef.current;
     if (!scroller || !host) return;
-    scroller.scrollTo({ top: host.offsetTop + ratio * totalHeight, behavior: "auto" });
+    scroller.scrollTo({ top: host.offsetTop + ratio * totalHeight, behavior: "instant" as ScrollBehavior });   // "auto" means the CSS value: smooth, one animation per move
   }, [totalHeight]);
 
   if (!items.length) {

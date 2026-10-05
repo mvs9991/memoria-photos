@@ -108,6 +108,9 @@
   gap: 14px;
   height: var(--topbar-h);
   padding: 0 var(--gutter);
+  /* under the status bar and notch in the home-screen app (viewport-fit=cover); 0 everywhere else */
+  height: calc(var(--topbar-h) + env(safe-area-inset-top));
+  padding-top: env(safe-area-inset-top);
   border-bottom: 1px solid var(--hairline);
   background: color-mix(in srgb, var(--bg) 82%, transparent);
   backdrop-filter: saturate(140%) blur(14px);

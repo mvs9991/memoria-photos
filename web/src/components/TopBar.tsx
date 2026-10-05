@@ -3,7 +3,7 @@ import { useNavigate } from "react-router-dom";
 import { useQuery } from "@tanstack/react-query";
 import { Loader2, Moon, Search, Sun, X } from "lucide-react";
 import { api, faceUrl, thumbUrl } from "../lib/api";
-import { useTheme } from "../lib/hooks";
+import { useDebounced, useTheme } from "../lib/hooks";
 import { JobIndicator } from "./JobIndicator";
 
 const EXAMPLES = [
@@ -20,11 +20,15 @@ export function TopBar() {
   const inputRef = useRef<HTMLInputElement>(null);
   const { theme, toggle } = useTheme();
 
+  // One request when typing pauses, the last list kept on screen meanwhile (it blanked on every key), and
+  // none past the 80 characters the server takes (a longer search got a 422 for every key typed).
+  const term = useDebounced(q, 150);
   const { data, isFetching } = useQuery({
-    queryKey: ["suggestions", q],
-    queryFn: () => api.suggestions(q),
-    enabled: open,
+    queryKey: ["suggestions", term],
+    queryFn: () => api.suggestions(term),
+    enabled: open && term.length <= 80,
     staleTime: 15_000,
+    placeholderData: (previous) => previous,
   });
 
   useEffect(() => {

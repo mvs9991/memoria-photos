@@ -10,7 +10,7 @@ from pydantic import BaseModel
 from .. import db
 from ..engine import albums as albums_mod
 from ..engine import insights as insights_mod
-from .deps import get_state
+from .deps import get_state, shown_path
 from .routes_library import COLLECTIONS, photo_filter_sql
 
 router = APIRouter()
@@ -28,23 +28,24 @@ def collections():
     # Every collection shares the same base filter and differs only by its own clause,
     # so all the counts come from one pass instead of one scan each. At 250k photos
     # that was 14 scans and about five seconds.
+    # The covers come from the same pass: each collection's best photo (rating, then quality, then lowest id).
+    # A cover query per collection after the counts doubled the time (about a second more on the real library).
     base, base_args = photo_filter_sql(conn, collection=None)
-    cases = ", ".join(f"SUM(CASE WHEN {spec['where']} THEN 1 ELSE 0 END) AS c_{key}"
-                      for key, spec in COLLECTIONS.items())
-    counts = conn.execute(f"SELECT {cases} FROM photos p WHERE {base}", base_args).fetchone()
+    keys = list(COLLECTIONS)
+    flags = ", ".join(f"CASE WHEN {COLLECTIONS[key]['where']} THEN 1 ELSE 0 END" for key in keys)
+    counts = dict.fromkeys(keys, 0)
+    best: dict[str, tuple] = {}
+    for row in conn.execute(f"SELECT p.id, p.rating, COALESCE(p.quality_score, 0), {flags} FROM photos p "
+                            f"WHERE {base}", base_args):
+        rank = (row[1] or 0, row[2], -row[0])
+        for n_key, key in enumerate(keys):
+            if row[3 + n_key]:
+                counts[key] += 1
+                if key not in best or rank > best[key]:
+                    best[key] = rank
     for key, spec in COLLECTIONS.items():
-        n = counts[f"c_{key}"] or 0
-        cover = None
-        if n:
-            # Only look for a cover when there is something to cover. Skipping the
-            # empty ones avoids a full scan that was always going to find nothing.
-            where, args = photo_filter_sql(conn, collection=key)
-            row = conn.execute(
-                f"SELECT p.id FROM photos p WHERE {where} "
-                f"ORDER BY p.rating DESC, COALESCE(p.quality_score, 0) DESC LIMIT 1", args).fetchone()
-            cover = row["id"] if row else None
-        out.append({"key": key, "title": spec["title"], "group": spec["group"], "count": n,
-                    "cover_photo_id": cover})
+        out.append({"key": key, "title": spec["title"], "group": spec["group"], "count": counts[key],
+                    "cover_photo_id": -best[key][2] if key in best else None})
     recent = conn.execute("SELECT id FROM photos WHERE status = 'ok' AND hidden = 0 AND live_component = 0 "
                           "ORDER BY first_seen_at DESC, id DESC LIMIT 1").fetchone()
     dups = conn.execute("SELECT COUNT(*) FROM dup_groups WHERE kind != 'similar' AND review_status = 'pending'").fetchone()[0]
@@ -63,7 +64,7 @@ def browse_folders(root_id: int | None = None, path: str = ""):
                 f"SELECT COUNT(*), (SELECT id FROM photos WHERE root_id = ? AND {vis} "
                 f"ORDER BY COALESCE(quality_score, 0) DESC LIMIT 1) FROM photos WHERE root_id = ? AND {vis}",
                 (r["id"], r["id"])).fetchone()
-            roots.append({"root_id": r["id"], "name": r["path"], "path": "", "count": n, "cover_photo_id": cover})
+            roots.append({"root_id": r["id"], "name": shown_path(r["path"]), "path": "", "count": n, "cover_photo_id": cover})
         return {"root_id": None, "path": "", "folders": roots, "direct_count": 0}
     prefix = path.strip("/")
     rows = conn.execute(

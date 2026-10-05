@@ -1,6 +1,16 @@
 import { useCallback, useEffect, useRef, useState } from "react";
-import { useQuery } from "@tanstack/react-query";
+import { type QueryClient, useQuery } from "@tanstack/react-query";
 import { api, type Role } from "./api";
+
+/** Every query that draws photos (with their rotation, stars, favourite or visibility). A change made in the
+ * viewer or on a selection refreshed only the photo list, so an album, event, search, place or person grid kept
+ * showing the old rotation and stars, or a photo just hidden, until the page was opened again. */
+const GRID_KEYS = ["photos", "album", "albums", "event", "events", "search", "place", "person", "locked-photos",
+  "private-photos", "memories", "timeline", "map-points", "collections", "stats"];
+
+export function invalidateGrids(qc: QueryClient) {
+  for (const key of GRID_KEYS) qc.invalidateQueries({ queryKey: [key] });
+}
 
 /** The signed-in person's role; "owner" for a library without accounts. */
 export function useRole(): Role {

@@ -17,7 +17,7 @@ import { PhotoGrid } from "../components/PhotoGrid";
 import { EmptyState, ErrorState, Spinner } from "../components/States";
 import { SelectionBar, SelectToggle, useGridSelect } from "../components/SelectionBar";
 import { useViewer } from "../components/ViewerContext";
-import { useTitle } from "../lib/hooks";
+import { invalidateGrids, useTitle } from "../lib/hooks";
 
 const ICONS: Record<string, React.ComponentType<{ size?: number }>> = {
   videos: Film, live: Sparkle, panoramas: GalleryHorizontal, selfies: ScanFace, raw: Camera, stacks: Layers,
@@ -123,7 +123,7 @@ export function CollectionDetail() {
     mutationFn: (ids: number[]) => api.hide(ids, !hiddenView),
     onSuccess: () => {
       sel.clear();
-      qc.invalidateQueries({ queryKey: ["photos"] });
+      invalidateGrids(qc);
       qc.invalidateQueries({ queryKey: ["collections"] });
       qc.invalidateQueries({ queryKey: ["stats"] });
     },

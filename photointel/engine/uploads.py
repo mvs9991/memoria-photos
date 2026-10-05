@@ -105,9 +105,11 @@ def _claim(dest_dir: Path, name: str) -> Path:
 
 
 def save_upload(ctx, conn: sqlite3.Connection, stream: BinaryIO, filename: str, who: str = "Phone",
-                subfolder: str | None = None, album_id: int | None = None) -> Saved:
+                subfolder: str | None = None, album_id: int | None = None, sees_hidden: bool = True) -> Saved:
     """Store one uploaded file. `who` names the top folder (a user, or "Shared" for a
-    shared album's visitors); with `album_id` the photo also goes into that album."""
+    shared album's visitors); with `album_id` the photo also goes into that album. Without
+    `sees_hidden` (anyone but an owner) a locked or trashed copy is not "already there": saying so
+    revealed it, and swallowed the upload."""
     name = _safe(Path(filename or "upload").name)
     ext = Path(name).suffix.lower()
     if ext not in SUPPORTED_EXTENSIONS:
@@ -139,7 +141,8 @@ def save_upload(ctx, conn: sqlite3.Connection, stream: BinaryIO, filename: str, 
         # must arrive (and nothing about the other one is revealed).
         dup = conn.execute("SELECT id, status FROM photos WHERE sha256 = ? AND status != 'deleted' "
                            "AND (private_to IS NULL OR private_to = (SELECT id FROM users WHERE username = ?)) "
-                           "ORDER BY status = 'ok' DESC LIMIT 1", (digest, who)).fetchone()
+                           + ("" if sees_hidden else "AND status NOT IN ('locked', 'trashed') AND locked = 0 ")
+                           + "ORDER BY status = 'ok' DESC LIMIT 1", (digest, who)).fetchone()
         if dup is not None:
             where = "in the Trash" if dup["status"] == "trashed" else "already in your library"
             if album_id is not None and dup["status"] == "ok":        # no second copy, but it joins the album

@@ -24,8 +24,8 @@ def set_date(conn: sqlite3.Connection, photo_ids: list[int], taken_local: str | 
     if (taken_local is None) == (shift_seconds is None):
         raise ValueError("give exactly one of taken_local or shift_seconds")
     now = time.time()
-    rows = conn.execute(
-        f"SELECT id, taken_ts FROM photos WHERE id IN ({','.join('?' * len(photo_ids))})", photo_ids).fetchall()
+    rows = [r for chunk, q in db.chunks(photo_ids)      # a selection can be bigger than SQLite binds at once
+            for r in conn.execute(f"SELECT id, taken_ts FROM photos WHERE id IN ({q})", chunk).fetchall()]
     for r in rows:
         if taken_local is not None:
             dt = parse_local(taken_local)
@@ -83,14 +83,15 @@ def clear(conn: sqlite3.Connection, photo_ids: list[int]) -> dict:
 
 def apply_overrides(conn: sqlite3.Connection, photo_ids: list[int] | None = None) -> int:
     sql = "SELECT photo_id, taken_local, lat, lon FROM photo_overrides"
-    args: list = []
-    if photo_ids is not None:
+    if photo_ids is None:
+        overrides = conn.execute(sql).fetchall()
+    else:
         if not photo_ids:
             return 0
-        sql += f" WHERE photo_id IN ({','.join('?' * len(photo_ids))})"
-        args = list(photo_ids)
+        overrides = [o for chunk, q in db.chunks(photo_ids)
+                     for o in conn.execute(f"{sql} WHERE photo_id IN ({q})", chunk).fetchall()]
     n = 0
-    for o in conn.execute(sql, args).fetchall():
+    for o in overrides:
         if o["taken_local"]:
             dt = datetime.strptime(o["taken_local"], FMT)
             conn.execute("UPDATE photos SET taken_ts = ?, taken_local = ?, date_source = 'user', "

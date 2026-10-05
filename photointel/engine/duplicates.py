@@ -67,12 +67,18 @@ class _UnionFind:
             self.parent[max(ra, rb)] = min(ra, rb)
 
 
+# Bits set in each byte value. Built once: it was rebuilt on every call, and with one call per candidate pair
+# that was 110 of the 257 seconds duplicate detection took on the real library.
+_BYTE_BITS = np.array([bin(i).count("1") for i in range(256)], dtype=np.uint8)
+
+
 def _popcount64(x: np.ndarray) -> np.ndarray:
-    table = np.array([bin(i).count("1") for i in range(256)], dtype=np.uint8)
-    return table[x.view(np.uint8).reshape(-1, 8)].sum(axis=1).astype(np.int16)
+    x = np.ascontiguousarray(x, dtype=np.uint64)
+    return _BYTE_BITS[x.view(np.uint8).reshape(-1, 8)].sum(axis=1).astype(np.int16).reshape(x.shape)
 
 
 def _hamming(a: np.ndarray, b: np.ndarray) -> np.ndarray:
+    """Bitwise distance, elementwise (and broadcast) over arrays of 64-bit hashes."""
     return _popcount64(np.bitwise_xor(a.astype(np.uint64), b.astype(np.uint64)))
 
 
@@ -150,12 +156,12 @@ def find_duplicates(ctx, conn: sqlite3.Connection, params: DupParams | None = No
                 # Degenerate hash (flat/black images): comparing all pairs would explode.
                 log.debug("Skipping oversized pHash bucket (%d members)", len(group))
                 continue
-            for a in range(len(group)):
-                for b in range(a + 1, len(group)):
-                    i, j = int(group[a]), int(group[b])
-                    if _hamming(phash[i:i + 1], phash[j:j + 1])[0] <= p.phash_likely:
-                        add_pair(i, j)
-                        band_hits += 1
+            # Every pair in the bucket at once (a bucket holds at most max_bucket photos).
+            a_idx, b_idx = np.triu_indices(len(group), 1)
+            close = _hamming(phash[group[a_idx]], phash[group[b_idx]]) <= p.phash_likely
+            for i, j in zip(group[a_idx[close]].tolist(), group[b_idx[close]].tolist()):
+                add_pair(i, j)
+            band_hits += int(close.sum())
 
     # ---- semantic neighbours (crops, filters, screenshots of photos)
     model_id = db.active_model_id(conn, "semantic")
@@ -184,9 +190,14 @@ def find_duplicates(ctx, conn: sqlite3.Connection, params: DupParams | None = No
 
     # ---- classify pairs
     classified: list[tuple[int, int, str, float, int]] = []
-    for (i, j) in pairs:
-        ph = int(_hamming(phash[i:i + 1], phash[j:j + 1])[0]) if has_hash[i] and has_hash[j] else 64
-        dh = int(_hamming(dhash[i:i + 1], dhash[j:j + 1])[0]) if has_hash[i] and has_hash[j] else 64
+    pair_list = list(pairs)
+    if pair_list:
+        pi_, pj_ = (np.array(c, dtype=np.int64) for c in zip(*pair_list))
+        both = has_hash[pi_] & has_hash[pj_]
+        ph_all = np.where(both, _hamming(phash[pi_], phash[pj_]), 64).tolist()
+        dh_all = np.where(both, _hamming(dhash[pi_], dhash[pj_]), 64).tolist()
+    for n_pair, (i, j) in enumerate(pair_list):
+        ph, dh = int(ph_all[n_pair]), int(dh_all[n_pair])
         sem = sem_sim.get((i, j), None)
         both_synthetic = (source_kind[i] in SYNTHETIC_KINDS and source_kind[j] in SYNTHETIC_KINDS)
         kind = None
@@ -231,14 +242,19 @@ def find_duplicates(ctx, conn: sqlite3.Connection, params: DupParams | None = No
 
     # Keep only the strongest kind for each set of photos: a group is emitted at kind K
     # if it is not already fully contained in a stronger group.
+    # Only the groups that hold a set's first member can contain it, so that is all that is checked: comparing
+    # each group with every one emitted before it took 43 of 95 seconds on the real library (10,872 groups).
     emitted: list[tuple[str, list[int]]] = []
     covered: list[set[int]] = []
+    covering: dict[int, list[int]] = defaultdict(list)
     for kind in ("exact", "near", "likely", "similar"):
         for members in groups[kind]:
             ms = set(members)
-            if any(ms <= c for c in covered):
+            if any(ms <= covered[c] for c in covering[members[0]]):
                 continue
             emitted.append((kind, members))
+            for m in members:
+                covering[m].append(len(covered))
             covered.append(ms)
 
     pair_kind = {(i, j): (k, sem, ph) for (i, j, k, sem, ph) in classified}

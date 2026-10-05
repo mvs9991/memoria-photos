@@ -32,10 +32,12 @@ export default function Photos() {
   const year = Number(params.get("year")) || undefined;
   const month = year ? Number(params.get("month")) || undefined : undefined;
   const period = year ? (month ? `${monthName(month)} ${year}` : String(year)) : "";
+  // Set by the Timeline's month links while it is filtered to one person.
+  const person = Number(params.get("person")) || undefined;
 
   const query = useQuery({
-    queryKey: ["photos", { favorite, source, order, year, month, media, unfold, minRating }],
-    queryFn: () => api.photos({ favorite, source: source || undefined, order, year, month, media: media || undefined,
+    queryKey: ["photos", { favorite, source, order, year, month, media, unfold, minRating, person }],
+    queryFn: () => api.photos({ favorite, source: source || undefined, order, year, month, media: media || undefined, person,
       collapse_stacks: !unfold, min_rating: minRating || undefined, archived: "exclude",
       include_screenshots: source ? true : undefined }),
   });
@@ -82,6 +84,12 @@ export default function Photos() {
               {period} <X size={12} />
             </button>
           )}
+          {person && (
+            <button className="chip chip-button chip-accent" style={{ marginTop: 8, marginLeft: period ? 6 : 0 }}
+              onClick={() => setParam("person", null)} title="Show everyone">
+              One person <X size={12} />
+            </button>
+          )}
         </div>
         <div className="toolbar">
           <div className="segmented" role="group" aria-label="Sort order">
@@ -98,7 +106,7 @@ export default function Photos() {
             <button className={density === "large" ? "on" : ""} onClick={() => setDensity("large")}
               title="Large"><Images size={15} /></button>
           </div>
-          {year && (
+          {year && !person && (
             <button className="btn btn-ghost btn-sm" onClick={() => setExporting(true)} disabled={!items.length}
               title={`Copy every photo from ${period} somewhere`}>
               <FolderOutput size={14} /> Export {period}
@@ -155,7 +163,7 @@ export default function Photos() {
       )}
 
       <SelectionBar {...sel.barProps} />
-      {slideshow && <Slideshow items={items.map((i) => ({ id: i.id, video: (i.flags & FLAG.video) > 0 }))}
+      {slideshow && <Slideshow items={items.map((i) => ({ id: i.id, video: (i.flags & FLAG.video) > 0, rot: i.rot }))}
         onClose={() => setSlideshow(false)} />}
 
       {query.isLoading ? (

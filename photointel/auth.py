@@ -135,7 +135,7 @@ def create_share(conn: sqlite3.Connection, album_id: int, allow_download: bool =
 
 
 def resolve_share(conn: sqlite3.Connection, token: str):
-    row = conn.execute("SELECT s.*, a.name, a.kind, a.query, a.hidden FROM share_links s "
+    row = conn.execute("SELECT s.*, a.name, a.kind, a.query, a.hidden, a.owner_user_id FROM share_links s "
                        "JOIN albums a ON a.id = s.album_id WHERE s.token = ?", (token,)).fetchone()
     if row is None or row["hidden"]:
         return None

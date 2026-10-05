@@ -96,8 +96,8 @@ def dismissed(conn: sqlite3.Connection) -> set[str]:
 
 def build_stacks(conn: sqlite3.Connection, enabled: bool = True) -> dict:
     t0 = time.time()
-    conn.execute("UPDATE photos SET stack_id = NULL, stack_hidden = 0 WHERE stack_id IS NOT NULL")
     if not enabled:
+        conn.execute("UPDATE photos SET stack_id = NULL, stack_hidden = 0 WHERE stack_id IS NOT NULL")
         conn.commit()
         return {"stacks": 0, "status": "disabled"}
     rows = conn.execute(
@@ -151,6 +151,7 @@ def build_stacks(conn: sqlite3.Connection, enabled: bool = True) -> dict:
     close_run()
 
     made = 0
+    wanted: dict[int, tuple[int, int]] = {}
     for kind, members in stacks:
         ids = [m["id"] for m in members]
         if _key(ids) in skip:
@@ -162,9 +163,17 @@ def build_stacks(conn: sqlite3.Connection, enabled: bool = True) -> dict:
             cover = members[0]
         else:
             cover = max(members, key=lambda m: (m["rating"] or 0, m["quality_score"] or 0, -m["id"]))
-        conn.executemany("UPDATE photos SET stack_id = ?, stack_hidden = ? WHERE id = ?",
-                         [(cover["id"], 0 if m["id"] == cover["id"] else 1, m["id"]) for m in members])
+        for m in members:
+            wanted[int(m["id"])] = (int(cover["id"]), 0 if m["id"] == cover["id"] else 1)
         made += 1
+    # Only photos whose stack changed are written (clearing all ~10k stacked photos on the real library and
+    # setting them again rewrote them on every hourly run).
+    current = {int(r[0]): (int(r[1]), int(r[2])) for r in conn.execute(
+        "SELECT id, stack_id, stack_hidden FROM photos WHERE stack_id IS NOT NULL")}
+    conn.executemany("UPDATE photos SET stack_id = NULL, stack_hidden = 0 WHERE id = ?",
+                     [(pid,) for pid in current if pid not in wanted])
+    conn.executemany("UPDATE photos SET stack_id = ?, stack_hidden = ? WHERE id = ?",
+                     [(sid, hid, pid) for pid, (sid, hid) in wanted.items() if current.get(pid) != (sid, hid)])
     conn.commit()
     out = {"stacks": made, "seconds": round(time.time() - t0, 2)}
     log.info("Stacks: %s", out)

@@ -7,6 +7,7 @@ import { useMutation, useQueries, useQueryClient } from "@tanstack/react-query";
 import { Check, EyeOff, Minus, Plus, X } from "lucide-react";
 import { Portal } from "./Portal";
 import { api, originalUrl, thumbUrl, type PhotoDetail } from "../lib/api";
+import { invalidateGrids } from "../lib/hooks";
 import { formatBytes, formatDateTime, megapixels } from "../lib/format";
 import { StarRating } from "./StarRating";
 
@@ -30,7 +31,7 @@ export function CompareView({ ids, onClose }: { ids: number[]; onClose: () => vo
   }, [onClose]);
 
   const refresh = (id?: number) => {
-    qc.invalidateQueries({ queryKey: ["photos"] });
+    invalidateGrids(qc);
     qc.invalidateQueries({ queryKey: ["album"] });
     if (id !== undefined) qc.invalidateQueries({ queryKey: ["photo", id] });
   };
@@ -80,7 +81,7 @@ export function CompareView({ ids, onClose }: { ids: number[]; onClose: () => vo
                   if (g) setPan({ x: g.px + (e.clientX - g.x) / zoom, y: g.py + (e.clientY - g.y) / zoom });
                 }}
                 onMouseUp={() => (drag.current = null)} onMouseLeave={() => (drag.current = null)}>
-                <img src={zoom > 1.3 ? originalUrl(id) : thumbUrl(id, "l")} alt={d?.filename ?? ""} draggable={false}
+                <img src={zoom > 1.3 ? originalUrl(id, d?.rotation) : thumbUrl(id, "l", d?.rotation)} alt={d?.filename ?? ""} draggable={false}
                   style={{ transform: `scale(${zoom}) translate(${pan.x}px, ${pan.y}px)` }} />
                 {gone && <span className="compare-gone"><EyeOff size={16} /> Hidden</span>}
               </div>

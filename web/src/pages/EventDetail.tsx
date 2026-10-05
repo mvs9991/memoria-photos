@@ -67,7 +67,7 @@ export default function EventDetail() {
               <input autoFocus className="field" value={title} onChange={(e) => setTitle(e.target.value)}
                 placeholder={data.auto_title} aria-label="Event title" />
               <button className="btn btn-primary" type="submit"><Check size={15} /> Save</button>
-              <button className="btn btn-quiet" type="button" onClick={() => setRenaming(false)}><X size={15} /></button>
+              <button className="btn btn-quiet" type="button" onClick={() => setRenaming(false)} aria-label="Cancel renaming"><X size={15} /></button>
             </form>
           ) : (
             <h1 className="display event-hero-title">
@@ -177,7 +177,7 @@ export default function EventDetail() {
           </div>} />
         {exporting && <ExportDialog spec={{ event_id: eventId }} title={`Export “${data.title}”`}
           onClose={() => setExporting(false)} />}
-        {slideshow && <Slideshow items={items.map((i: any) => ({ id: i.id, video: (i.flags & FLAG.video) > 0 }))}
+        {slideshow && <Slideshow items={items.map((i: any) => ({ id: i.id, video: (i.flags & FLAG.video) > 0, rot: i.rot }))}
           onClose={() => setSlideshow(false)} />}
         <SelectionBar {...sel.barProps} />
         <PhotoGrid items={items} grouping="day" targetHeight={220}

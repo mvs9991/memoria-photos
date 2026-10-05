@@ -48,3 +48,19 @@ def test_an_event_summary_counts_everyone_else(tmp_path):
                      "person_id, created_at) VALUES (?,?,0.1,0.1,0.4,0.4,0.99,120,0.9,?,?,0)",
                      (k, model, np.ones(4, np.float16).tobytes(), pid))
     assert "and 7 others" in events.build_summary(conn, 1)   # was "and 1 other"
+
+
+def test_person_stats_take_more_ids_than_sqlite_binds_at_once(tmp_path):
+    from photointel.engine.people import update_person_stats
+
+    conn = _library(tmp_path, 1)
+    update_person_stats(conn, list(range(1, 40_001)))     # was "too many SQL variables"
+
+
+def test_a_date_correction_takes_more_ids_than_sqlite_binds_at_once(tmp_path):
+    from photointel.engine import corrections
+
+    conn = _library(tmp_path, 2)
+    out = corrections.set_date(conn, list(range(1, 40_001)), shift_seconds=3600)   # "select all", then fix the clock
+    assert out["corrected"] == 2
+    assert conn.execute("SELECT taken_ts FROM photos WHERE id = 1").fetchone()[0] == 1_600_000_001 + 3600

@@ -14,7 +14,7 @@ import sqlite3
 import time
 from pathlib import Path
 
-from .. import imaging
+from .. import db, imaging
 from ..metadata import ts_to_naive
 from ..video import playable_in_browser
 from ..rotation import rotate_image
@@ -40,9 +40,9 @@ def export_album(conn: sqlite3.Connection, photo_ids: list[int], title: str, out
     t0 = time.time()
     for sub in ("thumbs", "photos", "videos"):
         (out / sub).mkdir(parents=True, exist_ok=True)
-    rows = {r["id"]: r for r in conn.execute(
+    rows = {r["id"]: r for chunk, q in db.chunks(photo_ids) for r in conn.execute(
         f"""SELECT p.*, rt.path AS root FROM photos p JOIN roots rt ON rt.id = p.root_id
-            WHERE p.id IN ({','.join('?' * len(photo_ids))})""", photo_ids)}
+            WHERE p.id IN ({q})""", chunk)}
     items, skipped = [], 0
     for n, pid in enumerate(photo_ids):
         r = rows.get(pid)

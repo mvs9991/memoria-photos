@@ -905,7 +905,7 @@ the future, everything collapsing into one event, fuzzy duplicate thresholds too
 
 ## 10. Working notes
 
-- Run the suite with `.venv/Scripts/python.exe -m pytest -q`. 703 tests, ~12 min, no GPU needed —
+- Run the suite with `.venv/Scripts/python.exe -m pytest -q`. 756 tests, ~12 min, no GPU needed —
   the neural nets are replaced by deterministic fakes.
 - Test fixtures seed randomness from `zlib.crc32` of the **file name**, not `hash()` (salted per
   process) and not the full path (contains pytest's per-run tmp counter). Both made failures
@@ -1072,3 +1072,84 @@ the clip's length on first play; pre-transcoding all 194 was judged too heavy (h
   link (revocation and expiry still apply at once) and the timestamp is written at most once a minute.
 - **Upload page:** a file whose connection dropped (a phone sleeping, a Wi-Fi blip) is retried twice before it is
   marked failed; the server dedupes by content, so a retry cannot add a second copy. Not covered by a test.
+- **Search suggestions and the iCloud CSV import** had the same unescaped `LIKE`: typing `_` suggested every named
+  person. `db.like_contains` / `db.like_prefix`.
+
+### Post-processing on the real library (2026-10-05; each change checked on a copy of the real database)
+
+Hourly scheduled runs logged Takeout 135–639 s, duplicates 50–152 s, events twice per run, the search index rebuilt
+from nothing. Each change below was run old-vs-new on two copies made from one backup (`sqlite3.backup`, so the live
+database was only read), and the outputs compared row for row:
+
+| Stage | Before | After | What was identical |
+|---|---|---|---|
+| Events (`detect_events`) | 13.3 s | 1.8 s | all 754 events/trips, every photo's event, counts, titles |
+| Duplicates (CPU kNN) | 177 s | 48 s | every group's signature, keeper, members, relation, similarity |
+| Search index, nothing changed | 5.0 s | 1.8 s | both FTS tables row for row; ranked results for six words |
+| Takeout, sidecars unchanged | 7.4 s warm / minutes cold | 1.5 s | photos and `takeout_sidecars` row for row |
+| Stacks (`build_stacks`) | 6.6–8.6 s | 2.3–3.2 s | every photo's `stack_id` and `stack_hidden` (4,075 stacks) |
+
+- **Events:** every photo's `event_id` was cleared and set again, rewriting the photos table each run; committing that
+  was 7.7 of the 10 s. Only photos whose event changes are written now. The second `detect_events` (after location
+  inference) runs only when inference placed a photo; most runs it places none.
+- **Events (correctness):** cover, location confidence and summary people looked at the first 900 photos (two events
+  on the real library are larger; event 826, 2,087 photos, now gets its cover from its second half). The summary
+  fetched 4 people and said "and N others" from that, so it never said more than "1 other"; now "and 50 others".
+- **Duplicates:** `_popcount64` rebuilt its 256-entry table on every call (one per candidate pair: 110 s); bucket
+  pairs and pair distances are now computed with numpy in one go; the "already inside a stronger group" check
+  compared each group with every emitted one (43 s) and now checks only groups sharing its first member. The live
+  server runs the kNN on the GPU, so its total is lower than the CPU figure.
+- **Takeout:** each run re-read all 17,392 sidecars. Their path, mtime and size are now stored
+  (`takeout_sidecars.json_mtime/json_size`, added without a schema bump); an unchanged one has its stored values
+  applied, which is what re-reading it did. The live minutes were cold reads on the HDD, made worse by whatever else
+  was reading the disk; the 7.4 s "before" is with the files in the OS cache.
+- **Stacks:** the same clear-and-set-again as events, on the ~10k stacked photos; now only differences.
+- **Search index:** rebuilt by diffing against what the FTS tables already hold, instead of delete-all/insert-all.
+
+### Endpoints that blocked (2026-10-05, timed against the live server, GET only)
+
+- **`/api/health` took 152 s** on the real library: it summed the thumbnail cache with a `stat` per file on the
+  hard drive, and Settings polls it every 20 s, so the walks queued behind each other. The size is now measured with
+  `os.scandir` (on Windows the listing carries each size: no per-file read) in a background thread, remembered for a
+  minute; a request waits at most 2 s, then gets the last figure, or `null` ("measuring…" on Settings) before the
+  first. Repeat calls dropped to 8 ms.
+- **`/api/collections`** ran one cover query per collection after the counting pass; covers now come from the same
+  pass (best rating, then quality, then lowest id). Counts and covers checked identical on a copy of the real
+  database for all 14 collections.
+- Also chunked: a date correction, location correction or HTML export on more than ~32k photos, and person stats
+  for more than 900 people (SQLite's variable limit).
+
+### Authorization review (2026-10-05, `tests/test_authz_review.py`; all 11 failed before their fixes)
+
+A route-by-route review as a family member, a guest and a share-link visitor. Each leak below was confirmed by a test:
+
+- **Search:** the keyword fallback returned locked, private, trashed and hidden photos (the FTS index is rebuilt only
+  by post-processing); suggestions offered tags and places of photos the caller cannot see, and people seen only in
+  locked photos.
+- **Bulk actions** (tags, hide, rotate, rate, archive, date/place corrections, face assign/reject) took any id: a
+  family member could change a locked or someone's private photo, and the returned counts confirmed it existed.
+  `deps.visible_ids` now filters every one of them.
+- **People:** non-owners no longer see (or open) a person with no photo they can see; only an owner may set "me".
+- **Trash:** a trashed photo's details, thumbnail, original and download stayed open to family and guests.
+- **Uploads:** a family member uploading a copy of a locked photo was told "already in your library" with its id, and
+  their copy was dropped; now it is stored (an owner's own re-upload still dedupes, so a locked photo cannot reappear).
+- **Share links:** a shared smart album's search ran with no account and so saw private albums; it now runs as the
+  album's owner. Share links of an album you cannot see can no longer be listed or revoked.
+- **Photo details** counted and named a locked duplicate. **Server paths** (stats, photo details, folder browser,
+  export location, upload and edit results) are shown to non-owners as the last folder name only.
+- Not fixed, noted: event start/end/place are not recomputed when a photo is locked (counts and covers are);
+  `/api/jobs` is readable by guests.
+
+### Frontend review (2026-10-05)
+
+- Keys pressed while a dialog sat over the viewer still moved the viewer, so Fix date applied to the next photo.
+- A selection survived a new search, filter chip or subfolder; bulk actions then hit photos no longer on screen.
+- The viewer stayed open over route changes (its own person/place links looked dead; phone Back moved the page
+  behind it). Viewer mutations refreshed whichever photo was showing when they finished, not the one changed.
+- Rotations, stars and hides now refresh every grid (`invalidateGrids`), not only the photo list.
+- The photo frame died for good after one failed refetch, or froze when a batch came back in the same order.
+- iPhone: `100dvh` and safe-area insets (the home-screen app drew under the notch).
+- Also: slideshow/compare show the user's rotation; "similar photo" opens even when not in the page's list;
+  Timeline/Map keep their person picker when empty and month links keep the person; editor preview blobs freed;
+  scrubber scrolls instantly; private imported albums listed once; type-ahead debounced and capped at 80 chars.
+- Checked: `e2e_gestures.mjs` 20/20 and `shots.mjs` with no console errors on the e2e library.

@@ -56,8 +56,11 @@ function PhotoEditor({ photoId, onClose }: { photoId: number; onClose: () => voi
     const t = window.setTimeout(async () => {
       try {
         const res = await post(`/api/photos/${photoId}/edit/preview`, JSON.parse(look));
-        const url = URL.createObjectURL(await res.blob());
-        if (alive) { setSrc((old) => { if (old) URL.revokeObjectURL(old); return url; }); setPreviewError(null); }
+        const blob = await res.blob();
+        if (!alive) return;            // superseded: no object URL is made, so none is left behind
+        const url = URL.createObjectURL(blob);
+        setSrc((old) => { if (old) URL.revokeObjectURL(old); return url; });
+        setPreviewError(null);
       } catch (e) {
         if (alive) setPreviewError((e as Error).message);
       } finally {
@@ -66,6 +69,10 @@ function PhotoEditor({ photoId, onClose }: { photoId: number; onClose: () => voi
     }, 220);
     return () => { alive = false; clearTimeout(t); };
   }, [look, photoId]);
+
+  const srcRef = useRef<string | null>(null);
+  srcRef.current = src;
+  useEffect(() => () => { if (srcRef.current) URL.revokeObjectURL(srcRef.current); }, []);   // the last one, on close
 
   // A new preview can have a different shape (after a turn): keep a fixed-aspect crop true to it.
   useEffect(() => {

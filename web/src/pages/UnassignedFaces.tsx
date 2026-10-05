@@ -1,4 +1,4 @@
-import { useMemo, useState } from "react";
+import { useEffect, useMemo, useState } from "react";
 import { Link } from "react-router-dom";
 import { useMutation, useQuery, useQueryClient } from "@tanstack/react-query";
 import { ArrowLeft, Check, Search, UserPlus, Users, X } from "lucide-react";
@@ -38,6 +38,12 @@ export default function UnassignedFaces() {
     if (!personFilter) return list.slice(0, 24);
     return list.filter((p) => p.label.toLowerCase().includes(personFilter.toLowerCase())).slice(0, 24);
   }, [people.data, personFilter]);
+
+  // Only faces on screen stay selected: switching to "Clear" kept faces it no longer shows, and they were named too.
+  useEffect(() => {
+    const shown = new Set((faces.data?.faces ?? []).map((f: any) => f.id));
+    setSelected((s) => (s.size && [...s].some((id) => !shown.has(id)) ? new Set([...s].filter((id) => shown.has(id))) : s));
+  }, [faces.data]);
 
   if (faces.isError) return <ErrorState error={faces.error} onRetry={() => faces.refetch()} />;
 
@@ -119,7 +125,8 @@ export default function UnassignedFaces() {
           {list.map((f: any) => (
             <button key={f.id} className={`face-review${selected.has(f.id) ? " is-selected" : ""}`}
               onClick={(e) => (e.shiftKey ? viewer.open([f.photo_id], 0) : toggle(f.id))}
-              title="Click to select · Shift-click to open the photo">
+              onContextMenu={(e) => { e.preventDefault(); viewer.open([f.photo_id], 0); }}
+              title="Click to select · Shift-click, right-click or press and hold to open the photo">
               <img src={faceUrl(f.id, 160)} alt="" loading="lazy" />
               {selected.has(f.id) && (
                 <span className="face-review-check"><Check size={14} strokeWidth={3} /></span>

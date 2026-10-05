@@ -16,6 +16,7 @@ export default function MapPage() {
   const points = useQuery({
     queryKey: ["map-points", person],
     queryFn: () => api.mapPoints(person ? { person } : {}),
+    placeholderData: (previous) => previous,
   });
   const settings = useQuery({ queryKey: ["settings"], queryFn: api.settings });
   const gpx = useQuery({ queryKey: ["gpx-tracks"], queryFn: () => api.gpxTracks() });
@@ -42,7 +43,9 @@ export default function MapPage() {
 
   if (places.isError) return <ErrorState error={places.error} onRetry={() => places.refetch()} />;
   if (places.isLoading) return <Spinner full label="Loading map" />;
-  if (!clustered.length && !tracks.length) {
+  // Only the unfiltered map can be "empty": with a person chosen the page (and its picker) stays, so another
+  // person, or Everyone, can be picked again.
+  if (!person && !clustered.length && !tracks.length) {
     return <EmptyState icon={<MapPin size={26} />} title="No photos with locations"
       hint="Photos need GPS metadata (or an event with GPS) to appear on the map." />;
   }
@@ -71,6 +74,7 @@ export default function MapPage() {
         </div>
       </div>
 
+      {person && !points.isFetching && !clustered.length && <p className="dim">No photos of this person have a location.</p>}
       <div className="card map-full">
         <MiniMap points={clustered} height={620} tracks={tracks} onSelect={(p: any) => p.id && navigate(`/places/${p.id}`)} />
       </div>

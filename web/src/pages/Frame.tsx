@@ -23,9 +23,13 @@ export default function Frame() {
     queryKey: ["frame", filter],
     queryFn: () => api.random(filter),
     staleTime: Infinity,
+    // A frame runs unattended for days: through a Wi-Fi blip or the server restarting it keeps trying,
+    // and keeps showing the photos it has meanwhile.
+    retry: true,
+    retryDelay: 30_000,
   });
 
-  if (isError) return <div className="frame-message">{(error as Error).message}</div>;
+  if (isError && !data) return <div className="frame-message">{(error as Error).message}</div>;
   if (!data) return <div className="frame-message">Loading…</div>;
   if (!data.ids.length) return <div className="frame-message">No photos match this frame’s filter.</div>;
   return <Slideshow frame items={data.ids.map((id) => ({ id }))} onExhausted={() => refetch()}

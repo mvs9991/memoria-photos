@@ -18,11 +18,18 @@ def upload(files: list[UploadFile]):
     """One or more files. Each is kept, skipped as a duplicate, or rejected — never overwriting."""
     state = get_state()
     conn = state.conn()
+    from .deps import current_role
+
+    owner = current_role() == "owner"
     out = []
     for f in files:
-        saved = uploads_mod.save_upload(state.ctx, conn, f.file, f.filename or "upload", who=_who())
-        out.append(saved.__dict__)
-    return {"results": out, "folder": str(uploads_mod.upload_root(state.ctx))}
+        saved = uploads_mod.save_upload(state.ctx, conn, f.file, f.filename or "upload", who=_who(),
+                                        sees_hidden=owner).__dict__
+        if not owner:                     # the server's folders and the library's photo ids are the owner's
+            saved.pop("path", None)
+            saved.pop("photo_id", None)
+        out.append(saved)
+    return {"results": out, "folder": str(uploads_mod.upload_root(state.ctx)) if owner else ""}
 
 
 def _who() -> str:
@@ -130,6 +137,10 @@ def edit_save(photo_id: int, body: EditBody):
         raise HTTPException(400, str(exc))
     _, root = uploads_mod.ensure_upload_root(state.ctx, conn)
     out["job_id"] = jobs.spawn_index_job(state.ctx, {"kind": "index", "roots": [str(root)]})
+    from .deps import shown_path
+
+    if "path" in out:
+        out["path"] = shown_path(out["path"])     # the page shows only the file name
     return out
 
 
@@ -151,6 +162,9 @@ def trim(photo_id: int, body: TrimBody):
         raise HTTPException(400, str(exc))
     _, root = uploads_mod.ensure_upload_root(state.ctx, conn)
     out["job_id"] = jobs.spawn_index_job(state.ctx, {"kind": "index", "roots": [str(root)]})
+    from .deps import shown_path
+
+    out["path"] = shown_path(out.get("path"))
     return out
 
 

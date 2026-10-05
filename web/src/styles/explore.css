@@ -212,7 +212,7 @@
 .frame-links li { line-height: 1.6; overflow-wrap: anywhere; }
 
 /* ---------------- shared album (public page) ---------------- */
-.share-page { height: 100vh; overflow-y: auto; background: var(--bg); color: var(--text); }
+.share-page { height: 100vh; height: 100dvh; overflow-y: auto; background: var(--bg); color: var(--text); }
 .share-head { max-width: 1400px; margin: 0 auto; padding: 34px 24px 10px; }
 .share-head h1 { font-size: 40px; }
 .share-grid { max-width: 1400px; margin: 0 auto; padding: 8px 24px 20px; }
@@ -223,7 +223,7 @@
 .share-lightbox .share-lb-bar a { color: inherit; }
 
 /* ---------------- login ---------------- */
-.login-page { min-height: 100vh; display: grid; place-items: center; padding: 20px; background: var(--bg); }
+.login-page { min-height: 100vh; min-height: 100dvh; display: grid; place-items: center; padding: 20px; background: var(--bg); }
 .login-card { width: min(360px, 100%); padding: 30px 28px; display: grid; gap: 12px; text-align: center; justify-items: center; }
 .login-card .field { width: 100%; }
 .login-card .btn { width: 100%; justify-content: center; }

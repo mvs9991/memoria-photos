@@ -11,7 +11,7 @@ from ..engine import people as people_mod
 from ..engine.events import event_title
 from ..engine.people import co_occurring, person_label
 from ..metadata import ts_to_naive
-from .deps import get_state
+from .deps import current_role, get_state, visible_ids
 from .routes_events import _visible_cover
 
 log = logging.getLogger(__name__)
@@ -23,7 +23,9 @@ def list_people(include_hidden: bool = False, include_ignored: bool = False, min
                 sort: str = Query("photos", pattern="^(photos|name|recent)$")):
     conn = get_state().conn()
     where = ["merged_into IS NULL", "photo_count >= ?"]
-    args: list = [min_photos]
+    # Anyone but an owner sees only people with a photo they can see: someone who appears only in locked or
+    # private photos was still listed (and named) to the family with ?min_photos=0.
+    args: list = [min_photos if current_role() == "owner" else max(min_photos, 1)]
     if not include_hidden:
         where.append("hidden = 0")
     if not include_ignored:
@@ -65,6 +67,8 @@ def person_detail(person_id: int, photo_limit: int = 500):
             break
         r = nxt
     person_id = r["id"]
+    if r["photo_count"] == 0 and current_role() != "owner":
+        raise HTTPException(404, "person not found")    # only in photos this account cannot see
 
     events = [{"id": e["id"], "title": event_title(e), "kind": e["kind"], "start_ts": e["start_ts"],
                "end_ts": e["end_ts"], "photo_count": e["photo_count"], "matched": e["n"],
@@ -174,6 +178,9 @@ class FlagsBody(BaseModel):
 def flags(person_id: int, body: FlagsBody):
     state = get_state()
     conn = state.conn()
+    if body.is_me is not None and current_role() != "owner":
+        # "Me" is the library's setting (settings.json), which only an owner may change.
+        raise HTTPException(403, "only an owner can choose who 'me' is")
     people_mod.set_person_flags(conn, person_id, body.hidden, body.ignored)
     if body.birth_date is not None:
         try:
@@ -234,7 +241,10 @@ def assign(body: AssignBody):
     conn = get_state().conn()
     if not body.face_ids:
         raise HTTPException(400, "no faces given")
-    return people_mod.assign_faces(conn, body.face_ids, body.person_id, body.name)
+    face_ids = _visible_faces(conn, body.face_ids)
+    if not face_ids:
+        return {"person_id": body.person_id, "faces": 0}
+    return people_mod.assign_faces(conn, face_ids, body.person_id, body.name)
 
 
 class RejectBody(BaseModel):
@@ -245,7 +255,17 @@ class RejectBody(BaseModel):
 @router.post("/faces/reject")
 def reject(body: RejectBody):
     conn = get_state().conn()
-    return people_mod.reject_faces(conn, body.face_ids, body.person_id)
+    return people_mod.reject_faces(conn, _visible_faces(conn, body.face_ids), body.person_id)
+
+
+def _visible_faces(conn, face_ids: list[int]) -> list[int]:
+    """Faces on photos this caller may see (a family member could name a face on a locked photo)."""
+    photo_of = {}
+    for chunk, marks in db.chunks(face_ids):
+        photo_of.update({int(r[0]): int(r[1]) for r in conn.execute(
+            f"SELECT id, photo_id FROM faces WHERE id IN ({marks})", chunk)})
+    ok = set(visible_ids(conn, list(photo_of.values())))
+    return [f for f in dict.fromkeys(face_ids) if photo_of.get(f) in ok]
 
 
 @router.get("/people/suggestions/merges")

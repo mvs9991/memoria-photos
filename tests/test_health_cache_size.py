@@ -30,12 +30,44 @@ def test_cache_size_is_remembered_between_calls(ctx):
 def test_a_file_vanishing_mid_walk_is_not_an_error(tmp_path, monkeypatch):
     (tmp_path / "keep.jpg").write_bytes(b"x" * 10)
     (tmp_path / "gone.jpg").write_bytes(b"x" * 99)
-    real = os.stat
+    real = os.scandir
 
-    def flaky(path, *a, **kw):
-        if str(path).endswith("gone.jpg"):
-            raise FileNotFoundError(path)
-        return real(path, *a, **kw)
+    class Vanishing:
+        def __init__(self, entry):
+            self._e, self.path, self.name = entry, entry.path, entry.name
 
-    monkeypatch.setattr(os, "stat", flaky)
+        def is_dir(self, **kw):
+            return self._e.is_dir(**kw)
+
+        def stat(self, **kw):
+            if self.name == "gone.jpg":
+                raise FileNotFoundError(self.path)
+            return self._e.stat(**kw)
+
+    class Listing:
+        def __init__(self, path):
+            self._it = real(path)
+
+        def __enter__(self):
+            return (Vanishing(e) for e in self._it)
+
+        def __exit__(self, *exc):
+            self._it.close()
+
+    monkeypatch.setattr(os, "scandir", Listing)
     assert routes_system._dir_bytes(tmp_path) == 10
+
+
+def test_a_slow_measurement_does_not_hold_up_health(tmp_path, monkeypatch):
+    """Measured in the background: a request waits at most a moment, then gets the last figure."""
+    import threading
+
+    routes_system._cache_bytes_memo.clear()
+    release = threading.Event()
+    monkeypatch.setattr(routes_system, "_dir_bytes", lambda root: (release.wait(10), 42)[1])
+    assert routes_system._cache_bytes((tmp_path,), wait=0.1) is None        # not known yet, and no waiting
+    release.set()
+    for _ in range(100):
+        if routes_system._cache_bytes((tmp_path,), wait=0.1) == 42:
+            break
+    assert routes_system._cache_bytes((tmp_path,), wait=0.1) == 42

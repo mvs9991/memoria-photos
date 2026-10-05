@@ -291,7 +291,7 @@ function OwnerSettings() {
         {health.data && (
           <div className="stat-row">
             <Stat label="Database" value={formatBytes(health.data.db_bytes)} />
-            <Stat label="Thumbnail cache" value={formatBytes(health.data.cache_bytes)} />
+            <Stat label="Thumbnail cache" value={health.data.cache_bytes == null ? "measuring…" : formatBytes(health.data.cache_bytes)} />
             <Stat label="Free space" value={formatBytes(health.data.free_bytes)} />
           </div>
         )}
@@ -349,7 +349,7 @@ function FolderPicker({ onClose, onPicked }: { onClose: () => void; onPicked: ()
       <div className="modal" onClick={(e) => e.stopPropagation()}>
         <div className="modal-head">
           <h3>Choose a photo folder</h3>
-          <button className="btn btn-quiet btn-icon btn-sm" onClick={onClose}><X size={16} /></button>
+          <button className="btn btn-quiet btn-icon btn-sm" onClick={onClose} aria-label="Close"><X size={16} /></button>
         </div>
         <div className="modal-path">
           <code>{data?.path ?? "This computer"}</code>

@@ -13,7 +13,7 @@ from pydantic import BaseModel
 from .. import accounts, auth, db, ratelimit
 from ..engine import locked as locked_mod
 from ..engine import visibility
-from .deps import current_user, get_state, locked_open
+from .deps import current_user, get_state, locked_open, visible_ids
 from .routes_library import columnar
 
 router = APIRouter()
@@ -230,7 +230,7 @@ class ArchiveBody(BaseModel):
 def archive(body: ArchiveBody):
     """Out of the timeline, memories and the photo frame; still in search, albums and people."""
     conn = get_state().conn()
-    ids = visibility.companions(conn, body.photo_ids)
+    ids = visibility.companions(conn, visible_ids(conn, body.photo_ids))
     if not ids:
         return {"changed": 0}
     n = sum(conn.execute(f"UPDATE photos SET archived = ? WHERE id IN ({marks})", (int(body.archived), *chunk)).rowcount

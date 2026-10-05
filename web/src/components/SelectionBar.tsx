@@ -2,7 +2,7 @@
 import { Suspense, lazy, useCallback, useEffect, useState } from "react";
 import { useMutation, useQuery, useQueryClient } from "@tanstack/react-query";
 import { Archive, Sparkles, BookImage, CalendarClock, CheckSquare, Columns2, EyeOff, FolderOutput, Lock, MapPin, RotateCw, Tag, Trash2, X } from "lucide-react";
-import { useRole } from "../lib/hooks";
+import { invalidateGrids, useRole } from "../lib/hooks";
 import { api } from "../lib/api";
 import { AlbumPicker } from "./AlbumPicker";
 import { CompareView } from "./CompareView";
@@ -47,7 +47,7 @@ export function SelectionBar({ selected, onClear, onDone, extra, allIds, onSelec
   const archive = useMutation({
     mutationFn: () => api.archive(ids, true),
     onSuccess: () => { setNote(`Archived ${ids.length.toLocaleString()} — find them in Collections → Archive`);
-      qc.invalidateQueries({ queryKey: ["photos"] }); onClear(); },
+      invalidateGrids(qc); onClear(); },
   });
   const lock = useMutation({
     mutationFn: () => api.lock(ids),
@@ -66,6 +66,7 @@ export function SelectionBar({ selected, onClear, onDone, extra, allIds, onSelec
     onError: (e: Error) => setNote(e.message),
   });
   const [stars, setStars] = useState(0);
+  useEffect(() => setStars(0), [selected]);   // a new selection does not have the last one's rating
   const [tag, setTag] = useState("");
   const [note, setNote] = useState<string | null>(null);
   const ids = [...selected];
@@ -83,7 +84,7 @@ export function SelectionBar({ selected, onClear, onDone, extra, allIds, onSelec
     mutationFn: () => api.rotate(ids, 90),
     onSuccess: () => {
       setNote(`Rotated ${ids.length.toLocaleString()} — only in Memoria, the files are unchanged`);
-      qc.invalidateQueries({ queryKey: ["photos"] });
+      invalidateGrids(qc);
       ids.forEach((p) => qc.invalidateQueries({ queryKey: ["photo", p] }));
     },
   });
@@ -93,7 +94,7 @@ export function SelectionBar({ selected, onClear, onDone, extra, allIds, onSelec
     onSuccess: (r) => {
       setStars(r);
       setNote(r ? `Rated ${ids.length.toLocaleString()} ${"★".repeat(r)}` : "Ratings cleared");
-      qc.invalidateQueries({ queryKey: ["photos"] });
+      invalidateGrids(qc);
       ids.forEach((p) => qc.invalidateQueries({ queryKey: ["photo", p] }));
     },
   });
@@ -241,6 +242,17 @@ export function useGridSelect(allIds: number[]) {
   const { selected, toggle, addMany, setAll, clear } = useSelection();
   const [selecting, setSelecting] = useState(false);
   useSelectAllShortcut(selecting, allIds, setAll);
+
+  // Only what this grid shows can stay selected. A new search, a filter chip or a subfolder changes the list
+  // without leaving the page, and the bar kept saying "5 selected": Delete or Add to album then acted on
+  // photos no longer on screen.
+  useEffect(() => {
+    if (selected.size === 0) return;
+    const present = new Set(allIds);
+    const kept = [...selected].filter((id) => present.has(id));
+    if (kept.length !== selected.size) setAll(kept);
+    // eslint-disable-next-line react-hooks/exhaustive-deps
+  }, [allIds]);
 
   const begin = useCallback(() => setSelecting(true), []);
   const exit = useCallback(() => { setSelecting(false); clear(); }, [clear]);

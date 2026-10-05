@@ -48,7 +48,7 @@ def suggestions(q: str = Query("", max_length=80), limit: int = 8):
     if not term:
         # Cold start: offer the most useful entry points.
         for r in conn.execute("""SELECT id, name, display_no, cover_face_id, photo_count FROM persons
-                                 WHERE merged_into IS NULL AND ignored=0 AND name IS NOT NULL
+                                 WHERE merged_into IS NULL AND ignored=0 AND name IS NOT NULL AND photo_count > 0
                                  ORDER BY photo_count DESC LIMIT 4"""):
             out.append({"type": "person", "id": r["id"], "label": person_label(r),
                         "detail": f"{r['photo_count']:,} photos", "cover_face_id": r["cover_face_id"]})
@@ -59,12 +59,13 @@ def suggestions(q: str = Query("", max_length=80), limit: int = 8):
         return {"suggestions": out}
     like = db.like_contains(term)
     for r in conn.execute("""SELECT id, name, display_no, cover_face_id, photo_count FROM persons
-                             WHERE merged_into IS NULL AND ignored=0 AND LOWER(COALESCE(name,'')) LIKE ? ESCAPE '\\'
+                             WHERE merged_into IS NULL AND ignored=0 AND photo_count > 0 AND LOWER(COALESCE(name,'')) LIKE ? ESCAPE '\\'
                              ORDER BY photo_count DESC LIMIT ?""", (like, limit)):
         out.append({"type": "person", "id": r["id"], "label": person_label(r),
                     "detail": f"{r['photo_count']:,} photos", "cover_face_id": r["cover_face_id"]})
     for r in conn.execute("""SELECT pl.id, pl.name, pl.city, pl.country, COUNT(p.id) n FROM places pl
                              JOIN photos p ON p.place_id = pl.id
+                               AND p.status = 'ok' AND p.hidden = 0 AND p.live_component = 0
                              WHERE LOWER(pl.name) LIKE ? ESCAPE '\\' OR LOWER(COALESCE(pl.city,'')) LIKE ? ESCAPE '\\'
                                 OR LOWER(COALESCE(pl.admin1,'')) LIKE ? ESCAPE '\\' OR LOWER(COALESCE(pl.country,'')) LIKE ? ESCAPE '\\'
                              GROUP BY pl.id ORDER BY n DESC LIMIT ?""", (like, like, like, like, limit)):
@@ -76,6 +77,7 @@ def suggestions(q: str = Query("", max_length=80), limit: int = 8):
         out.append({"type": "event", "id": r["id"], "label": r["user_title"] or r["auto_title"],
                     "detail": f"{r['photo_count']:,} photos", "cover_photo_id": r["cover_photo_id"]})
     for r in conn.execute("""SELECT t.name, COUNT(*) n FROM tags t JOIN photo_tags pt ON pt.tag_id = t.id
+                             JOIN photos p ON p.id = pt.photo_id AND p.status = 'ok' AND p.hidden = 0
                              WHERE t.name LIKE ? ESCAPE '\\' AND pt.score >= 2.0 GROUP BY t.id ORDER BY n DESC LIMIT ?""",
                           (like, limit)):
         out.append({"type": "tag", "label": r["name"], "detail": f"{r['n']:,} photos"})

@@ -132,8 +132,18 @@ def share_album(album_id: int, body: ShareBody):
     return auth.create_share(conn, album_id, body.allow_download, body.expires_days, body.allow_upload)
 
 
+def _own_album(conn, album_id: int) -> None:
+    """Share links belong to the album: only an account that may see the album may list or revoke them
+    (another owner's private album's live tokens were listed to anyone who asked)."""
+    from .deps import current_user_id
+
+    if albums_mod.can_see(conn, album_id, current_user_id()) is None:
+        raise HTTPException(404, "album not found")
+
+
 @router.get("/albums/{album_id}/shares")
 def list_shares(album_id: int):
+    _own_album(get_state().conn(), album_id)
     rows = get_state().conn().execute(
         "SELECT token, allow_download, allow_upload, expires_at, created_at, last_used_at FROM share_links WHERE album_id = ? "
         "ORDER BY created_at DESC", (album_id,)).fetchall()
@@ -142,7 +152,11 @@ def list_shares(album_id: int):
 
 @router.delete("/shares/{token}")
 def revoke(token: str):
-    auth.revoke_share(get_state().conn(), token)
+    conn = get_state().conn()
+    row = conn.execute("SELECT album_id FROM share_links WHERE token = ?", (token,)).fetchone()
+    if row is not None:
+        _own_album(conn, int(row["album_id"]))
+        auth.revoke_share(conn, token)
     return {"ok": True}
 
 
@@ -163,13 +177,30 @@ def _share_photo_ids(conn, share) -> list[int]:
     if hit and now - hit[0] < _SHARE_IDS_TTL:
         return hit[1]
     if share["kind"] == "smart":
-        ids = get_state().search.search(conn, share["query"], limit=5000).photo_ids
+        ids = _search_as_album_owner(conn, share)
     else:
         ids = albums_mod.album_photo_ids(conn, share["album_id"])
     if len(_share_ids_cache) > 256:
         _share_ids_cache.clear()
     _share_ids_cache[key] = (now, ids, frozenset(ids))
     return ids
+
+
+def _search_as_album_owner(conn, share) -> list[int]:
+    """A shared smart album's search, run as the account that made the album. A visitor has no account, and
+    with none the search saw every album, private ones too: "album Therapy" shared another person's private
+    album to anyone holding the link."""
+    from .deps import set_current_user, _current_user
+
+    user = None
+    if accounts.enabled(conn):
+        owner = share["owner_user_id"] if "owner_user_id" in share.keys() else None
+        user = (accounts.get(conn, int(owner)) if owner else None) or {"id": -1, "username": None, "role": "guest"}
+    token = set_current_user(user)
+    try:
+        return get_state().search.search(conn, share["query"], limit=5000).photo_ids
+    finally:
+        _current_user.reset(token)
 
 
 def _in_share(conn, share, photo_id: int) -> bool:

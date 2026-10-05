@@ -6,7 +6,7 @@ import { api, thumbUrl } from "../lib/api";
 import { EmptyState, ErrorState, Spinner } from "../components/States";
 import { useViewer } from "../components/ViewerContext";
 import { formatBytes, formatDate } from "../lib/format";
-import { useTitle } from "../lib/hooks";
+import { invalidateGrids, useTitle } from "../lib/hooks";
 
 const KIND_HELP: Record<string, string> = {
   exact: "Byte-for-byte identical files.",
@@ -48,7 +48,7 @@ export default function Duplicates() {
     mutationFn: ({ id, ids }: { id: number; ids: number[] }) => api.hideCopies(id, ids),
     onSuccess: () => {
       qc.invalidateQueries({ queryKey: ["duplicates"] });
-      qc.invalidateQueries({ queryKey: ["photos"] });
+      invalidateGrids(qc);
       qc.invalidateQueries({ queryKey: ["stats"] });
     },
   });

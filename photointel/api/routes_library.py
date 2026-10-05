@@ -20,7 +20,7 @@ from ..engine.places import place_label
 from ..metadata import ts_to_naive
 from ..rotation import rotate_box
 from ..engine import favorites
-from .deps import current_user_id, get_state, guard_locked
+from .deps import current_user_id, get_state, guard_locked, shown_path, visible_ids
 
 log = logging.getLogger(__name__)
 router = APIRouter()
@@ -282,8 +282,14 @@ def photo_detail(photo_id: int):
     for d in conn.execute(
             """SELECT g.id, g.kind, g.member_count, g.keep_photo_id, m.relation FROM dup_members m
                JOIN dup_groups g ON g.id = m.group_id WHERE m.photo_id = ?""", (photo_id,)):
-        dups.append({"group_id": d["id"], "kind": d["kind"], "count": d["member_count"],
-                     "relation": d["relation"], "keep_photo_id": d["keep_photo_id"]})
+        # Only the copies this account can see are counted or named: a locked or someone's private copy was
+        # counted and given as the one to keep.
+        seen = visible_ids(conn, [int(r[0]) for r in conn.execute(
+            "SELECT photo_id FROM dup_members WHERE group_id = ?", (d["id"],))])
+        if len(seen) < 2:
+            continue
+        dups.append({"group_id": d["id"], "kind": d["kind"], "count": len(seen), "relation": d["relation"],
+                     "keep_photo_id": d["keep_photo_id"] if d["keep_photo_id"] in seen else min(seen)})
     trip = None
     if row["parent_id"]:
         t = conn.execute("SELECT id, auto_title, user_title FROM events WHERE id=?", (row["parent_id"],)).fetchone()
@@ -298,7 +304,7 @@ def photo_detail(photo_id: int):
                  "confidence": row["location_confidence"], "source": row["location_source"]}
     return {
         "id": row["id"], "filename": row["filename"], "folder": row["folder"], "path": row["rel_path"],
-        "root": row["root"], "ext": row["ext"], "size": row["size"],
+        "root": shown_path(row["root"]), "ext": row["ext"], "size": row["size"],
         "width": row["height"] if row["rotation"] in (90, 270) else row["width"],
         "height": row["width"] if row["rotation"] in (90, 270) else row["height"],
         "rotation": row["rotation"] or 0,
@@ -411,12 +417,15 @@ class TagBody(BaseModel):
 def add_tag(body: TagBody):
     if not body.photo_ids or not body.name.strip():
         raise HTTPException(400, "photos and a tag name are required")
-    return albums_mod.add_user_tag(get_state().conn(), body.photo_ids, body.name)
+    conn = get_state().conn()
+    ids = visible_ids(conn, body.photo_ids)
+    return albums_mod.add_user_tag(conn, ids, body.name) if ids else {"tagged": 0}
 
 
 @router.post("/photos/tags/remove")
 def remove_tag(body: TagBody):
-    return albums_mod.remove_user_tag(get_state().conn(), body.photo_ids, body.name)
+    conn = get_state().conn()
+    return albums_mod.remove_user_tag(conn, visible_ids(conn, body.photo_ids), body.name)
 
 
 @router.get("/tags")
@@ -432,9 +441,10 @@ class HideBody(BaseModel):
 @router.post("/photos/hide")
 def hide_photos(body: HideBody):
     """Hide from (or bring back to) the library views. Files are never touched."""
+    conn = get_state().conn()
+    body.photo_ids = visible_ids(conn, body.photo_ids)
     if not body.photo_ids:
         return {"changed": 0}
-    conn = get_state().conn()
     n = sum(conn.execute(f"UPDATE photos SET hidden = ? WHERE id IN ({marks})", (int(body.hidden), *chunk)).rowcount
             for chunk, marks in db.chunks(body.photo_ids))
     db.audit(conn, "photos_hidden" if body.hidden else "photos_unhidden", "photo", None, {"photos": body.photo_ids[:2000]})
@@ -455,9 +465,10 @@ def rotate_photos(body: RotateBody):
     """Turn photos as Memoria shows them. The files are not changed."""
     if body.degrees % 90:
         raise HTTPException(400, "rotate by a multiple of 90 degrees")
+    conn = get_state().conn()
+    body.photo_ids = visible_ids(conn, body.photo_ids)
     if not body.photo_ids:
         return {"rotated": 0}
-    conn = get_state().conn()
     n = sum(conn.execute(f"UPDATE photos SET rotation = ((rotation + ?) % 360 + 360) % 360 WHERE id IN ({marks})",
                          (body.degrees, *chunk)).rowcount for chunk, marks in db.chunks(body.photo_ids))
     db.audit(conn, "photos_rotated", "photo", None, {"photos": body.photo_ids[:2000], "degrees": body.degrees})
@@ -475,6 +486,7 @@ def rate(body: RateBody):
     if not 0 <= body.rating <= 5:
         raise HTTPException(400, "rating is 0 (none) to 5")
     conn = get_state().conn()
+    body.photo_ids = visible_ids(conn, body.photo_ids)
     for chunk, marks in db.chunks(body.photo_ids):
         conn.execute(f"UPDATE photos SET rating = ? WHERE id IN ({marks})", (body.rating, *chunk))
     db.audit(conn, "photos_rated", "photo", None, {"photos": body.photo_ids[:2000], "rating": body.rating})
@@ -508,6 +520,9 @@ def _after_correction(rebuild: bool, stages: list[str]) -> None:
 def correct_date(body: DateFixBody):
     if not body.photo_ids:
         raise HTTPException(400, "no photos given")
+    body.photo_ids = visible_ids(get_state().conn(), body.photo_ids)
+    if not body.photo_ids:
+        return {"corrected": 0}
     try:
         out = corrections_mod.set_date(get_state().conn(), body.photo_ids, body.taken_local, body.shift_seconds)
     except ValueError as exc:
@@ -528,6 +543,9 @@ def correct_location(body: PlaceFixBody):
         lat, lon = pl["lat"], pl["lon"]
     if lat is None or lon is None or not body.photo_ids:
         raise HTTPException(400, "photos and a location are required")
+    body.photo_ids = visible_ids(conn, body.photo_ids)
+    if not body.photo_ids:
+        return {"corrected": 0}
     try:
         out = corrections_mod.set_location(conn, body.photo_ids, lat, lon)
     except ValueError as exc:
@@ -545,7 +563,8 @@ class IdsBody(BaseModel):
 
 @router.post("/photos/corrections/clear")
 def clear_corrections(body: IdsBody):
-    return corrections_mod.clear(get_state().conn(), body.photo_ids)
+    conn = get_state().conn()
+    return corrections_mod.clear(conn, visible_ids(conn, body.photo_ids))
 
 
 @router.get("/stacks/{stack_id}")
@@ -784,7 +803,8 @@ def stats():
         "bytes": size_ok,
         "date_range": {"from": date_from, "to": date_to},
         "top_places": top_places,
-        "roots": [dict(r) for r in conn.execute("SELECT id, path, last_scan_at FROM roots")],
+        "roots": [{**dict(r), "path": shown_path(r["path"])}
+                  for r in conn.execute("SELECT id, path, last_scan_at FROM roots")],
     }
 
 

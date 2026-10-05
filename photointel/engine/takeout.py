@@ -172,15 +172,26 @@ def import_takeout(ctx, conn: sqlite3.Connection) -> dict:
     by_root: dict[int, set[str]] = defaultdict(set)
     for f in folders:
         by_root[f["root_id"]].add(f["folder"])
-    existing = {int(r[0]) for r in conn.execute("SELECT photo_id FROM takeout_sidecars")}
+    # What each photo's sidecar said when it was last read, and which file (path, mtime, size) that was. Every
+    # post-processing run went through every sidecar again: 17,392 small files on the real library, two to ten
+    # minutes on a hard drive, every hour. A file that is unchanged is not read again: its stored values are
+    # applied instead, which is exactly what reading it would do.
+    stored = {int(r["photo_id"]): r for r in conn.execute(
+        "SELECT photo_id, json_path, json_mtime, json_size, taken_ts, lat, lon, description, favorited, archived, "
+        "trashed FROM takeout_sidecars")}
     now = time.time()
 
     for f in folders:
         abs_dir = os.path.join(f["root"], f["folder"])
         try:
-            names = [e.name for e in os.scandir(abs_dir) if e.is_file() and e.name.lower().endswith(".json")]
+            stat_of = {}
+            for e in os.scandir(abs_dir):
+                if e.name.lower().endswith(".json") and e.is_file():
+                    st = e.stat()          # from the directory listing on Windows: no extra disk read
+                    stat_of[e.name] = (st.st_mtime, st.st_size)
         except OSError:
             continue
+        names = list(stat_of)
         if not names:
             continue
         sidecars = _FolderSidecars(names)
@@ -191,6 +202,16 @@ def import_takeout(ctx, conn: sqlite3.Connection) -> dict:
             jname = sidecars.match(p["filename"])
             if not jname:
                 continue
+            rel = os.path.join(f["folder"], jname)
+            mtime, size = stat_of[jname]
+            old = stored.get(int(p["id"]))
+            if old is not None and old["json_path"] == rel and old["json_mtime"] == mtime and old["json_size"] == size:
+                sc = {k: old[k] for k in ("taken_ts", "lat", "lon", "description")}
+                sc.update({k: bool(old[k]) for k in ("favorited", "archived", "trashed")})
+                _apply(conn, int(p["id"]), p, sc, first_time=False, stats=stats)
+                stats["sidecars"] += 1
+                stats["unchanged"] += 1
+                continue
             try:
                 with open(os.path.join(abs_dir, jname), encoding="utf-8") as fh:
                     raw = json.load(fh)
@@ -200,16 +221,17 @@ def import_takeout(ctx, conn: sqlite3.Connection) -> dict:
             if not isinstance(raw, dict) or ("photoTakenTime" not in raw and "title" not in raw):
                 continue    # some other JSON that happens to sit next to the photo
             sc = parse_sidecar(raw)
-            _apply(conn, int(p["id"]), p, sc, first_time=int(p["id"]) not in existing, stats=stats)
+            _apply(conn, int(p["id"]), p, sc, first_time=old is None, stats=stats)
             conn.execute(
                 """INSERT INTO takeout_sidecars(photo_id, json_path, taken_ts, lat, lon, description, people,
-                       favorited, archived, trashed, imported_at) VALUES (?,?,?,?,?,?,?,?,?,?,?)
+                       favorited, archived, trashed, imported_at, json_mtime, json_size) VALUES (?,?,?,?,?,?,?,?,?,?,?,?,?)
                    ON CONFLICT(photo_id) DO UPDATE SET json_path=excluded.json_path, taken_ts=excluded.taken_ts,
                        lat=excluded.lat, lon=excluded.lon, description=excluded.description, people=excluded.people,
-                       favorited=excluded.favorited, archived=excluded.archived, trashed=excluded.trashed""",
-                (int(p["id"]), os.path.join(f["folder"], jname), sc["taken_ts"], sc["lat"], sc["lon"],
+                       favorited=excluded.favorited, archived=excluded.archived, trashed=excluded.trashed,
+                       json_mtime=excluded.json_mtime, json_size=excluded.json_size""",
+                (int(p["id"]), rel, sc["taken_ts"], sc["lat"], sc["lon"],
                  sc["description"], json.dumps(sc["people"]), int(sc["favorited"]), int(sc["archived"]),
-                 int(sc["trashed"]), now))
+                 int(sc["trashed"]), now, mtime, size))
             stats["sidecars"] += 1
         conn.commit()
 

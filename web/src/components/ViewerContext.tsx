@@ -1,4 +1,5 @@
-import { createContext, useCallback, useContext, useMemo, useState } from "react";
+import { createContext, useCallback, useContext, useEffect, useMemo, useRef, useState } from "react";
+import { useLocation } from "react-router-dom";
 import { PhotoViewer } from "./PhotoViewer";
 
 export interface ViewerItem {
@@ -28,6 +29,17 @@ export function ViewerProvider({ children }: { children: React.ReactNode }) {
     setIds([]);
     document.body.style.overflow = "";
   }, []);
+
+  // Going anywhere closes it: a person, place or album link in its own details panel changed the page
+  // underneath while the viewer stayed on top (it looked as if the click did nothing), and a phone's Back
+  // button moved the page behind it.
+  const { pathname, search } = useLocation();
+  const where = useRef(pathname + search);
+  useEffect(() => {
+    if (where.current === pathname + search) return;
+    where.current = pathname + search;
+    close();
+  }, [pathname, search, close]);
 
   const value = useMemo(() => ({ open, close }), [open, close]);
 

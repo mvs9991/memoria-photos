@@ -28,8 +28,8 @@ export default function Albums() {
   const privateAlbums = albums.filter((a) => a.private);
   const mine = albums.filter((a) => a.source === "user" && a.kind !== "smart" && !a.private);
   const smart = albums.filter((a) => a.kind === "smart" && !a.private);
-  const imported = albums.filter((a) => a.source === "takeout");
-  const icloud = albums.filter((a) => a.source === "icloud");
+  const imported = albums.filter((a) => a.source === "takeout" && !a.private);   // a private one is listed under Private
+  const icloud = albums.filter((a) => a.source === "icloud" && !a.private);
 
   return (
     <div className="page">

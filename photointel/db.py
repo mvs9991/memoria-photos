@@ -67,6 +67,11 @@ V7_COLUMNS = {
         ("private", "INTEGER NOT NULL DEFAULT 0"),      # 1 = only that account sees it
     ],
 }
+# Added later without a schema bump (older versions ignore them): the sidecar file each Takeout row was read
+# from, so an unchanged one is not read again (engine/takeout.py).
+LATER_COLUMNS = {
+    "takeout_sidecars": [("json_mtime", "REAL"), ("json_size", "INTEGER")],
+}
 MIGRATION_INDEXES = [
     "CREATE INDEX IF NOT EXISTS ix_photos_media ON photos(media_type)",
     "CREATE INDEX IF NOT EXISTS ix_photos_live ON photos(live_component)",
@@ -84,7 +89,8 @@ def _add_columns(conn: sqlite3.Connection, table: str, columns: list[tuple[str, 
 def _ensure_columns(conn: sqlite3.Connection) -> None:
     """Add every post-v1 column that is missing. Idempotent; runs for new and old databases."""
     _add_columns(conn, "photos", V2_PHOTO_COLUMNS)
-    for table, cols in (*V3_COLUMNS.items(), *V6_COLUMNS.items(), *V7_COLUMNS.items(), *V8_COLUMNS.items()):
+    for table, cols in (*V3_COLUMNS.items(), *V6_COLUMNS.items(), *V7_COLUMNS.items(), *V8_COLUMNS.items(),
+                        *LATER_COLUMNS.items()):
         _add_columns(conn, table, cols)
     for sql in MIGRATION_INDEXES:
         conn.execute(sql)

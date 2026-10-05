@@ -16,6 +16,8 @@
   justify-content: space-between;
   gap: 12px;
   padding: 10px 14px;
+  /* the home-screen app draws under the status bar and notch (viewport-fit=cover) */
+  padding: calc(10px + env(safe-area-inset-top)) max(14px, env(safe-area-inset-right)) 10px max(14px, env(safe-area-inset-left));
   flex: none;
   z-index: 3;
 }
@@ -59,6 +61,8 @@
 .viewer-img {
   max-width: 100%;
   max-height: calc(100vh - 92px);
+  /* iOS: 100vh is the height with Safari's bars hidden, which cut a portrait photo off top and bottom */
+  max-height: calc(100dvh - 92px - env(safe-area-inset-top) - env(safe-area-inset-bottom));
   object-fit: contain;
   border-radius: 3px;
   box-shadow: var(--sh-4);

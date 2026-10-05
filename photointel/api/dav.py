@@ -169,12 +169,12 @@ def _mark_pending(conn) -> None:
         conn.commit()
 
 
-def _finalize(conn, who: str, path: str, tmp: Path, size: int) -> tuple[int, str]:
+def _finalize(conn, who: str, path: str, tmp: Path, size: int, role: str = "owner") -> tuple[int, str]:
     """Store a received file under its final name; record where it went for that path."""
     ctx = get_state().ctx
     name = path.rsplit("/", 1)[-1]
     with open(tmp, "rb") as fh:
-        saved = uploads_mod.save_upload(ctx, conn, fh, name, who=who)
+        saved = uploads_mod.save_upload(ctx, conn, fh, name, who=who, sees_hidden=role == "owner")
     if saved.status == "rejected":
         return 415, saved.reason or "not a photo or video"
     stored = saved.path
@@ -276,7 +276,7 @@ async def dav(request: Request, path: str = ""):
                 _discard(Path(old[0]))
             return Response(status_code=201)
         try:
-            code, _ = await run_in_threadpool(_finalize, conn, who, clean, tmp, size)
+            code, _ = await run_in_threadpool(_finalize, conn, who, clean, tmp, size, role)
         finally:
             _discard(tmp)
         return Response(status_code=code)
@@ -294,7 +294,7 @@ async def dav(request: Request, path: str = ""):
             if not tmp.is_file():
                 return Response(status_code=404)
             try:
-                code, _ = await run_in_threadpool(_finalize, conn, who, dest, tmp, pend["size"])
+                code, _ = await run_in_threadpool(_finalize, conn, who, dest, tmp, pend["size"], role)
             finally:
                 _discard(tmp)
                 conn.execute("DELETE FROM dav_pending WHERE who = ? AND path = ?", (who, clean))
