@@ -62,7 +62,11 @@ def until_db_changes(by_day: bool = False):
                 hit = _entries.get(key)
                 if hit is not None and hit[0] == token:
                     _entries.move_to_end(key)
-                    return _replay(hit[1])
+                    kept = hit[1]
+                else:
+                    kept = None
+            if kept is not None:
+                return _replay(kept, key, token)
             out = fn(*args, **kwargs)
             from .deps import _response_notes
 
@@ -83,19 +87,38 @@ def until_db_changes(by_day: bool = False):
 
 def _keep(out):
     """What to store: the encoded body of a JSON response, or a plain dict/list (never a Response object,
-    which carries per-request state)."""
+    which carries per-request state). The third slot holds its gzip once a client has asked for one."""
     if isinstance(out, JSONResponse):
-        return (bytes(out.body), out.status_code)
+        return (bytes(out.body), out.status_code, None)
     if isinstance(out, (dict, list)):
         # Encoded once, as FastAPI would have: a shared dict handed to every later request could be changed by one.
         from fastapi.encoders import jsonable_encoder
 
-        return (bytes(JSONResponse(jsonable_encoder(out)).body), 200)
+        return (bytes(JSONResponse(jsonable_encoder(out)).body), 200, None)
     return None
 
 
-def _replay(kept):
-    return Response(content=kept[0], status_code=kept[1], media_type="application/json")
+GZIP_MIN = 1024          # as the app's GZipMiddleware: smaller answers go as they are
+
+
+def _replay(kept, key, token):
+    """A kept answer, compressed once and then sent compressed: gzipping the 830 KB photo index took 25 ms of
+    the 25 ms a kept answer otherwise cost (GZipMiddleware leaves a response that already has an encoding)."""
+    from .deps import accepts_gzip
+
+    body, status, gz = kept
+    if len(body) < GZIP_MIN or not accepts_gzip():
+        return Response(content=body, status_code=status, media_type="application/json")
+    if gz is None:
+        import gzip
+
+        gz = gzip.compress(body, compresslevel=5)
+        with _lock:
+            hit = _entries.get(key)
+            if hit is not None and hit[0] == token:
+                _entries[key] = (token, (body, status, gz))
+    return Response(content=gz, status_code=status, media_type="application/json",
+                    headers={"Content-Encoding": "gzip", "Vary": "Accept-Encoding"})
 
 
 def close_all() -> None:

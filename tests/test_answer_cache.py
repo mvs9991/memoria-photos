@@ -42,3 +42,13 @@ def test_answers_differ_by_their_arguments(client):
     everyone = client.get("/api/timeline").json()
     assert client.get("/api/timeline", params={"person": 999999}).json() != everyone
     assert client.get("/api/timeline").json() == everyone
+
+
+def test_a_kept_answer_goes_out_compressed_once_and_decodes_the_same(client):
+    first = client.get("/api/timeline", headers={"Accept-Encoding": "gzip"})
+    again = client.get("/api/timeline", headers={"Accept-Encoding": "gzip"})
+    plain = client.get("/api/timeline", headers={"Accept-Encoding": "identity"})
+    assert again.json() == first.json() == plain.json()
+    if len(plain.content) >= 1024:
+        assert again.headers.get("content-encoding") == "gzip"
+        assert plain.headers.get("content-encoding") is None

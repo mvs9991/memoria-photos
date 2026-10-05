@@ -66,9 +66,18 @@ from contextvars import ContextVar  # noqa: E402
 _request_mark: ContextVar[object | None] = ContextVar("memoria_request", default=None)
 
 
-def start_request(path: str = "") -> None:
+def start_request(path: str = "", accepts_gzip: bool = False) -> None:
     """Called once per HTTP request (app middleware), so ApiState.conn can tell requests apart."""
     _request_mark.set((object(), path))
+    _accepts_gzip.set(accepts_gzip)
+
+
+_accepts_gzip: ContextVar[bool] = ContextVar("memoria_accepts_gzip", default=False)
+
+
+def accepts_gzip() -> bool:
+    """Whether this request's client takes gzip (cache.py then sends a kept answer already compressed)."""
+    return _accepts_gzip.get()
 
 
 _current_user: ContextVar[dict | None] = ContextVar("memoria_user", default=None)

@@ -175,7 +175,7 @@ def create_app(ctx: AppContext) -> FastAPI:
     @app.middleware("http")
     async def hardening(request: Request, call_next):
         _last_request[0] = time.monotonic()
-        start_request(request.url.path)
+        start_request(request.url.path, "gzip" in request.headers.get("accept-encoding", "").lower())
         response = _hardened(await access(request, call_next))
         if request.url.path.startswith("/assets/") and response.status_code == 200:
             # Build files are named by their content, so a browser never needs to ask about them again.
