@@ -197,6 +197,7 @@ ALLOWED_REMOVALS = {
     "video.py": 2,                      # transcode temp files
     "engine/uploads.py": 1,             # an upload's own temp file in <upload folder>/.incoming
     "engine/editor.py": 1,              # a trim's own .part file when nothing was copied
+    "engine/export.py": 1,              # an export copy's own temp file in the export folder when the copy failed
     "api/images.py": 2,                 # temp files under <data>/cache: a rotated thumbnail that lost a race; a face crop whose write failed
     "api/dav.py": 1,                    # _discard(): a backup app's own temp upload in .incoming (too large / dropped / stored / moved / replaced)
     "autostart.py": 3,                  # its own start-up entries (Startup .cmd, launchd plist, systemd unit)
@@ -449,3 +450,20 @@ def test_zip_entries_also_carry_the_capture_date(ctx, library, tmp_path):
     want = ts_to_naive(taken)                 # the wall clock the photo was taken at
     assert info.date_time[:5] == (want.year, want.month, want.day, want.hour, want.minute)
     conn.close()
+
+
+def test_an_export_never_replaces_another_apps_sidecar(ctx, library, tmp_path):
+    """Exporting with XMP into a folder that already holds the photo and a Lightroom sidecar for it."""
+    from photointel.engine import export as export_mod
+    from photointel.pipeline.indexer import Indexer
+
+    Indexer(ctx, workers=1).run(roots=[str(library)])
+    conn = ctx.connect()
+    pid = conn.execute("SELECT id FROM photos WHERE status = 'ok' AND live_component = 0 ORDER BY id LIMIT 1").fetchone()[0]
+    out = tmp_path / "out"
+    spec = export_mod.ExportSpec(photo_ids=[pid], layout="flat", xmp=True, folder=str(out))
+    export_mod.export_to_folder(conn, spec)
+    side = next(out.glob("*.xmp"))
+    side.write_text("<x:xmpmeta x:xmptk='Adobe XMP Core'>Lightroom's edits</x:xmpmeta>", encoding="utf-8")
+    export_mod.export_to_folder(conn, spec)            # a re-run into the same folder
+    assert "Lightroom's edits" in side.read_text(encoding="utf-8")     # was: replaced with Memoria's

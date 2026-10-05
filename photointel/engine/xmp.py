@@ -111,6 +111,25 @@ def refuse_inside_roots(conn: sqlite3.Connection, folders) -> None:
                 raise ExportError(f"{f} would be inside the photo folder {r}; choose another export folder")
 
 
+XMP_MARK = 'x:xmptk="Memoria"'
+
+
+def write_sidecar(dest: Path, xml: str) -> bool:
+    """Write `xml` to `dest` unless a sidecar Memoria did not write is already there (another app's, e.g.
+    Lightroom's beside a photo the user had in that folder): that one is left alone and False returned."""
+    if dest.exists():
+        try:
+            head = dest.read_text(encoding="utf-8", errors="replace")[:4096]
+        except OSError:
+            return False
+        if XMP_MARK not in head:
+            return False
+    tmp = dest.with_name(f".{dest.name}.{os.getpid()}.memoria-tmp")
+    tmp.write_text(xml, encoding="utf-8")
+    os.replace(tmp, dest)
+    return True
+
+
 def export_xmp(conn: sqlite3.Connection, out_dir: str | Path, include_auto_tags: bool = False,
                everything: bool = False) -> dict:
     out = _check_destination(conn, Path(out_dir))
@@ -118,20 +137,20 @@ def export_xmp(conn: sqlite3.Connection, out_dir: str | Path, include_auto_tags:
     roots = {int(r[0]): Path(r[1]).name or f"root{r[0]}" for r in conn.execute("SELECT id, path FROM roots")}
     refuse_inside_roots(conn, [out / name for name in roots.values()])
     rows, tags_of, faces_of = _load(conn, include_auto_tags)
-    written = 0
+    written = kept = 0
     for r in rows:
         xml, has_user_data = _sidecar(r, tags_of, faces_of)
         if not (has_user_data or everything):
             continue
         dest = out / roots.get(r["root_id"], "library") / (r["rel_path"] + ".xmp")
         dest.parent.mkdir(parents=True, exist_ok=True)
-        tmp = dest.with_name(dest.name + ".tmp")
-        tmp.write_text(xml, encoding="utf-8")
-        os.replace(tmp, dest)
-        written += 1
+        if write_sidecar(dest, xml):
+            written += 1
+        else:
+            kept += 1             # another app's sidecar: not ours to replace
     (out / "memoria-export.json").write_text(json.dumps({
         "exported_at": time.time(), "sidecars": written, "auto_tags": include_auto_tags}, indent=2), encoding="utf-8")
-    return {"written": written, "folder": str(out), "seconds": round(time.time() - t0, 2)}
+    return {"written": written, "kept_existing": kept, "folder": str(out), "seconds": round(time.time() - t0, 2)}
 
 
 def _bag(items: list[str]) -> str:

@@ -905,7 +905,7 @@ the future, everything collapsing into one event, fuzzy duplicate thresholds too
 
 ## 10. Working notes
 
-- Run the suite with `.venv/Scripts/python.exe -m pytest -q`. 803 tests, ~12 min, no GPU needed —
+- Run the suite with `.venv/Scripts/python.exe -m pytest -q`. 804 tests, ~12 min, no GPU needed —
   the neural nets are replaced by deterministic fakes.
 - Test fixtures seed randomness from `zlib.crc32` of the **file name**, not `hash()` (salted per
   process) and not the full path (contains pytest's per-run tmp counter). Both made failures
@@ -1194,3 +1194,6 @@ folders, export targets or newly claimed upload/edit files; renames only in `eng
 - Files dated before 1970 failed to index; a `+00:00` EXIF offset was read as "none"; `FB_IMG_<epoch ms>` names were
   dated in UTC while every other source uses local time.
 - A drive used as a root (`D:\`) cut the first letter off every relative path (found while applying the above; not covered by a test, since it needs a whole drive as a root).
+- **Exports never replace another app's sidecar** (2026-10-05): exporting with XMP into a folder that already held the
+  photo with a Lightroom `.xmp` replaced that file. `xmp.write_sidecar` writes only where nothing is, or where the
+  file carries Memoria's `x:xmptk` mark; the copy goes through a unique temp name and is tidied if the copy fails.

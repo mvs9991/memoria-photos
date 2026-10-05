@@ -28,7 +28,7 @@ from ..metadata import naive_to_ts, ts_to_naive
 from . import albums as albums_mod
 from ..pipeline.scanner import long_path
 from .people import person_label
-from .xmp import ExportError, _check_destination, refuse_inside_roots, sidecars_for
+from .xmp import ExportError, _check_destination, refuse_inside_roots, sidecars_for, write_sidecar
 
 log = logging.getLogger(__name__)
 
@@ -257,9 +257,16 @@ def export_to_folder(conn: sqlite3.Connection, spec: ExportSpec, progress: Calla
             if same:
                 already += 1
             else:
-                tmp = dest.with_name(dest.name + ".part")
-                shutil.copy2(it.src, tmp)           # bytes and modification time, from a read-only open
-                os.replace(tmp, dest)
+                tmp = dest.with_name(f".{dest.name}.{os.getpid()}.memoria-part")   # never a name someone uses
+                try:
+                    shutil.copy2(it.src, tmp)       # bytes and modification time, from a read-only open
+                    os.replace(tmp, dest)
+                except OSError:
+                    try:
+                        tmp.unlink()                # a half copy is ours to tidy (never the original)
+                    except OSError:
+                        pass
+                    raise
                 try:
                     os.utime(dest, (it.stamp, it.stamp))    # date taken, so other apps sort it right
                 except OSError:
@@ -267,7 +274,9 @@ def export_to_folder(conn: sqlite3.Connection, spec: ExportSpec, progress: Calla
                 copied += 1
                 written_bytes += it.size
             if it.photo_id in xmps:
-                (dest.with_name(dest.name + ".xmp")).write_text(xmps[it.photo_id], encoding="utf-8")
+                # Not over another app's sidecar: re-exporting into a folder that already held this photo
+                # with a Lightroom .xmp replaced that file.
+                write_sidecar(dest.with_name(dest.name + ".xmp"), xmps[it.photo_id])
             manifest.append({"photo_id": it.photo_id, "from": str(it.src), "to": dest.relative_to(out).as_posix()})
         except OSError as exc:
             failed += 1
