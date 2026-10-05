@@ -98,7 +98,7 @@ def _small_thumb_backfill(ctx: AppContext, stop: threading.Event) -> None:
     """Make the phone grid's small thumbnails for photos indexed before the indexer made them. Only while
     nobody has asked the server for anything for 30 s and no index job runs: it reads from the same slow
     disk as everyone else."""
-    from ..engine import thumbs
+    from ..engine import thumbpack, thumbs
     from ..pipeline import jobs
 
     while not stop.wait(60):
@@ -113,7 +113,11 @@ def _small_thumb_backfill(ctx: AppContext, stop: threading.Event) -> None:
                 if made:
                     log.info("Made %d small thumbnails while idle", made)
                 elif not thumbs.missing(conn, ctx.paths.thumbs, 1):
-                    stop.wait(3600)             # all done; look again in an hour (new imports make their own)
+                    # Every small thumbnail exists: keep the pack (grid order, one file) up to date, then rest.
+                    if thumbpack.needs_build(conn, ctx.paths.thumbs):
+                        thumbpack.build(conn, ctx.paths.thumbs, may_run=lambda: _idle() and not stop.is_set())
+                    else:
+                        stop.wait(3600)         # all done; look again in an hour (new imports make their own)
             finally:
                 conn.close()
         except Exception:

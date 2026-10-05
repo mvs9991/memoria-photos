@@ -405,6 +405,10 @@ def clear_cache(kind: str = Query("previews", pattern="^(previews|faces|thumbs|a
     paths = state.ctx.paths
     targets = {"previews": [paths.previews], "faces": [paths.faces], "thumbs": [paths.thumbs],
                "all": [paths.previews, paths.faces, paths.thumbs]}[kind]
+    if paths.thumbs in targets:
+        from ..engine import thumbpack
+
+        thumbpack.close(paths.thumbs)    # Windows will not delete a file that is open
     removed = 0
     for t in targets:
         if t.exists():

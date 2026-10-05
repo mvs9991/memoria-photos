@@ -19,7 +19,7 @@ from fastapi.responses import FileResponse, StreamingResponse
 from PIL import Image
 
 from .. import imaging
-from ..engine import thumbs
+from ..engine import thumbpack, thumbs
 from ..config import RAW_EXTENSIONS
 from ..rotation import rotate_image
 from ..pipeline.scanner import long_path
@@ -142,6 +142,10 @@ def _thumb_plain(photo_id: int, s: str, row) -> Response:
         if p.exists() and (hit := _cached_file(p, "image/webp")) is not None:
             return hit
     if s == "sm" and sha:
+        # From the pack first: one file in grid order, so a screenful is one read rather than 30 seeks.
+        packed = thumbpack.lookup(paths.thumbs, sha)
+        if packed is not None:
+            return Response(packed, media_type="image/webp", headers={"Cache-Control": IMMUTABLE})
         small = thumbs.small_path(paths.thumbs, sha)
         if small.exists() and (hit := _cached_file(small, "image/webp")) is not None:
             return hit
