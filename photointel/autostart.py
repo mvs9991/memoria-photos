@@ -86,7 +86,8 @@ def install(data: Path, at_boot: bool = False) -> dict:
     data = Path(data).resolve()
     if os.name == "nt":
         launcher = data / "memoria-start.cmd"
-        launcher.write_text(launcher_text(data), encoding="utf-8")
+        # Written as is: the text already has Windows line ends, and text mode doubled the CR in each.
+        launcher.write_text(launcher_text(data), encoding="utf-8", newline="")
         if at_boot:
             r = _run(["schtasks", "/Create", "/F", "/TN", TASK_NAME, "/SC", "ONSTART", "/RU", "SYSTEM",
                       "/RL", "HIGHEST", "/TR", f'"{launcher}"'])
