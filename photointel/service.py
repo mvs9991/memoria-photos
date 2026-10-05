@@ -159,6 +159,73 @@ def _spawn(cmd: list[str], data: Path) -> int:
             raise
 
 
+def find_processes(data: Path) -> list[tuple[int, str, str]]:
+    """(pid, role, command line) of Memoria's keeper ("run") and server ("serve") processes for this library."""
+    want = os.path.normcase(str(Path(data).resolve()))
+    found = []
+    if os.name == "nt":
+        ps = ("Get-CimInstance Win32_Process -Filter \"Name='python.exe' OR Name='pythonw.exe'\" | "
+              "ForEach-Object { \"$($_.ProcessId)`t$($_.CommandLine)\" }")
+        out = subprocess.run(["powershell", "-NoProfile", "-Command", ps], capture_output=True, text=True,
+                             timeout=60).stdout
+        lines = [ln.split("	", 1) for ln in out.splitlines() if "	" in ln]
+    else:
+        out = subprocess.run(["ps", "-eo", "pid=,args="], capture_output=True, text=True, timeout=60).stdout
+        lines = [ln.strip().split(" ", 1) for ln in out.splitlines() if ln.strip()]
+    for pid, cmd in lines:
+        if "photointel" not in cmd or int(pid) == os.getpid():
+            continue
+        role = _subcommand(cmd)
+        if role in ("run", "serve") and want in os.path.normcase(cmd.replace('"', "")):
+            found.append((int(pid), role, cmd))
+    return found
+
+
+def _subcommand(cmd: str) -> str | None:
+    """The photointel subcommand in a command line: the first word after "photointel" that is not an option
+    or an option's value (`python -m photointel --data D:/lib run --host 0.0.0.0` -> "run")."""
+    parts = cmd.replace('"', " ").split()
+    try:
+        i = parts.index("photointel") + 1
+    except ValueError:
+        return None
+    while i < len(parts):
+        if parts[i] in ("--data",):
+            i += 2
+        elif parts[i].startswith("-"):
+            i += 1
+        else:
+            return parts[i]
+    return None
+
+
+def stop(data: Path) -> list[int]:
+    """Stop the keeper first (or it would start the server again), then the server. Returns the pids stopped."""
+    procs = find_processes(data)
+    stopped = []
+    for role in ("run", "serve"):
+        for pid, r, _ in procs:
+            if r != role:
+                continue
+            if os.name == "nt":
+                ok = subprocess.run(["taskkill", "/PID", str(pid), "/T", "/F"], capture_output=True).returncode == 0
+            else:
+                import signal
+
+                try:
+                    os.kill(pid, signal.SIGTERM)
+                    ok = True
+                except OSError:
+                    ok = False
+            if ok:
+                stopped.append(pid)
+    state = read_state(data)
+    if stopped:
+        state["status"] = "stopped"
+        _write_state(data, state)
+    return stopped
+
+
 def restarts_since(data: Path, since: float) -> int:
     return sum(1 for t in read_state(data).get("restarts", []) if t >= since)
 

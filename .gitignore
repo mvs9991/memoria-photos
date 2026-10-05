@@ -35,3 +35,7 @@ web/perf.mjs
 web/jank.mjs
 web/diag*.mjs
 web/jk*.mjs
+
+# This PC's own setup notes and launcher (hold local paths and the password)
+/MY_SETUP_GUIDE.md
+/memoria.cmd

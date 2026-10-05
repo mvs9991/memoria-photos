@@ -34,3 +34,12 @@ def test_a_gps_minute_or_second_of_60_or_more_is_corrupt_not_a_position():
     assert parse_gps({1: "N", 2: (17, 23, 61), 3: "E", 4: (78, 28, 0)}) == (None, None, None)
     lat, lon, _ = parse_gps({1: "N", 2: (17, 23.5, 0), 3: "E", 4: (78, 28, 59.9)})          # decimal minutes are fine
     assert round(lat, 4) == 17.3917 and round(lon, 4) == 78.4833
+
+
+def test_stop_finds_the_keeper_and_server_of_this_library_only():
+    from photointel import service
+
+    assert service._subcommand(r'"D:\x\python.exe" -m photointel --data D:\lib run --host 0.0.0.0') == "run"
+    assert service._subcommand("python.exe -m photointel --data D:/lib serve --port 8765") == "serve"
+    assert service._subcommand("python.exe -m photointel --data D:/lib index --job-id 3") == "index"
+    assert service._subcommand("python.exe -m pytest -q") is None

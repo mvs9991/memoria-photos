@@ -26,7 +26,7 @@ tried and rejected, and what is still unverified. `README.md` documents the prod
 ## Commands
 
 ```bash
-.venv/Scripts/python.exe -m pytest -q          # 804 tests, ~12 min, no GPU needed (PHOTOINTEL_TEST_RESTIC=<restic.exe> adds the real-restic test)
+.venv/Scripts/python.exe -m pytest -q          # 819 tests, ~12 min, no GPU needed (PHOTOINTEL_TEST_RESTIC=<restic.exe> adds the real-restic test)
 python -m photointel add-root "D:/Photos"
 python -m photointel index                     # resumable; only processes what changed
 python -m photointel index --post-only --full-recluster   # after changing clustering settings
@@ -42,6 +42,7 @@ python -m photointel accounts list|reset-password <name>|reset-pin   # recovery 
 python -m photointel serve                     # http://127.0.0.1:8765 (+ https on 8443 once set up)
 python -m photointel run                       # serve under the keeper: restarts it if it stops (what autostart runs)
 python -m photointel autostart on|off|status   # start with the computer (--at-boot: Task Scheduler, admin)
+python -m photointel stop                      # stop the running keeper and server for this library
 python -m photointel health                    # drives, space, backups, phones, HTTPS, off-site
 python -m photointel offsite setup|run|status|snapshots|check|restore   # encrypted off-site copy (restic)
 python eval/inspect_library.py --data ./data   # sanity report for a real library

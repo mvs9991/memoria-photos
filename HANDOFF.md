@@ -905,7 +905,7 @@ the future, everything collapsing into one event, fuzzy duplicate thresholds too
 
 ## 10. Working notes
 
-- Run the suite with `.venv/Scripts/python.exe -m pytest -q`. 804 tests, ~12 min, no GPU needed —
+- Run the suite with `.venv/Scripts/python.exe -m pytest -q`. 819 tests, ~12 min, no GPU needed —
   the neural nets are replaced by deterministic fakes.
 - Test fixtures seed randomness from `zlib.crc32` of the **file name**, not `hash()` (salted per
   process) and not the full path (contains pytest's per-run tmp counter). Both made failures
@@ -1197,3 +1197,24 @@ folders, export targets or newly claimed upload/edit files; renames only in `eng
 - **Exports never replace another app's sidecar** (2026-10-05): exporting with XMP into a folder that already held the
   photo with a Lightroom `.xmp` replaced that file. `xmp.write_sidecar` writes only where nothing is, or where the
   file carries Memoria's `x:xmptk` mark; the copy goes through a unique temp name and is tidied if the copy fails.
+
+### People review (2026-10-05, `tests/test_people_review.py`; all 14 failed before their fixes)
+
+- **A full recluster gave a named person's faces to whoever was just corrected:** a cluster holding one person's
+  user-confirmed faces went wholly to them even when another (unconfirmed, e.g. only renamed) person held most of it,
+  so after "split 2 off Priya" Priya ended with 0 faces. `_map_clusters_to_persons` now splits such a cluster between
+  the two by nearest centroid (the existing branch for clusters spanning confirmed identities). This only acts where
+  user-confirmed faces exist, so the clustering evaluations (no user corrections) are unaffected; no threshold moved.
+- **"Not this person" was erased** when a changed photo was re-analysed (deleting old faces cascaded their
+  rejections) and on a face-model upgrade (the carry-over code was a comment). Both now carry rejections to the new
+  face by box overlap; re-analysis also uses each old face once (one confirmed name could land on two new faces).
+- **Merges:** the survivor keeps a name and birth date whichever side had them ("Same person" always sends the older
+  id as target and deleted a name given to the newer); "these are different people" follows the merge; the merge
+  takes the write lock before reading who survives (two opposite merges at once orphaned every face). "Me" follows
+  a merge (search "photos of me" found nothing after one). Rename, flags, birth date, split and reject from a page
+  left open since a merge now act on the survivor.
+- Unknown person ids are a 404 (they were a 500 that left a write transaction open, and other requests then waited
+  out the 60 s lock timeout). Naming faces "priya " no longer makes a second Priya. Birth dates are stored in one
+  form and future ones refused. "Appears with" leaves out hidden photos. Merge suggestions kept only the first 40
+  pairs and compared each person with 6 neighbours, so dismissing them dried suggestions up: the neighbourhood now
+  grows with the dismissals (up to 36) and every pair is kept.

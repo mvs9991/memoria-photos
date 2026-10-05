@@ -45,7 +45,7 @@ def list_people(include_hidden: bool = False, include_ignored: bool = False, min
         "WHERE f.person_id IS NULL AND f.quality >= 0.3 AND p.status = 'ok' AND p.hidden = 0 "
         "AND p.live_component = 0").fetchone()[0]
     return {"people": people, "unassigned_faces": unassigned,
-            "me_person_id": get_state().ctx.settings.me_person_id}
+            "me_person_id": _me(conn)}
 
 
 @router.get("/people/{person_id}")
@@ -118,7 +118,7 @@ def person_detail(person_id: int, photo_limit: int = 500):
         "hidden": bool(r["hidden"]), "ignored": bool(r["ignored"]),
         "events": events, "event_count": event_count, "places": places, "years": years, "representative_photos": best,
         "co_occurring": co_occurring(conn, person_id),
-        "is_me": state.ctx.settings.me_person_id == person_id,
+        "is_me": _me(conn) == person_id,
         "birth_date": r["birth_date"],
         "age": people_mod.age_on(r["birth_date"], None),
     }
@@ -154,6 +154,21 @@ def unassigned_faces(limit: int = Query(200, le=1000), min_quality: float = 0.35
                        "box": [r["x1"], r["y1"], r["x2"], r["y2"]], "taken_ts": r["taken_ts"]} for r in rows]}
 
 
+def _person_or_404(conn, person_id: int) -> int:
+    """The person (or the one it was merged into), or a 404. An id that does not exist reached the engine,
+    failed on a foreign key with its write transaction still open, and every other request then waited out
+    the 60 s lock timeout."""
+    if conn.execute("SELECT 1 FROM persons WHERE id = ?", (int(person_id),)).fetchone() is None:
+        raise HTTPException(404, "person not found")
+    return people_mod.live_person(conn, int(person_id))
+
+
+def _me(conn) -> int | None:
+    """Who "me" is now: the setting keeps the id chosen, which a merge may have folded into another person."""
+    me = get_state().ctx.settings.me_person_id
+    return people_mod.live_person(conn, me) if me else None
+
+
 class RenameBody(BaseModel):
     name: str | None = None
 
@@ -161,10 +176,12 @@ class RenameBody(BaseModel):
 @router.post("/people/{person_id}/rename")
 def rename(person_id: int, body: RenameBody):
     conn = get_state().conn()
-    people_mod.rename_person(conn, person_id, (body.name or "").strip() or None)
+    person_id = _person_or_404(conn, person_id)
+    name = (body.name or "").strip() or None
+    people_mod.rename_person(conn, person_id, name)
     db.bump_generation(conn, "people")
     conn.commit()
-    return {"ok": True, "id": person_id, "name": body.name}
+    return {"ok": True, "id": person_id, "name": name}
 
 
 class FlagsBody(BaseModel):
@@ -181,6 +198,7 @@ def flags(person_id: int, body: FlagsBody):
     if body.is_me is not None and current_role() != "owner":
         # "Me" is the library's setting (settings.json), which only an owner may change.
         raise HTTPException(403, "only an owner can choose who 'me' is")
+    person_id = _person_or_404(conn, person_id)
     people_mod.set_person_flags(conn, person_id, body.hidden, body.ignored)
     if body.birth_date is not None:
         try:
@@ -188,7 +206,8 @@ def flags(person_id: int, body: FlagsBody):
         except ValueError as exc:
             raise HTTPException(400, str(exc))
     if body.is_me is not None:
-        state.ctx.settings.me_person_id = person_id if body.is_me else None
+        state.ctx.settings.me_person_id = person_id if body.is_me else (
+            None if _me(conn) == person_id else state.ctx.settings.me_person_id)
         state.ctx.settings.save(state.ctx.paths.data)
     db.bump_generation(conn, "people")
     conn.commit()
@@ -214,7 +233,11 @@ class MergeBody(BaseModel):
 @router.post("/people/merge")
 def merge(body: MergeBody):
     conn = get_state().conn()
-    return people_mod.merge_persons(conn, body.target_id, body.source_ids)
+    _person_or_404(conn, body.target_id)
+    sources = [s for s in body.source_ids if conn.execute("SELECT 1 FROM persons WHERE id = ?", (int(s),)).fetchone()]
+    if not sources:
+        raise HTTPException(404, "person not found")
+    return people_mod.merge_persons(conn, body.target_id, sources)
 
 
 class SplitBody(BaseModel):
@@ -227,6 +250,7 @@ def split(person_id: int, body: SplitBody):
     conn = get_state().conn()
     if not body.face_ids:
         raise HTTPException(400, "no faces given")
+    person_id = _person_or_404(conn, person_id)
     return people_mod.split_person(conn, person_id, body.face_ids, body.name)
 
 
@@ -241,6 +265,8 @@ def assign(body: AssignBody):
     conn = get_state().conn()
     if not body.face_ids:
         raise HTTPException(400, "no faces given")
+    if body.person_id is not None:
+        _person_or_404(conn, body.person_id)
     face_ids = _visible_faces(conn, body.face_ids)
     if not face_ids:
         return {"person_id": body.person_id, "faces": 0}
@@ -255,7 +281,8 @@ class RejectBody(BaseModel):
 @router.post("/faces/reject")
 def reject(body: RejectBody):
     conn = get_state().conn()
-    return people_mod.reject_faces(conn, _visible_faces(conn, body.face_ids), body.person_id)
+    person_id = _person_or_404(conn, body.person_id)
+    return people_mod.reject_faces(conn, _visible_faces(conn, body.face_ids), person_id)
 
 
 def _visible_faces(conn, face_ids: list[int]) -> list[int]:

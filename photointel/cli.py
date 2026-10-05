@@ -198,6 +198,14 @@ def cmd_offsite(ctx: AppContext, args) -> None:
         conn.close()
 
 
+def cmd_stop(ctx: AppContext, args) -> None:
+    from . import service
+
+    stopped = service.stop(ctx.paths.data)
+    print(f"Stopped Memoria ({len(stopped)} process{'es' if len(stopped) != 1 else ''})." if stopped
+          else "Memoria was not running for this library.")
+
+
 def cmd_autostart(ctx: AppContext, args) -> None:
     from . import autostart
 
@@ -479,6 +487,9 @@ def main(argv: list[str] | None = None) -> None:
     p.add_argument("--host")
     p.add_argument("--port", type=int)
 
+    sub.add_parser("stop", help="stop the running server and its keeper (it starts again at the next start-up "
+                                "unless auto-start is off)")
+
     p = sub.add_parser("autostart", help="start Memoria with the computer (on | off | status)")
     p.add_argument("action", choices=["on", "off", "status"])
     p.add_argument("--at-boot", action="store_true",
@@ -557,7 +568,7 @@ def main(argv: list[str] | None = None) -> None:
                 "export-xmp": cmd_export_xmp,
                 "set-password": cmd_set_password, "import-gpx": cmd_import_gpx, "export": cmd_export,
                 "trash": cmd_trash, "backup": cmd_backup, "accounts": cmd_accounts, "run": cmd_run,
-                "autostart": cmd_autostart, "health": cmd_health, "offsite": cmd_offsite}
+                "autostart": cmd_autostart, "stop": cmd_stop, "health": cmd_health, "offsite": cmd_offsite}
     t0 = time.time()
     handlers[args.cmd](ctx, args)
     log.debug("%s finished in %.1fs", args.cmd, time.time() - t0)

@@ -643,21 +643,34 @@ class Indexer:
             "SELECT id, x1, y1, x2, y2, person_id, assign_source FROM faces WHERE photo_id=? AND model_id=?",
             (pid, self.face_mid),
         ).fetchall()
-        # Preserve user-confirmed identities when a changed file is re-analysed (match by box IoU).
-        carry: dict[int, tuple[int, str]] = {}
+        # Keep what the user said about a face when a changed file is re-analysed: each new face takes the old
+        # face it overlaps most (box IoU > 0.5, each old face used once), with its confirmed name and every
+        # "not this person". Deleting the old faces cascaded their rejections away, so a face the user had
+        # said was not Priya went straight back to Priya at the next recluster.
+        match: dict[int, int] = {}
+        rejected: dict[int, list[int]] = {}
         if old:
-            for i, f in enumerate(faces):
-                best, best_iou = None, 0.5
-                for o in old:
-                    iou = _iou(f.box_norm, (o["x1"], o["y1"], o["x2"], o["y2"]))
-                    if iou > best_iou and o["person_id"] is not None and o["assign_source"] == "user":
-                        best, best_iou = o, iou
-                if best is not None:
-                    carry[i] = (best["person_id"], "user")
+            pairs = sorted(((_iou(f.box_norm, (o["x1"], o["y1"], o["x2"], o["y2"])), i, n)
+                            for i, f in enumerate(faces) for n, o in enumerate(old)), reverse=True)
+            used_new, used_old = set(), set()
+            for iou, i, n in pairs:
+                if iou <= 0.5:
+                    break
+                if i in used_new or n in used_old:
+                    continue
+                match[i] = n
+                used_new.add(i)
+                used_old.add(n)
+            marks = ",".join("?" * len(old))
+            for fid, person in conn.execute(f"SELECT face_id, person_id FROM face_rejections WHERE face_id IN ({marks})",
+                                            [int(o["id"]) for o in old]):
+                rejected.setdefault(int(fid), []).append(int(person))
             conn.execute("DELETE FROM faces WHERE photo_id=? AND model_id=?", (pid, self.face_mid))
         for i, f in enumerate(faces):
-            person, source = carry.get(i, (None, None))
-            conn.execute(
+            o = old[match[i]] if i in match else None
+            person, source = ((o["person_id"], "user") if o is not None and o["person_id"] is not None
+                              and o["assign_source"] == "user" else (None, None))
+            cur = conn.execute(
                 "INSERT INTO faces(photo_id, model_id, x1, y1, x2, y2, landmarks, det_score, size_px, sharpness, yaw, "
                 "quality, embedding, person_id, assign_source, assign_confidence, created_at) "
                 "VALUES (?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?)",
@@ -665,6 +678,9 @@ class Indexer:
                  f.yaw, f.quality, f.embedding.astype(np.float16).tobytes(), person, source,
                  1.0 if person else None, now),
             )
+            if o is not None and rejected.get(int(o["id"])):
+                conn.executemany("INSERT OR IGNORE INTO face_rejections(face_id, person_id, created_at) VALUES (?,?,?)",
+                                 [(cur.lastrowid, rp, now) for rp in rejected[int(o["id"])]])
         conn.execute("UPDATE photos SET faces_model=?, face_count=? WHERE id=?", (self.face_mid, len(faces), pid))
 
 

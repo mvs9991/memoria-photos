@@ -196,13 +196,20 @@ def _map_clusters_to_persons(conn, ids, mat, result, person_of_row, user_locked,
         confirmed = Counter(int(person_of_row[r]) for r in rows if user_locked[r] and person_of_row[r] >= 0)
         weak = Counter(int(person_of_row[r]) for r in rows if not user_locked[r] and person_of_row[r] >= 0)
         conf_lab = result.cluster_confidence.get(lab, 0.5)
-        if len(confirmed) > 1:
+        anchors = {pid: [r for r in rows if user_locked[r] and int(person_of_row[r]) == pid] for pid in confirmed}
+        if len(confirmed) == 1 and weak:
+            # One person's faces are user-confirmed here (just split off, or just named), but most of the cluster
+            # belongs to someone else whose faces were never confirmed (a rename locks none). Handing the whole
+            # cluster to the confirmed person took every face of the other: after "split 2 off Priya" or
+            # "these 2 are Ravi", a full recluster left Priya with none. Both keep their own side instead.
+            (c_pid, c_n), (w_pid, w_n) = next(iter(confirmed.items())), weak.most_common(1)[0]
+            if w_pid != c_pid and w_n > c_n + weak.get(c_pid, 0) and best_cluster_for.get(w_pid) == lab:
+                anchors[w_pid] = [r for r in rows if not user_locked[r] and int(person_of_row[r]) == w_pid]
+        if len(anchors) > 1:
             # The cluster spans identities the user explicitly separated: split it by
             # nearest confirmed member instead of merging two real people.
-            targets = list(confirmed)
             centroids = {}
-            for pid in targets:
-                sel = [r for r in rows if user_locked[r] and int(person_of_row[r]) == pid]
+            for pid, sel in anchors.items():
                 centroids[pid] = normalize(mat[sel].mean(0, keepdims=True))[0]
             for r in rows:
                 if user_locked[r]:
@@ -277,6 +284,8 @@ def update_person_stats(conn: sqlite3.Connection, person_ids: list[int] | None =
 # ---------------------------------------------------------------- user operations
 
 def rename_person(conn: sqlite3.Connection, person_id: int, name: str | None) -> None:
+    person_id = live_person(conn, person_id)      # a page left open since a merge names the survivor
+    name = (name or "").strip() or None
     old = conn.execute("SELECT name FROM persons WHERE id=?", (person_id,)).fetchone()
     conn.execute("UPDATE persons SET name=?, updated_at=? WHERE id=?", (name or None, time.time(), person_id))
     db.audit(conn, "person_renamed", "person", person_id, {"from": old[0] if old else None, "to": name})
@@ -285,12 +294,19 @@ def rename_person(conn: sqlite3.Connection, person_id: int, name: str | None) ->
 
 
 def set_birth_date(conn: sqlite3.Connection, person_id: int, value: str) -> None:
+    person_id = live_person(conn, person_id)
     value = (value or "").strip()
     if value:
+        no_year = value.startswith("--")
         try:
-            datetime.strptime(value if not value.startswith("--") else "2000" + value[1:], "%Y-%m-%d")
+            d = datetime.strptime(value if not no_year else "2000" + value[1:], "%Y-%m-%d")
         except ValueError:
             raise ValueError("birth date must be YYYY-MM-DD, or --MM-DD when the year is unknown")
+        if not no_year and d > datetime.now():
+            raise ValueError("a birth date cannot be in the future")
+        # Stored in one form: "2000-3-9" was kept as typed, and the birthday reminder (which reads the last five
+        # characters, "0-3-9") then never showed.
+        value = d.strftime("--%m-%d") if no_year else d.strftime("%Y-%m-%d")
     conn.execute("UPDATE persons SET birth_date = ?, updated_at = ? WHERE id = ?", (value or None, time.time(), person_id))
     db.audit(conn, "person_birth_date", "person", person_id, {"birth_date": value or None})
     db.bump_generation(conn, "people")
@@ -311,6 +327,7 @@ def age_on(birth_date: str | None, ts: float | None) -> int | None:
 
 def set_person_flags(conn: sqlite3.Connection, person_id: int, hidden: bool | None = None,
                      ignored: bool | None = None) -> None:
+    person_id = live_person(conn, person_id)
     sets, args = [], []
     if hidden is not None:
         sets.append("hidden=?")
@@ -373,12 +390,30 @@ def merge_persons(conn: sqlite3.Connection, target_id: int, source_ids: list[int
     # Merge into the person that survives, never into one already merged away: from a stale page, "merge A
     # into B" after B had been merged into A pointed the two at each other, and A's faces then belonged to a
     # person no list shows (and opening either looped).
+    # Take the write lock before reading who survives: two opposite merges at once ("A into B" and "B into A")
+    # otherwise both read the other as alive and point the two at each other, orphaning every face.
+    if conn.in_transaction:
+        conn.commit()
+    conn.execute("BEGIN IMMEDIATE")
     target_id = live_person(conn, target_id)
-    source_ids = [int(s) for s in source_ids if int(s) != target_id]
+    source_ids = list(dict.fromkeys(live_person(conn, int(s)) for s in source_ids))
+    source_ids = [s for s in source_ids if s != target_id]
     if not source_ids:
+        conn.rollback()
         return {"merged": 0}
     moved = 0
     for sid in source_ids:
+        # The survivor keeps a name and birth date whichever side had them: "Same person" always sends the
+        # older (smaller) id as the target, so naming the newer cluster and then merging deleted the name.
+        conn.execute("UPDATE persons SET name = COALESCE(name, (SELECT name FROM persons WHERE id = ?)), "
+                     "birth_date = COALESCE(birth_date, (SELECT birth_date FROM persons WHERE id = ?)) WHERE id = ?",
+                     (sid, sid, target_id))
+        # "These are different people" said about the source holds for the survivor too.
+        for a, b in conn.execute("SELECT a, b FROM person_not_same WHERE a = ? OR b = ?", (sid, sid)).fetchall():
+            other = b if a == sid else a
+            if other != target_id:
+                conn.execute("INSERT OR IGNORE INTO person_not_same(a, b, created_at) VALUES (?,?,?)",
+                             (min(other, target_id), max(other, target_id), time.time()))
         face_ids = [int(r[0]) for r in conn.execute("SELECT id FROM faces WHERE person_id=?", (sid,))]
         conn.execute("UPDATE faces SET person_id=? WHERE person_id=?", (target_id, sid))
         conn.execute("UPDATE persons SET merged_into=?, updated_at=? WHERE id=?", (target_id, time.time(), sid))
@@ -395,6 +430,7 @@ def merge_persons(conn: sqlite3.Connection, target_id: int, source_ids: list[int
 
 def split_person(conn: sqlite3.Connection, person_id: int, face_ids: list[int], name: str | None = None) -> dict:
     """Move the given faces out of a person into a new person (a mis-clustered identity)."""
+    person_id = live_person(conn, person_id)
     # Only faces that are this person's: a stale page could send others, and they were moved (and recorded as
     # "not this person") all the same.
     q = ",".join("?" * len(face_ids))
@@ -425,9 +461,11 @@ def assign_faces(conn: sqlite3.Connection, face_ids: list[int], person_id: int |
     """Confirm an identity for faces (user action -> locked)."""
     if person_id is not None:
         person_id = live_person(conn, person_id)
+    name = (name or "").strip() or None          # "priya " (or "   ") made a second person
     if person_id is None:
         if name:
-            row = conn.execute("SELECT id FROM persons WHERE name = ? AND merged_into IS NULL", (name,)).fetchone()
+            row = conn.execute("SELECT id FROM persons WHERE name = ? COLLATE NOCASE AND merged_into IS NULL "
+                               "ORDER BY photo_count DESC, id LIMIT 1", (name,)).fetchone()
             person_id = int(row[0]) if row else create_person(conn, name, db.active_model_id(conn, "face"), actor="user")
         else:
             person_id = create_person(conn, None, db.active_model_id(conn, "face"), actor="user")
@@ -451,6 +489,7 @@ def assign_faces(conn: sqlite3.Connection, face_ids: list[int], person_id: int |
 def reject_faces(conn: sqlite3.Connection, face_ids: list[int], person_id: int) -> dict:
     if not face_ids:
         return {"rejected": 0}
+    person_id = live_person(conn, person_id)
     now = time.time()
     conn.executemany("INSERT OR IGNORE INTO face_rejections(face_id, person_id, created_at) VALUES (?,?,?)",
                      [(int(f), int(person_id), now) for f in face_ids])
@@ -494,26 +533,54 @@ def merge_suggestions(ctx, conn: sqlite3.Connection, threshold: float = 0.50, li
     # Comparing every person's faces with every other's took ~4 s on a real library, on each visit to
     # People. The pairs only change when faces, assignments, people or embeddings do, so they are kept
     # for as long as none of those has; names, covers, counts and "not the same person" are read fresh.
-    key = _merge_inputs_key(conn, model_id, threshold)
-    pairs = _merge_pairs_cache.get(key)
-    if pairs is None:
-        ids, mat, meta = load_face_embeddings(conn, model_id)
-        if len(ids) == 0:
-            return []
-        mat = normalize(mat)
-        named = {int(r[0]) for r in conn.execute("SELECT id FROM persons WHERE merged_into IS NULL AND ignored = 0")}
-        rows_by_person: dict[int, list[int]] = defaultdict(list)
-        for i, pid in enumerate(meta["person_id"]):
-            if pid >= 0 and int(pid) in named:
-                rows_by_person[int(pid)].append(i)
-        identity_rows = {k: np.array(v) for k, v in rows_by_person.items() if len(v) >= 2}
-        pairs = suggest_merges(mat, identity_rows, threshold=threshold, device=getattr(ctx, "device", "auto"))
-        _merge_pairs_cache.clear()
-        _merge_pairs_cache[key] = pairs
+    inputs = _merge_inputs_key(conn, model_id, threshold)
     blocked = {(int(a), int(b)) for a, b in conn.execute("SELECT a, b FROM person_not_same")}
-    out = []
+    pairs, n_identities = _merge_pairs(ctx, conn, model_id, threshold, inputs, 6)
+    out, hidden = _merge_cards(conn, pairs, blocked, limit)
+    if len(out) < limit and hidden and n_identities - 1 > 6:
+        # Each person is compared with its 6 nearest. When "these are different people" has used those up,
+        # look further (as far as the most-dismissed person has ruled out, up to 36): suggestions dried up
+        # while pairs were still undecided. Only when the list runs short, so a dismissal costs nothing else.
+        most = conn.execute("SELECT MAX(n) FROM (SELECT p, COUNT(*) n FROM (SELECT a AS p FROM person_not_same "
+                            "UNION ALL SELECT b FROM person_not_same) GROUP BY p)").fetchone()[0] or 0
+        wider = min(36, 6 + int(most), n_identities - 1)
+        if wider > 6:
+            pairs, _ = _merge_pairs(ctx, conn, model_id, threshold, inputs, wider)
+            out, _ = _merge_cards(conn, pairs, blocked, limit)
+    return out
+
+
+def _merge_pairs(ctx, conn, model_id: int, threshold: float, inputs, neighbours: int):
+    """(candidate pairs, number of identities compared), cached per neighbourhood size until the inputs change."""
+    hit = _merge_pairs_cache.get((inputs, neighbours))
+    if hit is not None:
+        return hit
+    ids, mat, meta = load_face_embeddings(conn, model_id)
+    if len(ids) == 0:
+        return [], 0
+    mat = normalize(mat)
+    named = {int(r[0]) for r in conn.execute("SELECT id FROM persons WHERE merged_into IS NULL AND ignored = 0")}
+    rows_by_person: dict[int, list[int]] = defaultdict(list)
+    for i, pid in enumerate(meta["person_id"]):
+        if pid >= 0 and int(pid) in named:
+            rows_by_person[int(pid)].append(i)
+    identity_rows = {k: np.array(v) for k, v in rows_by_person.items() if len(v) >= 2}
+    # Every candidate pair, not the first 40: "these are different people" is applied after this list, so once
+    # those 40 were dismissed nothing was ever suggested again.
+    pairs = suggest_merges(mat, identity_rows, threshold=threshold, device=getattr(ctx, "device", "auto"),
+                           max_suggestions=neighbours * max(1, len(identity_rows)), neighbours=neighbours)
+    for key in [k for k in _merge_pairs_cache if k[0] != inputs]:
+        del _merge_pairs_cache[key]
+    _merge_pairs_cache[(inputs, neighbours)] = (pairs, len(identity_rows))
+    return pairs, len(identity_rows)
+
+
+def _merge_cards(conn, pairs, blocked: set, limit: int) -> tuple[list[dict], int]:
+    """The suggestion cards, and how many pairs "these are different people" held back."""
+    out, hidden = [], 0
     for a, b, score in pairs:
         if (min(a, b), max(a, b)) in blocked:
+            hidden += 1
             continue
         ra = conn.execute("SELECT id, name, display_no, cover_face_id, photo_count FROM persons WHERE id=?", (a,)).fetchone()
         rb = conn.execute("SELECT id, name, display_no, cover_face_id, photo_count FROM persons WHERE id=?", (b,)).fetchone()
@@ -526,7 +593,7 @@ def merge_suggestions(ctx, conn: sqlite3.Connection, threshold: float = 0.50, li
         })
         if len(out) >= limit:
             break
-    return out
+    return out, hidden
 
 
 def co_occurring(conn: sqlite3.Connection, person_id: int, limit: int = 8) -> list[dict]:
@@ -535,6 +602,7 @@ def co_occurring(conn: sqlite3.Connection, person_id: int, limit: int = 8) -> li
            FROM faces f1 JOIN faces f2 ON f1.photo_id = f2.photo_id
            JOIN photos p ON p.id = f1.photo_id
            WHERE f1.person_id = ? AND f2.person_id IS NOT NULL AND f2.person_id != ? AND p.status='ok'
+             AND p.hidden = 0 AND p.live_component = 0
            GROUP BY f2.person_id ORDER BY n DESC LIMIT ?""",
         (person_id, person_id, limit),
     ).fetchall()
@@ -559,17 +627,25 @@ def migrate_face_identities(conn: sqlite3.Connection, old_model: int, new_model:
     """
     if old_model == new_model:
         return {"migrated": 0}
+    # Faces with an identity, and faces the user said were *not* someone (a rejected face has no person, so
+    # those were left out and their "not this person" was lost with the old rows).
     old_rows = conn.execute(
         """SELECT photo_id, id, x1, y1, x2, y2, person_id, assign_source, assign_confidence
-           FROM faces WHERE model_id = ? AND person_id IS NOT NULL""", (old_model,)).fetchall()
+           FROM faces f WHERE model_id = ? AND (person_id IS NOT NULL
+             OR EXISTS (SELECT 1 FROM face_rejections r WHERE r.face_id = f.id))""", (old_model,)).fetchall()
     if not old_rows:
         return {"migrated": 0}
+    rejected: dict[int, list[int]] = defaultdict(list)
+    for fid, person in conn.execute("SELECT r.face_id, r.person_id FROM face_rejections r JOIN faces f ON f.id = r.face_id "
+                                    "WHERE f.model_id = ?", (old_model,)):
+        rejected[int(fid)].append(int(person))
     by_photo: dict[int, list] = defaultdict(list)
     for r in old_rows:
         by_photo[int(r["photo_id"])].append(r)
 
     migrated = locked = 0
     updates = []
+    carried_rejections = []
     for photo_id, olds in by_photo.items():
         news = conn.execute(
             "SELECT id, x1, y1, x2, y2 FROM faces WHERE photo_id = ? AND model_id = ? AND person_id IS NULL",
@@ -588,6 +664,9 @@ def migrate_face_identities(conn: sqlite3.Connection, old_model: int, new_model:
             if best is None:
                 continue
             used.add(best["id"])
+            carried_rejections += [(int(best["id"]), rp, time.time()) for rp in rejected.get(int(o["id"]), [])]
+            if o["person_id"] is None:
+                continue                 # only its rejections to carry
             # A hand-confirmed identity stays hand-confirmed; an automatic one is
             # carried as a suggestion so re-clustering can still revise it.
             source = "user" if o["assign_source"] == "user" else "attach"
@@ -597,6 +676,8 @@ def migrate_face_identities(conn: sqlite3.Connection, old_model: int, new_model:
             migrated += 1
     conn.executemany("UPDATE faces SET person_id=?, assign_source=?, assign_confidence=? WHERE id=?", updates)
     # Rejections follow the face they were made about.
+    conn.executemany("INSERT OR IGNORE INTO face_rejections(face_id, person_id, created_at) VALUES (?,?,?)",
+                     carried_rejections)
     conn.commit()
     update_person_stats(conn)
     db.audit(conn, "faces_migrated", "model", new_model,

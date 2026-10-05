@@ -279,13 +279,13 @@ def attach_faces(mat: np.ndarray, target_rows: np.ndarray, identity_rows: dict[i
 
 
 def suggest_merges(mat: np.ndarray, identity_rows: dict[int, np.ndarray], threshold: float = 0.50,
-                   device: str = "auto", max_suggestions: int = 40) -> list[tuple[int, int, float]]:
+                   device: str = "auto", max_suggestions: int = 40, neighbours: int = 6) -> list[tuple[int, int, float]]:
     """Identity pairs that look like the same person (for user confirmation, never automatic)."""
     ids = [i for i, rows in identity_rows.items() if len(rows)]
     if len(ids) < 2:
         return []
     cents = np.stack([_norm(mat[identity_rows[i]].mean(0)) for i in ids])
-    k = min(6, len(ids) - 1)
+    k = min(neighbours, len(ids) - 1)
     idx, sims = knn(cents, cents, k, device=device, exclude_self=True)
     seen: set[tuple[int, int]] = set()
     out: list[tuple[int, int, float]] = []

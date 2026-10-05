@@ -217,7 +217,12 @@ class SearchEngine:
     def search(self, conn: sqlite3.Connection, query: str, limit: int = 500,
                use_llm: bool | None = None) -> SearchResult:
         t0 = time.time()
-        q = parse(query, conn, me_person_id=self.ctx.settings.me_person_id)
+        me = self.ctx.settings.me_person_id
+        if me:                       # "me" chosen before a merge is the person it was merged into
+            from ..engine.people import live_person
+
+            me = live_person(conn, me)
+        q = parse(query, conn, me_person_id=me)
         _drop_hidden_albums(conn, q)
 
         if q.is_empty() and query.strip():

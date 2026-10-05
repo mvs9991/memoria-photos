@@ -65,7 +65,7 @@ def test_merge_suggestions_compare_faces_once_until_something_changes(ctx, monke
     monkeypatch.setattr(people_mod, "load_face_embeddings", lambda c, m: (
         np.arange(6), np.eye(6, 4, dtype=np.float32) + 1, {"person_id": np.array([1, 1, 2, 2, 3, 3])}))
 
-    def fake_suggest(mat, rows, threshold, device):
+    def fake_suggest(mat, rows, threshold, device, **kw):
         calls.append(1)
         return [(1, 2, 0.91)]
 
