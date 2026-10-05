@@ -1218,3 +1218,23 @@ folders, export targets or newly claimed upload/edit files; renames only in `eng
   form and future ones refused. "Appears with" leaves out hidden photos. Merge suggestions kept only the first 40
   pairs and compared each person with 6 neighbours, so dismissing them dried suggestions up: the neighbourhood now
   grows with the dismissals (up to 36) and every pair is kept.
+
+### API latency on a copy of the real library (2026-10-05; each change compared byte-for-byte with the old JSON)
+
+Measured on a `sqlite3.backup` copy of the real database (31,469 photos, 75k faces) served on a private port:
+
+| Change | Before | After |
+|---|---|---|
+| People merge suggestions precomputed at start-up (and face rows gathered once per person) | first People visit 6.2–14.5 s | 0.11–0.16 s |
+| Folder browser: one pass for counts and covers (was a LIKE query per subfolder) | root 583 ms | 108 ms |
+| `JSONResponse` directly on big lists (FastAPI's generic encoder was most of their time) | /people 207, /map/points 179, /events 156 ms | 62, 65, 73 ms |
+| Timeline counts and covers in one pass | 331 ms | 146 ms |
+| Tag collections as `IN (subquery)` | pets grid 79–90 ms | 3–9 ms |
+| First search / "similar" after a restart (model and GPU kNN warmed at start-up) | 798 / 284 ms | 376 / 83 ms |
+| Insights: photos per day once | 370 ms | 279 ms |
+| `columnar()` reads columns by position | Photos page 437 ms | 370 ms |
+
+Rejected after measuring: batched name suggestions, a partial index for selfies, a covering grid index (the planner
+ignored both), stack size via JOIN, place covers without the window function. Still slow, not fixed: `/photos/index`
+SQL (~180 ms of row fetching for 25k rows), `/stats` 216 ms, `/memories` 169 ms. Thumbnails, originals and video
+were not measured (the copy had no thumbnail cache).

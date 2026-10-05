@@ -4,6 +4,7 @@ from __future__ import annotations
 from typing import Literal
 
 from fastapi import APIRouter, HTTPException, Query
+from fastapi.responses import JSONResponse
 from pydantic import BaseModel
 
 from .. import db
@@ -80,8 +81,8 @@ def list_groups(kind: str | None = Query(None, pattern="^(exact|near|likely|simi
              JOIN photos p ON p.id = m.photo_id
              WHERE {' AND '.join(where)} AND g.kind != 'similar'
                AND m.photo_id != g.keep_photo_id""", args).fetchone()[0]
-    return {"groups": groups, "counts": counts, "reclaimable_bytes": total_bytes,
-            "total": conn.execute(f"SELECT COUNT(*) FROM dup_groups g WHERE {' AND '.join(where)}", args).fetchone()[0]}
+    return JSONResponse({"groups": groups, "counts": counts, "reclaimable_bytes": total_bytes,
+            "total": conn.execute(f"SELECT COUNT(*) FROM dup_groups g WHERE {' AND '.join(where)}", args).fetchone()[0]})
 
 
 class ReviewBody(BaseModel):

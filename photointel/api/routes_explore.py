@@ -58,36 +58,45 @@ def browse_folders(root_id: int | None = None, path: str = ""):
     conn = get_state().conn()
     vis = "status = 'ok' AND hidden = 0 AND live_component = 0"
     if root_id is None:
-        roots = []
-        for r in conn.execute("SELECT id, path FROM roots ORDER BY id"):
-            n, cover = conn.execute(
-                f"SELECT COUNT(*), (SELECT id FROM photos WHERE root_id = ? AND {vis} "
-                f"ORDER BY COALESCE(quality_score, 0) DESC LIMIT 1) FROM photos WHERE root_id = ? AND {vis}",
-                (r["id"], r["id"])).fetchone()
-            roots.append({"root_id": r["id"], "name": shown_path(r["path"]), "path": "", "count": n, "cover_photo_id": cover})
+        # Every root's count and cover (best quality, the lowest id on a tie) from one pass, not two scans
+        # per root.
+        count: dict[int, int] = defaultdict(int)
+        best: dict[int, tuple] = {}
+        for rid, pid, quality in conn.execute(
+                f"SELECT root_id, id, COALESCE(quality_score, 0) FROM photos WHERE {vis} ORDER BY id"):
+            count[rid] += 1
+            if rid not in best or quality > best[rid][0]:
+                best[rid] = (quality, pid)
+        roots = [{"root_id": r["id"], "name": shown_path(r["path"]), "path": "", "count": count.get(r["id"], 0),
+                  "cover_photo_id": best[r["id"]][1] if r["id"] in best else None}
+                 for r in conn.execute("SELECT id, path FROM roots ORDER BY id")]
         return {"root_id": None, "path": "", "folders": roots, "direct_count": 0}
     prefix = path.strip("/")
+    # One pass for the counts and every subfolder's cover (best rating, then quality; on a tie the first in
+    # id order, which is what the per-subfolder ORDER BY ... LIMIT 1 query this replaces returned).
+    # That query ran once per subfolder, with a LIKE no index serves: 0.6 s for a 30-folder root.
     rows = conn.execute(
-        f"SELECT folder, COUNT(*) n, MAX(COALESCE(quality_score, 0)) q FROM photos WHERE root_id = ? AND {vis} "
-        f"AND (? = '' OR folder = ? OR folder LIKE ? ESCAPE '\\') GROUP BY folder",
+        f"SELECT folder, id, rating, COALESCE(quality_score, 0) FROM photos WHERE root_id = ? AND {vis} "
+        f"AND (? = '' OR folder = ? OR folder LIKE ? ESCAPE '\\') ORDER BY folder",
         (root_id, prefix, prefix, db.like_prefix(prefix))).fetchall()
+    rows.sort(key=lambda r: r[1])      # then id order (ORDER BY id made SQLite walk the whole table)
     children: dict[str, int] = defaultdict(int)
+    best: dict[str, tuple] = {}
     direct = 0
-    for r in rows:
-        folder = r["folder"]
+    for folder, pid, rating, quality in rows:
         if folder == prefix:
-            direct += r["n"]
+            direct += 1
             continue
         rest = folder[len(prefix) + 1:] if prefix else folder
-        children[rest.split("/", 1)[0]] += r["n"]
+        name = rest.split("/", 1)[0]
+        children[name] += 1
+        if name not in best or (rating, quality) > best[name][0]:
+            best[name] = ((rating, quality), pid)
     folders = []
     for name, n in sorted(children.items(), key=lambda kv: kv[0].lower()):
         full = f"{prefix}/{name}" if prefix else name
-        cover = conn.execute(
-            f"SELECT id FROM photos WHERE root_id = ? AND {vis} AND (folder = ? OR folder LIKE ? ESCAPE '\\') "
-            f"ORDER BY rating DESC, COALESCE(quality_score, 0) DESC LIMIT 1", (root_id, full, db.like_prefix(full))).fetchone()
         folders.append({"root_id": root_id, "name": name, "path": full, "count": n,
-                        "cover_photo_id": cover[0] if cover else None})
+                        "cover_photo_id": best[name][1] if name in best else None})
     return {"root_id": root_id, "path": prefix, "folders": folders, "direct_count": direct}
 
 

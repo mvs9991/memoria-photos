@@ -38,13 +38,18 @@ def compute(conn: sqlite3.Connection, year: int | None = None) -> dict:
     videos = totals_row["videos"] or 0
     video_seconds = totals_row["secs"] or 0
 
+    # Photos per day, once, for the months, the busiest day and the list of years: they were three more
+    # scans of the photo table (about 120 ms of this page on a real library).
+    per_day = conn.execute(f"SELECT date(p.taken_ts, 'unixepoch') d, COUNT(*) n FROM photos p WHERE {VISIBLE} "
+                           f"AND p.taken_ts IS NOT NULL GROUP BY d", ()).fetchall()
     months = [0] * 12
-    for r in conn.execute(f"SELECT CAST(strftime('%m', p.taken_ts, 'unixepoch') AS INT) m, COUNT(*) n "
-                          f"FROM photos p WHERE {where} AND p.taken_ts IS NOT NULL GROUP BY m", args):
-        months[r["m"] - 1] = r["n"]
-    busiest = conn.execute(
-        f"SELECT date(p.taken_ts, 'unixepoch') d, COUNT(*) n FROM photos p WHERE {where} AND p.taken_ts IS NOT NULL "
-        f"GROUP BY d ORDER BY n DESC LIMIT 1", args).fetchone()
+    busiest = None
+    for d, n in per_day:
+        if year and int(d[:4]) != year:
+            continue
+        months[int(d[5:7]) - 1] += n
+        if busiest is None or n > busiest["n"]:          # the earliest day on a tie, as before
+            busiest = {"d": d, "n": n}
 
     # Who appears most. Counting it from the faces table means a three-way join and a
     # COUNT(DISTINCT) over every face — 4.7s of a 6.8s build at 250k photos. Without a
@@ -129,9 +134,7 @@ def compute(conn: sqlite3.Connection, year: int | None = None) -> dict:
               AND COALESCE(p.source_kind, '') != 'screenshot' AND p.stack_hidden = 0
             ORDER BY p.rating DESC, COALESCE(p.quality_score, 0) DESC LIMIT 60""", args)]
     best = _spread(conn, best, 12)
-    years = [int(r[0]) for r in conn.execute(
-        f"SELECT DISTINCT CAST(strftime('%Y', p.taken_ts, 'unixepoch') AS INT) FROM photos p "
-        f"WHERE {VISIBLE} AND p.taken_ts IS NOT NULL ORDER BY 1 DESC") if r[0]]
+    years = sorted({int(d[:4]) for d, _ in per_day if int(d[:4])}, reverse=True)
     return {
         "year": year, "years": years,
         "totals": {"photos": photos, "videos": videos, "video_minutes": round(video_seconds / 60, 1),

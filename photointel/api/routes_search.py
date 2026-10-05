@@ -4,6 +4,7 @@ from __future__ import annotations
 import logging
 
 from fastapi import APIRouter, Query
+from fastapi.responses import JSONResponse
 
 from .. import db
 from ..engine.people import person_label
@@ -32,11 +33,11 @@ def search(q: str = Query(..., min_length=1), limit: int = Query(500, ge=1, le=2
             w, h = (r["height"], r["width"]) if r["rotation"] in (90, 270) else (r["width"], r["height"])
             photos.append({"id": pid, "ratio": round(max(0.2, min(6.0, (w or 4) / max(h or 3, 1))), 3), "rot": r["rotation"],
                            "ts": int(r["taken_ts"] or 0), "score": res.scores.get(pid)})
-    return {
+    return JSONResponse({
         "query": q, "interpretation": res.interpretation, "explanation": res.explanation,
         "result_type": res.result_type, "total": res.total, "took_ms": res.took_ms,
         "photos": photos, "events": res.events, "people": res.people, "places": res.places,
-    }
+    })
 
 
 @router.get("/search/suggestions")

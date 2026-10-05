@@ -289,6 +289,13 @@ def suggest_merges(mat: np.ndarray, identity_rows: dict[int, np.ndarray], thresh
     idx, sims = knn(cents, cents, k, device=device, exclude_self=True)
     seen: set[tuple[int, int]] = set()
     out: list[tuple[int, int, float]] = []
+    faces: dict[int, np.ndarray] = {}        # each person's face rows gathered once, not once per pair
+
+    def faces_of(p: int) -> np.ndarray:
+        m = faces.get(p)
+        if m is None:
+            m = faces[p] = mat[identity_rows[p]]
+        return m
     for i in range(len(ids)):
         for j_pos in range(idx.shape[1]):
             j = int(idx[i, j_pos])
@@ -299,9 +306,10 @@ def suggest_merges(mat: np.ndarray, identity_rows: dict[int, np.ndarray], thresh
             if key in seen:
                 continue
             seen.add(key)
-            ra, rb = identity_rows[a], identity_rows[b]
-            cross = mat[ra] @ mat[rb].T
-            score = float(np.sort(cross.ravel())[::-1][:3].mean())
+            cross = (faces_of(a) @ faces_of(b).T).ravel()
+            if cross.size > 3:               # the best three without sorting every pair of faces
+                cross = np.partition(cross, cross.size - 3)[-3:]
+            score = float(np.sort(cross)[::-1][:3].mean())
             if score >= threshold:
                 out.append((key[0], key[1], score))
     out.sort(key=lambda x: -x[2])

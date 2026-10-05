@@ -2,6 +2,7 @@
 from __future__ import annotations
 
 from fastapi import APIRouter, Body, HTTPException, Query
+from fastapi.responses import JSONResponse
 from pydantic import BaseModel
 
 from .. import db
@@ -72,7 +73,7 @@ def list_events(kind: str | None = Query(None, pattern="^(event|trip)$"), year: 
     rows = conn.execute(
         f"SELECT e.* FROM events e WHERE {' AND '.join(where)} ORDER BY e.start_ts DESC LIMIT ?",
         (*args, limit if limit is not None else -1)).fetchall()
-    return {"events": [_event_dict(conn, e) for e in rows]}
+    return JSONResponse({"events": [_event_dict(conn, e) for e in rows]})
 
 
 @router.get("/events/{event_id}")
@@ -130,7 +131,7 @@ def event_detail(event_id: int):
         data["map_points"] = [{"lat": g["gps_lat"], "lon": g["gps_lon"]} for g in gps]
     else:
         data.update({"people": [], "places": [], "tags": [], "highlights": [], "map_points": []})
-    return data
+    return JSONResponse(data)
 
 
 class EventUpdate(BaseModel):
@@ -211,7 +212,7 @@ def list_places():
     hierarchy = [{"country": c["country"], "count": c["count"],
                   "regions": sorted(c["regions"].values(), key=lambda r: -r["count"])}
                  for c in sorted(countries.values(), key=lambda c: -c["count"])]
-    return {"places": places, "hierarchy": hierarchy}
+    return JSONResponse({"places": places, "hierarchy": hierarchy})
 
 
 @router.get("/places/{place_id}")
@@ -250,8 +251,8 @@ def map_points(limit: int = Query(20000, le=100000), person: int | None = None):
     sql += " ORDER BY p.taken_ts DESC LIMIT ?"
     args.append(limit)
     rows = conn.execute(sql, args).fetchall()
-    return {"points": [{"id": r["id"], "lat": round(r["lat"], 5), "lon": round(r["lon"], 5),
-                        "place_id": r["place_id"], "ts": int(r["taken_ts"] or 0)} for r in rows]}
+    return JSONResponse({"points": [{"id": r["id"], "lat": round(r["lat"], 5), "lon": round(r["lon"], 5),
+                                     "place_id": r["place_id"], "ts": int(r["taken_ts"] or 0)} for r in rows]})
 
 
 def _fav() -> str:

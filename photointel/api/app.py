@@ -38,11 +38,32 @@ def _warm_models(ctx: AppContext) -> None:
         try:
             model_id = db.active_model_id(conn, "semantic")
             if model_id:
-                state.index_cache.get(conn, model_id, int(db.get_meta(conn, "gen:embeddings", 0) or 0))
+                index = state.index_cache.get(conn, model_id, int(db.get_meta(conn, "gen:embeddings", 0) or 0))
+                # The first text query and the first nearest-neighbour search on the GPU each paid a one-off
+                # start-up (1.3 s and 0.9 s on the real library); pay them here instead of in someone's search.
+                t0 = time.time()
+                ctx.semantic_model().encode_texts(["a photo"])
+                if len(index.ids):
+                    index.search(index.mat[0], k=2, device=ctx.device)
+                log.info("Search warm after %.1fs", time.time() - t0)
         finally:
             conn.close()
     except Exception as exc:
         log.warning("Could not preload photo embeddings: %s", exc)
+    # People's merge suggestions compare every person's faces with their neighbours' (5-7 s on the real
+    # library, on the first visit to People after a restart). Kept until faces or people change.
+    try:
+        from ..engine.people import merge_suggestions
+
+        conn = ctx.connect()
+        try:
+            t0 = time.time()
+            merge_suggestions(ctx, conn)
+            log.info("Merge suggestions warm after %.1fs", time.time() - t0)
+        finally:
+            conn.close()
+    except Exception as exc:
+        log.warning("Could not precompute merge suggestions: %s", exc)
 
 
 def _trash_sweeper(ctx: AppContext, stop: threading.Event) -> None:

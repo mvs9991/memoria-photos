@@ -139,15 +139,15 @@ COLLECTIONS: dict[str, dict] = {
     # Pets: the tagger's dog and cat. Which dog is not recognised: that needs a pet-identity
     # model, and none that runs offline is part of Memoria.
     "pets": {"group": "media", "title": "Pets",
-             "where": "EXISTS (SELECT 1 FROM photo_tags pt JOIN tags t ON t.id = pt.tag_id WHERE "
-                      "pt.photo_id = p.id AND t.name IN ('dog', 'cat') AND pt.score >= 2.0)"},
+             "where": "p.id IN (SELECT pt.photo_id FROM photo_tags pt JOIN tags t ON t.id = pt.tag_id WHERE "
+                      "t.name IN ('dog', 'cat') AND pt.score >= 2.0)"},
     "screenshots": {"group": "cleanup", "title": "Screenshots", "where": "p.source_kind = 'screenshot'"},
     "documents": {"group": "cleanup", "title": "Documents & receipts",
-                  "where": "EXISTS (SELECT 1 FROM photo_tags pt JOIN tags t ON t.id = pt.tag_id WHERE "
-                           f"pt.photo_id = p.id AND t.name IN {_TEXTY} AND pt.score >= 2.0)"},
+                  "where": "p.id IN (SELECT pt.photo_id FROM photo_tags pt JOIN tags t ON t.id = pt.tag_id WHERE "
+                           f"t.name IN {_TEXTY} AND pt.score >= 2.0)"},
     "memes": {"group": "cleanup", "title": "Memes & forwards",
-              "where": "EXISTS (SELECT 1 FROM photo_tags pt JOIN tags t ON t.id = pt.tag_id WHERE "
-                       "pt.photo_id = p.id AND t.name = 'meme' AND pt.score >= 2.0)"},
+              "where": "p.id IN (SELECT pt.photo_id FROM photo_tags pt JOIN tags t ON t.id = pt.tag_id WHERE "
+                       "t.name = 'meme' AND pt.score >= 2.0)"},
     "blurry": {"group": "cleanup", "title": "Possibly blurry",
                "where": "p.media_type = 'image' AND p.blur IS NOT NULL AND p.blur < 35 "
                         "AND COALESCE(p.source_kind, '') != 'screenshot'"},
@@ -219,25 +219,30 @@ def columnar(rows) -> dict:
     once: `key in row.keys()` builds a list of every column name, and doing that several times for each
     of 30k rows was most of this function's 175 ms."""
     ids, ratios, ts, flags, dur, stars, stack, rots = [], [], [], [], [], [], [], []
-    keys = set(rows[0].keys()) if rows else set()
-    has_rot, has_rating, has_stack = "rotation" in keys, "rating" in keys, "stack_size" in keys
+    # Columns by position, looked up once: reading a sqlite3.Row by name costs a name search per access,
+    # and this reads eleven per photo (~50 ms of a 30k-photo list).
+    pos = {k: i for i, k in enumerate(rows[0].keys())} if rows else {}
+    i_id, i_w, i_h, i_ts = pos.get("id"), pos.get("width"), pos.get("height"), pos.get("taken_ts")
+    i_fav, i_faces, i_media, i_dur = pos.get("favorite"), pos.get("face_count"), pos.get("media_type"), pos.get("duration")
+    i_live, i_motion = pos.get("live_video_id"), pos.get("motion_offset")
+    i_rot, i_rating, i_stack = pos.get("rotation"), pos.get("rating"), pos.get("stack_size")
     for r in rows:
-        ids.append(r["id"])
-        w, h = r["width"] or 4, r["height"] or 3
-        rot = (r["rotation"] or 0) if has_rot else 0
+        ids.append(r[i_id])
+        w, h = r[i_w] or 4, r[i_h] or 3
+        rot = (r[i_rot] or 0) if i_rot is not None else 0
         if rot in (90, 270):
             w, h = h, w
         rots.append(rot)
         ratios.append(round(max(0.2, min(6.0, w / max(h, 1))), 3))
-        ts.append(int(r["taken_ts"] or 0))
-        size = (r["stack_size"] or 0) if has_stack else 0
-        video = r["media_type"] == "video"
-        flags.append((FLAG_FAVORITE if r["favorite"] else 0) | (FLAG_FACES if (r["face_count"] or 0) > 0 else 0)
+        ts.append(int(r[i_ts] or 0))
+        size = (r[i_stack] or 0) if i_stack is not None else 0
+        video = r[i_media] == "video"
+        flags.append((FLAG_FAVORITE if r[i_fav] else 0) | (FLAG_FACES if (r[i_faces] or 0) > 0 else 0)
                      | (FLAG_VIDEO if video else 0)
-                     | (FLAG_LIVE if r["live_video_id"] or (r["motion_offset"] or 0) > 0 else 0)
+                     | (FLAG_LIVE if r[i_live] or (r[i_motion] or 0) > 0 else 0)
                      | (FLAG_STACK if size > 1 else 0))
-        dur.append(round(r["duration"], 1) if video and r["duration"] else 0)
-        stars.append((r["rating"] or 0) if has_rating else 0)
+        dur.append(round(r[i_dur], 1) if video and r[i_dur] else 0)
+        stars.append((r[i_rating] or 0) if i_rating is not None else 0)
         stack.append(size)
     return {"ids": ids, "ratio": ratios, "ts": ts, "flags": flags, "dur": dur, "rating": stars,
             "stack": stack, "rot": rots, "total": len(ids)}
@@ -705,33 +710,23 @@ def timeline(person: int | None = None, place: int | None = None, tag: str | Non
     conn = state.conn()
     where, args = photo_filter_sql(conn, [person] if person else None, place, None, None, None, tag,
                                    include_screenshots=False)
-    rows = conn.execute(
-        f"""SELECT strftime('%Y', p.taken_ts, 'unixepoch') AS y, strftime('%m', p.taken_ts, 'unixepoch') AS m,
-                   COUNT(*) AS n, MAX(COALESCE(p.quality_score,0)) AS best
-            FROM photos p WHERE {where} AND p.taken_ts IS NOT NULL GROUP BY y, m ORDER BY y DESC, m DESC""",
-        args).fetchall()
-    # One grouped query for every month's cover, rather than a query per month
-    # (20 years of photos would otherwise mean 240 round trips).
-    covers = {
-        (c["y"], c["m"]): c["id"] for c in conn.execute(
-            f"""SELECT y, m, id FROM (
-                    SELECT strftime('%Y', p.taken_ts, 'unixepoch') AS y,
-                           strftime('%m', p.taken_ts, 'unixepoch') AS m,
-                           p.id AS id,
-                           ROW_NUMBER() OVER (
-                               PARTITION BY strftime('%Y', p.taken_ts, 'unixepoch'),
-                                            strftime('%m', p.taken_ts, 'unixepoch')
-                               ORDER BY COALESCE(p.quality_score, 0) DESC) AS rk
-                    FROM photos p WHERE {where} AND p.taken_ts IS NOT NULL)
-                WHERE rk = 1""", args)
-    }
+    # One pass for every month's count and cover (its best photo; the first met on a tie, as the window query
+    # this replaces picked). The count and the cover were two scans with the month worked out several times
+    # per photo: 225 ms of the Timeline's 250 on a real library.
+    count: dict[str, int] = {}
+    best: dict[str, tuple] = {}
+    for ym, pid, quality in conn.execute(
+            f"""SELECT strftime('%Y-%m', p.taken_ts, 'unixepoch'), p.id, COALESCE(p.quality_score, 0)
+                FROM photos p WHERE {where} AND p.taken_ts IS NOT NULL""", args):
+        count[ym] = count.get(ym, 0) + 1
+        if ym not in best or quality > best[ym][0]:
+            best[ym] = (quality, pid)
     years: dict[str, dict] = {}
-    for r in rows:
-        y = r["y"]
+    for ym in sorted(count, reverse=True):
+        y, m = ym[:4], ym[5:]
         years.setdefault(y, {"year": int(y), "count": 0, "months": []})
-        years[y]["count"] += r["n"]
-        years[y]["months"].append({"month": int(r["m"]), "count": r["n"],
-                                   "cover_photo_id": covers.get((r["y"], r["m"]))})
+        years[y]["count"] += count[ym]
+        years[y]["months"].append({"month": int(m), "count": count[ym], "cover_photo_id": best[ym][1]})
     events = conn.execute(
         """SELECT id, kind, auto_title, user_title, start_ts, end_ts, photo_count, cover_photo_id, category,
                   parent_id FROM events ORDER BY start_ts DESC""").fetchall()
@@ -740,7 +735,7 @@ def timeline(person: int | None = None, place: int | None = None, tag: str | Non
            "category": e["category"], "parent_id": e["parent_id"],
            "year": ts_to_naive(e["start_ts"]).year, "month": ts_to_naive(e["start_ts"]).month}
           for e in events]
-    return {"years": sorted(years.values(), key=lambda x: -x["year"]), "events": ev}
+    return JSONResponse({"years": sorted(years.values(), key=lambda x: -x["year"]), "events": ev})
 
 
 @router.get("/stats")

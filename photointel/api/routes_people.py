@@ -4,6 +4,7 @@ from __future__ import annotations
 import logging
 
 from fastapi import APIRouter, Body, HTTPException, Query
+from fastapi.responses import JSONResponse
 from pydantic import BaseModel, Field
 
 from .. import db
@@ -44,8 +45,8 @@ def list_people(include_hidden: bool = False, include_ignored: bool = False, min
         "SELECT COUNT(*) FROM faces f JOIN photos p ON p.id = f.photo_id "
         "WHERE f.person_id IS NULL AND f.quality >= 0.3 AND p.status = 'ok' AND p.hidden = 0 "
         "AND p.live_component = 0").fetchone()[0]
-    return {"people": people, "unassigned_faces": unassigned,
-            "me_person_id": _me(conn)}
+    # Returned as JSON directly: FastAPI's generic encoder took 119 of /people's ~200 ms on the real library.
+    return JSONResponse({"people": people, "unassigned_faces": unassigned, "me_person_id": _me(conn)})
 
 
 @router.get("/people/{person_id}")
@@ -137,9 +138,10 @@ def person_faces(person_id: int, limit: int = Query(300, le=2000), offset: int =
             FROM faces f JOIN photos p ON p.id = f.photo_id
             WHERE f.person_id = ? AND p.status = 'ok' AND p.hidden = 0 ORDER BY {order_sql} LIMIT ? OFFSET ?""",
         (person_id, limit, offset)).fetchall()
-    return {"faces": [{"id": r["id"], "photo_id": r["photo_id"], "confidence": r["assign_confidence"],
-                       "source": r["assign_source"], "quality": round(r["quality"], 3),
-                       "box": [r["x1"], r["y1"], r["x2"], r["y2"]], "taken_ts": r["taken_ts"]} for r in rows]}
+    return JSONResponse({"faces": [{"id": r["id"], "photo_id": r["photo_id"], "confidence": r["assign_confidence"],
+                                    "source": r["assign_source"], "quality": round(r["quality"], 3),
+                                    "box": [r["x1"], r["y1"], r["x2"], r["y2"]], "taken_ts": r["taken_ts"]}
+                                   for r in rows]})
 
 
 @router.get("/faces/unassigned")
