@@ -871,10 +871,11 @@ the future, everything collapsing into one event, fuzzy duplicate thresholds too
   before); a fixed-aspect crop chosen before a turned preview arrived was not square.
 - **Zip downloads over 4 GB** use zip64 and are untested at that size; the UI suggests copying to a
   folder instead.
-- **Auth has had no outside security review.** It is PBKDF2 (240k rounds) + an HMAC session cookie,
-  with a guessing lockout (10 wrong passwords per 15 min per address and per name, 5 wrong PINs) and
-  HTTPS only with your own certificate. Fine behind a home router or a private VPN; do not forward a
-  port to it.
+- **Auth has had no outside security review** (an internal pen test of the live LAN server is in §10,
+  2026-10-06, and found nothing exploitable, but that is not the same as a review by someone who did not
+  write the code). It is PBKDF2 (240k rounds) + an HMAC session cookie, with a guessing lockout (10 wrong
+  passwords per 15 min per address and per name, 5 wrong PINs) and HTTPS only with your own certificate.
+  Fine behind a home router or a private VPN; do not forward a port to it.
 - **WebDAV has been tested with a test client only**, not with a real FolderSync or PhotoSync. The
   methods they are documented to use (PROPFIND, MKCOL, PUT, MOVE) are implemented; COPY, LOCK and
   PROPPATCH answer 501. If an app insists on LOCK, it will need a no-op lock.
@@ -905,7 +906,7 @@ the future, everything collapsing into one event, fuzzy duplicate thresholds too
 
 ## 10. Working notes
 
-- Run the suite with `.venv/Scripts/python.exe -m pytest -q`. 821 tests, ~12 min, no GPU needed —
+- Run the suite with `.venv/Scripts/python.exe -m pytest -q`. 845 tests, ~12 min, no GPU needed —
   the neural nets are replaced by deterministic fakes.
 - Test fixtures seed randomness from `zlib.crc32` of the **file name**, not `hash()` (salted per
   process) and not the full path (contains pytest's per-run tmp counter). Both made failures
@@ -1291,3 +1292,107 @@ averaged ~330 ms *per tile*). The pack holds unique content (23,991 of 31k photo
 one entry), is ~280 MB, takes ~6 min of idle disk time to build, pauses whenever someone uses the app, and is rebuilt
 when more than 2% of photos are missing from it or a day after the last build if any are. Anything not in it (new,
 rotated) is served from its file as before; clearing the thumbnail cache closes and removes it.
+
+### A content-security-policy, and a pen test of the live LAN server (2026-10-06)
+
+With the gallery now reachable from any device on the home Wi-Fi, the server was attacked as an outsider
+would attack it, directly against the real running library (read-only throughout — nothing was moved,
+deleted, or written to a photo): every unauthenticated route, path traversal and injection attempts on
+every ID/path parameter, session-cookie forgery, the Locked-folder PIN, share-link token guessing, CORS
+and cross-origin access, and the login rate limiter. Nothing was exploitable; password gating, the
+`hmac.compare_digest` session signature, the 10-attempts/15-minute lockout, and `secrets.token_urlsafe(16)`
+share tokens all held. The one real gap is structural, not fixable in code: the LAN is plain `http://`, so
+anyone already on the Wi-Fi can read traffic in flight. `MY_SETUP_GUIDE.md` §13 records this for the
+non-technical reader, with the same three mitigations given there (keep the Wi-Fi password private, prefer
+Tailscale for access from outside the house, never forward port 8765 to the internet).
+
+As defence in depth, `api/app.py::_hardened()` now also sends a `Content-Security-Policy` header on every
+response, computed once per app instance from the actual built `web/dist/index.html`: it hashes that page's
+own inline bootstrap script (SHA-256, base64) and allows only `'self'` plus that hash for `script-src`, with
+no `'unsafe-inline'` anywhere; `img-src` allows `data:`/`blob:`/the OpenStreetMap tile host for the map.
+Because the hash is read from the built file rather than hardcoded, a `npm run build` that changes the
+bootstrap script's contents does not break the policy. Verified against the live server (header present,
+hash matches) and with a full Playwright pass over every screen plus opening the viewer: zero console
+errors, zero CSP violations. Test: `test_hardening.py::test_content_security_policy_is_sent_and_allows_the_pages_own_inline_script`.
+
+### Five parallel code reviews, swept for bugs not yet covered by any test (2026-10-06)
+
+With time running out on this session, five reviews ran in parallel over areas the existing test suite
+didn't reach: accounts/locking, OCR, captioning, backup, and Live Photo pairing + WebDAV + GPX + the
+creations/editor "new copy" paths. Thirteen confirmed bugs, each with a regression test shown to fail on
+the pre-fix code (`git stash` on just that file, rerun, `git stash pop`) and pass after:
+
+- **`routes_accounts.py::lock_photos`** took whatever photo IDs it was given, including one made private
+  to someone else — so an owner locking a batch could lock (and a later "share with family" could then
+  silently fail to operate on) another family member's private photo. Fixed by routing the IDs through
+  `visible_ids()` like every other route that takes a list of IDs; `engine/locked.py::lock()` also gained
+  a defence-in-depth `AND private_to IS NULL` on its own UPDATE. Test:
+  `test_authz_review.py::test_locking_a_batch_of_ids_never_locks_a_private_photo`.
+- **`accounts.py::_check()`** validated the raw username against the name regex, which allows a bare
+  space — `"  "` passed, then got `.strip()`'d to `""` when stored. That account could sign in, but every
+  route keyed by `current_user()` (falsy for `""`) treated it as signed out, including its own password
+  change — a real account that was invisibly locked out of itself. Fixed by validating the stripped name.
+  Test: `test_v6_access.py::test_a_whitespace_only_username_is_refused_not_stored_blank`.
+- **OCR and captioning never applied the user's manual rotation** before reading the pixels
+  (`engine/ocr.py::candidates`/main loop, `vision/captioner.py::caption_photos`) — a photo turned 90° in
+  the viewer still had its text read, and its scene captioned, sideways. Both now `rotate_image()` first,
+  matching every other pixel-consuming path. Tests:
+  `test_media_and_organisation.py::test_ocr_reads_the_photo_as_the_user_turned_it`,
+  `test_captioning_sees_the_photo_as_the_user_turned_it`.
+- **A decode failure during OCR was silently dropped** instead of staying a retry candidate in one edge
+  case; confirmed the row is neither stamped as read nor lost, and is retried on the next OCR pass. Test:
+  `test_a_decode_failure_during_ocr_stays_a_candidate_for_retry` (note: this needed its own second look —
+  the first draft of the test asserted the *second* OCR run would succeed on a file that stays corrupted,
+  which can never happen; the corrected assertion is that it stays `failed` and retryable).
+- **`engine/backup.py`** silently dropped two kinds of files: anything under a path over ~260 characters
+  (Windows `MAX_PATH`, and `LongPathsEnabled=0` on this machine — confirmed via the registry), because
+  `os.walk`/`os.stat`/`os.makedirs`/`shutil.copystat` all need the `\\?\` prefix that `scanner.py::long_path()`
+  already exists for; and anything reached only through an NTFS junction, which `os.walk(followlinks=False)`
+  does **not** detect on Windows (that only catches true symlinks). Fixed by scanning through `long_path()`
+  with an `onerror` callback (recorded in the backup summary as `scan_errors`), and by skipping junction
+  directories via a new `scanner.py::is_link_dir_path()` (the `os.DirEntry`-based junction check already
+  used elsewhere, adapted for a path string from `os.walk`). `src`/`dest`/`rel` stay the clean, unprefixed
+  form everywhere except at the literal syscall, so error messages and hash lookups never show the ugly
+  `\\?\` form. Tests: `test_copyout_integrity.py::test_backup_does_not_silently_drop_a_file_whose_path_is_over_260_characters`,
+  `test_backup_does_not_follow_a_junction_outside_the_root` (a real junction, made with `mklink /J`, no
+  admin needed).
+- **Live Photo pairing (`engine/live.py`)** had two bugs: a video whose duration could not be read
+  (`duration IS NULL`) was treated as a *candidate* motion clip by the SQL (`duration IS NULL OR duration
+  <= ...`), so it could be wrongly buried as another photo's Live Photo motion instead of staying its own
+  visible video; and when two videos shared a stem with one still (a rare but real occurrence), the second
+  `UPDATE` silently overwrote the first `live_video_id`, orphaning one video — neither hidden as a motion
+  clip nor ever matched again. Fixed the SQL to require a readable duration, and added a `paired_stills`
+  set so a still is only ever paired once. Tests:
+  `test_media_and_organisation.py::test_a_video_with_unreadable_duration_is_not_wrongly_hidden_as_a_live_photos_motion`,
+  `test_two_videos_sharing_a_stem_with_one_still_do_not_both_vanish`.
+- **WebDAV PROPFIND with `Depth: infinity`** (`api/dav.py`) was silently answered as if it had been
+  `Depth: 1` — this server only ever has one level to give, but a client asking for the whole tree got
+  back exactly the same one-level listing with nothing to say anything past it was left out. A backup app
+  that trusts `Depth: infinity` to mean "everything" could believe a folder with content was empty. RFC
+  4918 §9.1 allows refusing it outright, which is what the fix does (403). Test:
+  `test_v7_features.py::test_propfind_depth_infinity_is_refused_not_silently_truncated`.
+- **GPX import (`engine/gpx.py::parse_gpx`) kept "null island"** (0, 0) track points — the literal
+  coordinate a GPS logger writes when it briefly loses its fix — while `metadata.py` and `engine/takeout.py`
+  already drop the same thing for EXIF and Takeout GPS. A photo taken near that moment on the walk could be
+  geotagged into the Gulf of Guinea. Fixed by applying the same filter GPX import was missing. Tests:
+  `test_v4_features.py::test_gpx_null_island_point_is_dropped`, `test_gpx_track_does_not_place_a_photo_at_null_island`.
+- **A failed trim, movie, collage or animation could leave a corrupt file under a real media filename**
+  inside an indexed folder (`engine/editor.py::trim_video`, `engine/creations.py::movie`/`collage`/
+  `animation`). `trim_video` and `movie` wrote to a `....part.mp4` temp file but never cleaned it up on an
+  exception (only on the "nothing to do" success path) — and that temp name still ends in a real `.mp4`
+  extension, so the next index pass would read the half-muxed leftover as a genuine, corrupt video.
+  `collage` and `animation` were worse: they wrote straight into the *final* reserved filename (from
+  `uploads.py::_claim`, which creates it as an empty placeholder up front), so a failure partway through
+  `Image.save()` left whatever had been written so far sitting under the finished creation's own name.
+  All four now follow `video.py::transcode_to_mp4`'s existing discipline: write to a sibling temp file,
+  `os.replace()` it into place only on success, and `unlink()` it on any exception. Tests (each using a
+  fake that lets a few writes/muxed packets through and then raises, to prove the leftover is real and not
+  just a theoretical one): `test_v6_features.py::test_a_failed_collage_does_not_leave_a_file_under_its_real_name`,
+  `test_a_failed_animation_does_not_leave_a_file_under_its_real_name`,
+  `test_a_failed_movie_does_not_leave_a_corrupt_mp4_under_a_real_name`,
+  `test_a_failed_trim_does_not_leave_a_corrupt_video_under_a_real_name`.
+
+All of the above were exercised only on synthetic fixtures, never against the real library; the backup
+fixes were additionally run together with the existing junction/long-path tests
+(`test_scan_junctions.py`, `test_v6_features.py`, `test_authz_review.py`: 72 passed, 1 skipped) and the full
+suite was re-run clean after all of them landed (see the test count in `CLAUDE.md`'s Commands section).
