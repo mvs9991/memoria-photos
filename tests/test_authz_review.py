@@ -204,3 +204,23 @@ def test_guests_are_not_shown_job_settings_or_messages(ctx, fam):
     body = guest.get("/api/jobs").text
     assert "secret" not in body, body                 # was: the export folder, in params and message
     assert "secret" in owner.get("/api/jobs").text
+
+
+def test_locking_a_batch_of_ids_never_locks_a_private_photo(ctx, fam):
+    """A stray id in an owner's /photos/lock call used to flip locked=1 on someone's private photo
+    (status stayed 'private'), and sharing it again then brought it back as 'locked' instead of 'ok' —
+    stuck invisible to its owner, and newly reachable through the Locked folder despite "not even the owner"."""
+    owner, priya, guest = fam
+    make_private(ctx, [13], username="Priya")
+    owner.post("/api/locked/pin", json={"new": "2468"})
+    assert owner.post("/api/photos/lock", json={"photo_ids": [1, 2, 13]}).status_code == 200
+    conn = ctx.connect()
+    row = conn.execute("SELECT status, locked FROM photos WHERE id = 13").fetchone()
+    conn.close()
+    assert row["status"] == "private" and row["locked"] == 0, dict(row)
+
+    assert priya.post("/api/photos/share-with-family", json={"photo_ids": [13]}).status_code == 200
+    conn = ctx.connect()
+    row2 = conn.execute("SELECT status FROM photos WHERE id = 13").fetchone()
+    conn.close()
+    assert row2["status"] == "ok", dict(row2)

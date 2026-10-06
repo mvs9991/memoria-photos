@@ -139,6 +139,37 @@ def test_import_gpx_rejects_junk(ctx, tmp_path):
     conn.close()
 
 
+def test_gpx_null_island_point_is_dropped(ctx, tmp_path):
+    """A logger that briefly lost its fix mid-track writes a literal (0,0) point. metadata.py and
+    takeout.py already drop this for EXIF/Takeout GPS; a GPX track point is no more trustworthy and
+    must not survive into the parsed track, or a photo near that moment gets placed in the ocean."""
+    from photointel.engine.gpx import parse_gpx
+
+    t = datetime(2024, 4, 6, 9, 0)
+    pts = [(t, 17.300, 78.400), (t + timedelta(minutes=1), 0.0, 0.0), (t + timedelta(minutes=2), 17.302, 78.402)]
+    name, arr = parse_gpx(_gpx(pts).encode("utf-8"))
+    assert len(arr) == 2                                             # the null-island point was dropped
+    assert not any(abs(lat) < 1e-6 and abs(lon) < 1e-6 for lat, lon in arr[:, 1:3])
+
+
+def test_gpx_track_does_not_place_a_photo_at_null_island(ctx, tmp_path):
+    root = tmp_path / "camera"
+    t = datetime(2024, 4, 6, 9, 0)
+    make_image(root / "DSC_0001.jpg", taken=t + timedelta(minutes=1), camera=("canon", "EOS R6"))
+    utc0 = datetime.fromtimestamp(t.astimezone().timestamp(), tz=timezone.utc).replace(tzinfo=None)
+    # a logger that lost its fix for the single point nearest this photo's capture time
+    track = [(utc0, 17.300, 78.400), (utc0 + timedelta(minutes=1), 0.0, 0.0), (utc0 + timedelta(minutes=2), 17.302, 78.402)]
+    (root / "walk.gpx").write_text(_gpx(track), encoding="utf-8")
+    index(ctx, root)
+    conn = ctx.connect()
+    out = run_post_stages(ctx, conn, stages=["gpx"])["gpx"]
+    assert out["placed"] == 1
+    row = conn.execute("SELECT gps_lat, gps_lon FROM photos WHERE filename = 'DSC_0001.jpg'").fetchone()
+    assert row["gps_lat"] != 0.0 and row["gps_lon"] != 0.0
+    assert row["gps_lat"] == pytest.approx(17.301, abs=1e-3)          # interpolated between the real neighbours
+    conn.close()
+
+
 # ----------------------------------------------------------------- password & share links
 
 def test_password_protects_every_api_route(ctx, library, client):

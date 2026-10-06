@@ -593,3 +593,134 @@ def test_videos_query_returns_only_videos(ctx, library, client_for):
     r = client_for().get("/api/search", params={"q": "videos"}).json()
     assert [p["id"] for p in r["photos"]] == [vid]
     conn.close()
+
+
+def _live_row(conn, **kw) -> int:
+    """A minimal photos row, for exercising live.pair_live_photos directly without a real video file."""
+    cols = ("root_id", "rel_path", "folder", "filename", "ext", "size", "mtime", "first_seen_at",
+            "last_seen_at", "status", "media_type", "duration", "taken_ts")
+    d = dict(root_id=1, rel_path="x", folder="DCIM", filename="x.jpg", ext=".jpg", size=10, mtime=0,
+            first_seen_at=0, last_seen_at=0, status="ok", media_type="image", duration=None, taken_ts=None)
+    d.update(kw)
+    d["rel_path"] = f"{d['folder']}/{d['filename']}"
+    vals = [d[c] for c in cols]
+    return conn.execute(f"INSERT INTO photos({','.join(cols)}) VALUES ({','.join('?' for _ in cols)})",
+                        vals).lastrowid
+
+
+def test_a_video_with_unreadable_duration_is_not_wrongly_hidden_as_a_live_photos_motion(ctx):
+    """duration IS NULL means "unknown", not "short": burying a video of any length as a still's hidden
+    motion half, with no way to find it again short of unpairing by hand, was worse than leaving it visible."""
+    from photointel.engine import live
+
+    conn = ctx.connect()
+    conn.execute("INSERT OR IGNORE INTO roots(id, path, added_at) VALUES (1, 'R', 0)")
+    _live_row(conn, filename="IMG_1.jpg", taken_ts=1000, media_type="image")
+    vid = _live_row(conn, filename="IMG_1.mov", taken_ts=1000, media_type="video", duration=None)
+    conn.commit()
+    live.pair_live_photos(conn)
+    row = conn.execute("SELECT live_component FROM photos WHERE id = ?", (vid,)).fetchone()
+    conn.close()
+    assert row[0] == 0, "a video whose length is unknown must stay a normal, visible video"
+
+
+def test_two_videos_sharing_a_stem_with_one_still_do_not_both_vanish(ctx):
+    """Only the still's live_video_id survives two matches (the second UPDATE overwrites the first), but
+    both candidate videos used to get live_component=1 regardless — the other was hidden everywhere
+    (grid, search, duplicates, collections all filter live_component=0) and unreachable from anything."""
+    from photointel.engine import live
+
+    conn = ctx.connect()
+    conn.execute("INSERT OR IGNORE INTO roots(id, path, added_at) VALUES (1, 'R', 0)")
+    _live_row(conn, filename="IMG_1.jpg", taken_ts=1000, media_type="image")
+    vid1 = _live_row(conn, filename="IMG_1.mov", taken_ts=1000, media_type="video", duration=3.0)
+    vid2 = _live_row(conn, filename="IMG_1.mp4", taken_ts=1001, media_type="video", duration=2.5)
+    conn.commit()
+    live.pair_live_photos(conn)
+    rows = {r["id"]: r["live_component"] for r in conn.execute("SELECT id, live_component FROM photos")}
+    conn.close()
+    assert sorted([rows[vid1], rows[vid2]]) == [0, 1], "one of the two videos must stay visible"
+
+
+def test_ocr_reads_the_photo_as_the_user_turned_it(ctx, tmp_path):
+    """photos.rotation is the user's own turn, applied everywhere else a photo is shown (the viewer, the
+    editor, thumbnails) — OCR skipped it and read a screenshot or scanned document sideways."""
+    from photointel.engine import ocr as ocr_mod
+
+    class ShapeOcr:
+        def __init__(self):
+            self.shapes = []
+
+        def read(self, rgb):
+            self.shapes.append(rgb.shape[:2])
+            return ""
+
+    root = tmp_path / "lib"
+    make_image(root / "photo.jpg", size=(800, 600))
+    index(ctx, root)
+    conn = ctx.connect()
+    pid = conn.execute("SELECT id FROM photos").fetchone()[0]
+    conn.execute("UPDATE photos SET rotation = 90 WHERE id = ?", (pid,))
+    conn.commit()
+    engine = ShapeOcr()
+    ocr_mod.ocr_photos(ctx, conn, everything=True, engine=engine)
+    h, w = engine.shapes[0]
+    conn.close()
+    assert h > w, f"OCR read the photo before the user's 90-degree turn was applied: shape(h,w)={(h, w)}"
+
+
+def test_a_decode_failure_during_ocr_stays_a_candidate_for_retry(ctx, tmp_path):
+    """A transient read failure (a locked file, a drive that dropped) was stamped with the current
+    ocr_model exactly as a real "no text found" would be — never retried again short of bumping the
+    OCR model version, even though the photo was never actually read."""
+    from photointel.engine import ocr as ocr_mod
+
+    class FakeOcr:
+        def read(self, rgb):
+            return ""
+
+    root = tmp_path / "lib"
+    p = make_image(root / "photo.jpg", size=(800, 600))
+    index(ctx, root)
+    conn = ctx.connect()
+    pid = conn.execute("SELECT id FROM photos").fetchone()[0]
+    p.write_bytes(b"corrupted after indexing")   # status is still 'ok' in the db; the file itself is now bad
+    out1 = ocr_mod.ocr_photos(ctx, conn, everything=True, engine=FakeOcr())
+    assert out1["failed"] == 1 and out1["read"] == 0
+    row = conn.execute("SELECT ocr_model FROM photos WHERE id = ?", (pid,)).fetchone()
+    assert row["ocr_model"] is None, "a failed read must not be stamped as if it had been read"
+    # Still a candidate: tried again (and fails again, the file is still corrupted) rather than
+    # silently skipped forever because a first failure was recorded as a confirmed "no text".
+    out2 = ocr_mod.ocr_photos(ctx, conn, everything=True, engine=FakeOcr())
+    conn.close()
+    assert out2["failed"] == 1, "a decode failure must remain a candidate for a later retry"
+
+
+def test_captioning_sees_the_photo_as_the_user_turned_it(ctx, tmp_path, monkeypatch):
+    from photointel.vision import captioner as cap_mod
+
+    seen = {}
+
+    class RecordingCaptioner:
+        def __init__(self, *a, **kw):
+            pass
+
+        def caption(self, image, detailed=False, max_new_tokens=96):
+            seen["size"] = image.size
+            return "x"
+
+        def unload(self):
+            pass
+
+    root = tmp_path / "lib"
+    make_image(root / "photo.jpg", size=(800, 600))
+    index(ctx, root)
+    conn = ctx.connect()
+    pid = conn.execute("SELECT id FROM photos").fetchone()[0]
+    conn.execute("UPDATE photos SET rotation = 90 WHERE id = ?", (pid,))
+    conn.commit()
+    monkeypatch.setattr(cap_mod, "Captioner", RecordingCaptioner)
+    cap_mod.caption_photos(ctx, conn, photo_ids=[pid])
+    conn.close()
+    w, h = seen["size"]
+    assert h > w, f"the captioner saw the photo before the user's 90-degree turn was applied: size(w,h)={(w, h)}"

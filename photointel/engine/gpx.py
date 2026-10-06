@@ -60,7 +60,10 @@ def parse_gpx(data: bytes) -> tuple[str | None, np.ndarray]:
             lat, lon = float(el.get("lat")), float(el.get("lon"))
         except (TypeError, ValueError):
             continue
-        if -90 <= lat <= 90 and -180 <= lon <= 180:
+        if -90 <= lat <= 90 and -180 <= lon <= 180 and not (abs(lat) < 1e-6 and abs(lon) < 1e-6):
+            # "null island": a GPS logger that briefly lost its fix mid-track writes a literal (0,0)
+            # point. metadata.py and takeout.py both already drop this for EXIF/Takeout GPS; a GPX track
+            # point is no more trustworthy and must not place a photo in the Gulf of Guinea.
             pts.append((ts, lat, lon))
     if not pts:
         raise GpxError("no timestamped track points")

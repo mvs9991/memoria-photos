@@ -552,3 +552,164 @@ def test_collage_animation_and_movie(ctx, library, client, monkeypatch):
     assert frames == 3 * 10 - 2 * 3                                    # two crossfades of 3 frames overlap
     assert {p: sha(p) for p in originals} == originals               # the photos are only read
     conn.close()
+
+
+def test_a_failed_collage_does_not_leave_a_file_under_its_real_name(ctx, library, client, monkeypatch):
+    """canvas.save() used to write straight into the reserved real filename; a failure partway
+    through left whatever had been written there under a name that looks like a finished collage."""
+    import PIL.Image as PILImage
+
+    from photointel.engine import creations
+    from photointel.engine.uploads import ensure_upload_root
+    from photointel.pipeline import jobs
+
+    monkeypatch.setattr(jobs, "_spawn", lambda args: None)
+    index(ctx, library)
+    ids = client.get("/api/photos/index", params={"year": 2024, "month": 7}).json()["ids"]
+
+    orig_save = PILImage.Image.save
+
+    def flaky_save(self, fp, *a, **kw):
+        if "Collage" in str(fp):
+            orig_save(self, fp, *a, **kw)              # the bytes do get written somewhere ...
+            raise OSError(28, "No space left on device (simulated)")   # ... but the save still fails
+        return orig_save(self, fp, *a, **kw)
+
+    monkeypatch.setattr(PILImage.Image, "save", flaky_save)
+    conn = ctx.connect()
+    _, root = ensure_upload_root(ctx, conn)
+    with pytest.raises(OSError):
+        creations.collage(ctx, conn, ids[:4])
+    conn.close()
+
+    leftovers = list((root / "Creations").rglob("Collage *"))
+    assert not any(p.name.endswith(".part") for p in leftovers)          # no leftover temp file
+    # the real name, if it exists at all (reserved before the write), never got the failed write's bytes
+    assert all(p.stat().st_size == 0 for p in leftovers if not p.name.endswith(".part"))
+
+
+def test_a_failed_animation_does_not_leave_a_file_under_its_real_name(ctx, library, client, monkeypatch):
+    import PIL.Image as PILImage
+
+    from photointel.engine import creations
+    from photointel.engine.uploads import ensure_upload_root
+    from photointel.pipeline import jobs
+
+    monkeypatch.setattr(jobs, "_spawn", lambda args: None)
+    index(ctx, library)
+    distinct = [pid_of(ctx, n) for n in ("IMG_x0.jpg", "IMG_20240300_110000.jpg", "Screenshot_20240610-101010.png")]
+
+    orig_save = PILImage.Image.save
+
+    def flaky_save(self, fp, *a, **kw):
+        if "Animation" in str(fp):
+            orig_save(self, fp, *a, **kw)
+            raise OSError(28, "No space left on device (simulated)")
+        return orig_save(self, fp, *a, **kw)
+
+    monkeypatch.setattr(PILImage.Image, "save", flaky_save)
+    conn = ctx.connect()
+    _, root = ensure_upload_root(ctx, conn)
+    with pytest.raises(OSError):
+        creations.animation(ctx, conn, distinct, fps=5)
+    conn.close()
+
+    leftovers = list((root / "Creations").rglob("Animation *"))
+    assert not any(p.name.endswith(".part") for p in leftovers)
+    assert all(p.stat().st_size == 0 for p in leftovers if not p.name.endswith(".part"))
+
+
+def test_a_failed_movie_does_not_leave_a_corrupt_mp4_under_a_real_name(ctx, library, client, monkeypatch):
+    """A disk-full (or any other) failure midway through muxing used to leave the half-written
+    ".part.mp4" behind — a real .mp4 extension, inside an indexed folder, that the next index run
+    would read as a genuine, corrupt video."""
+    import av
+
+    from photointel.engine import creations
+    from photointel.engine.uploads import ensure_upload_root
+    from photointel.pipeline import jobs
+
+    monkeypatch.setattr(jobs, "_spawn", lambda args: None)
+    index(ctx, library)
+    ids = client.get("/api/photos/index", params={"year": 2024, "month": 7}).json()["ids"]
+
+    real_open = av.open
+    muxed = {"n": 0}
+
+    class FlakyContainer:
+        def __init__(self, real):
+            self._real = real
+
+        def add_stream(self, *a, **kw):
+            return self._real.add_stream(*a, **kw)
+
+        def mux(self, pkt):
+            muxed["n"] += 1
+            if muxed["n"] > 3:
+                raise OSError(28, "No space left on device (simulated)")
+            return self._real.mux(pkt)
+
+        def close(self):
+            return self._real.close()
+
+    def fake_open(path, mode="r", **kw):
+        real = real_open(path, mode, **kw)
+        return FlakyContainer(real) if mode == "w" else real
+
+    monkeypatch.setattr(av, "open", fake_open)
+    conn = ctx.connect()
+    _, root = ensure_upload_root(ctx, conn)
+    with pytest.raises(OSError):
+        creations.movie(ctx, conn, ids[:3], seconds_each=1.0, size=(320, 180), fps=10, fade=0.3)
+    conn.close()
+
+    leftovers = list((root / "Creations").rglob("Memories *"))
+    assert not any(p.name.endswith(".part.mp4") for p in leftovers)
+
+
+def test_a_failed_trim_does_not_leave_a_corrupt_video_under_a_real_name(ctx, tmp_path, client, monkeypatch):
+    import av
+
+    from photointel.engine.editor import trim_video
+    from photointel.engine.uploads import ensure_upload_root
+    from photointel.pipeline import jobs
+    from tests.test_media_and_organisation import make_video
+
+    monkeypatch.setattr(jobs, "_spawn", lambda args: None)
+    lib = tmp_path / "lib"
+    make_video(lib / "clip.mp4", seconds=6, fps=10)
+    index(ctx, lib)
+    pid = pid_of(ctx, "clip.mp4")
+
+    real_open = av.open
+    muxed = {"n": 0}
+
+    class FlakyContainer:
+        def __init__(self, real):
+            self._real = real
+
+        def add_stream_from_template(self, s):
+            return self._real.add_stream_from_template(s)
+
+        def mux(self, pkt):
+            muxed["n"] += 1
+            if muxed["n"] > 3:
+                raise OSError(28, "No space left on device (simulated)")
+            return self._real.mux(pkt)
+
+        def close(self):
+            return self._real.close()
+
+    def fake_open(path, mode="r", **kw):
+        real = real_open(path, mode, **kw)
+        return FlakyContainer(real) if mode == "w" else real
+
+    monkeypatch.setattr(av, "open", fake_open)
+    conn = ctx.connect()
+    _, root = ensure_upload_root(ctx, conn)
+    with pytest.raises(OSError):
+        trim_video(ctx, conn, pid, 0.0, 5.0)
+    conn.close()
+
+    leftovers = list((root / "Edits").rglob("clip (trim)*"))
+    assert not any(p.name.endswith(".part.mp4") for p in leftovers)

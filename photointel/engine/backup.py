@@ -24,6 +24,7 @@ from pathlib import Path
 from typing import Callable
 
 from .. import db
+from ..pipeline.scanner import is_link_dir_path, long_path
 from .trash import TRASH_DIR_NAME
 from .xmp import ExportError, _check_destination
 
@@ -47,20 +48,25 @@ def _root_names(conn: sqlite3.Connection) -> dict[int, tuple[Path, str]]:
 
 
 def _copy_hashed(src: Path, dest: Path) -> str:
-    """Copy through a .part file, hashing what was read, then rename into place."""
+    """Copy through a .part file, hashing what was read, then rename into place. `src`/`dest` stay the
+    plain (non-prefixed) path everywhere else in this module (a test, an error message or
+    `known.get((rid, rel))` must see the same form whether or not a given path happens to be long);
+    every actual filesystem call here goes through `long_path()` instead — a path over 260 characters,
+    without Windows' long-paths setting on, otherwise cannot even be opened, let alone stat'd or renamed."""
     tmp = dest.with_name(dest.name + ".part")
+    lsrc, ltmp, ldest = long_path(str(src)), long_path(str(tmp)), long_path(str(dest))
     h = hashlib.sha256()
-    with open(src, "rb") as fi, open(tmp, "wb") as fo:
+    with open(lsrc, "rb") as fi, open(ltmp, "wb") as fo:
         before = os.fstat(fi.fileno())      # what the source looked like when we started reading
         for block in iter(lambda: fi.read(CHUNK), b""):
             h.update(block)
             fo.write(block)
-    shutil.copystat(src, tmp)
+    shutil.copystat(lsrc, ltmp)
     # Stamp the copy with the mtime the source had BEFORE it was read. If the source changed while
     # we copied, the copy may mix old and new bytes; with the new mtime it would look up to date for
     # ever. With the old one the next run sees a difference and copies it again.
-    os.utime(tmp, ns=(before.st_atime_ns, before.st_mtime_ns))
-    os.replace(tmp, dest)
+    os.utime(ltmp, ns=(before.st_atime_ns, before.st_mtime_ns))
+    os.replace(ltmp, ldest)
     return h.hexdigest()
 
 
@@ -82,16 +88,30 @@ def run_backup(ctx, conn: sqlite3.Connection, target: str | Path, progress: Call
         "SELECT root_id, rel_path, sha256 FROM photos WHERE sha256 IS NOT NULL AND status IN ('ok', 'error', 'pending')")}
 
     files: list[tuple[int, Path, str, Path]] = []
+    scan_errors: list[str] = []
     for rid, (root, name) in _root_names(conn).items():
         if not root.exists():
             log.warning("Backup: %s is not reachable; skipped", root)
             continue
-        for dirpath, dirnames, filenames in os.walk(root):
-            dirnames[:] = [d for d in dirnames if d not in SKIP_DIRS]
+        # Scanned via the long-path form (a path over 260 characters, without Windows' long-paths setting
+        # on, made os.walk silently drop that whole subtree — its default onerror is None, so the scan
+        # error vanished with no file counted as failed and nothing in the report). `src`/`rel` are rebuilt
+        # on the plain root straight after, so every path this function stores, compares or reports stays
+        # the ordinary form the rest of it (and the tests, and anyone reading `errors`) already expects;
+        # only the few calls that touch the filesystem go through `_lp()` for the long form.
+        long_root = str(long_path(str(root)))
+        root_len = len(long_root.rstrip("\\/")) + 1
+        for dirpath, dirnames, filenames in os.walk(long_root, onerror=lambda e: scan_errors.append(str(e))):
+            # os.walk's own followlinks=False does not see a Windows junction (only a real symlink), so a
+            # junction pointing outside the root — or back at one of its own ancestors, which would recurse
+            # forever — was both followed and backed up as if it were part of the photo library.
+            dirnames[:] = [d for d in dirnames if d not in SKIP_DIRS
+                          and not is_link_dir_path(os.path.join(dirpath, d))]
             for fn in filenames:
-                src = Path(dirpath) / fn
-                rel = src.relative_to(root).as_posix()
-                files.append((rid, src, rel, base / "photos" / name / rel))
+                rel = (dirpath[root_len:] + "/" + fn).replace(os.sep, "/").lstrip("/")
+                src = root / rel
+                dest = base / "photos" / name / rel
+                files.append((rid, src, rel, dest))
 
     copied = unchanged = failed = 0
     mismatched: list[str] = []
@@ -102,16 +122,16 @@ def run_backup(ctx, conn: sqlite3.Connection, target: str | Path, progress: Call
         if should_stop and should_stop():
             break
         try:
-            st = src.stat()
-            if dest.exists():
-                dst = dest.stat()
+            st = os.stat(long_path(str(src)))
+            if os.path.exists(long_path(str(dest))):
+                dst = os.stat(long_path(str(dest)))
                 if dst.st_size == st.st_size and abs(dst.st_mtime - st.st_mtime) < 2:
                     unchanged += 1
                     continue
                 if dst.st_mtime > st.st_mtime + 2:
                     unchanged += 1      # the backup holds a newer version; never replace it with an older one
                     continue
-            dest.parent.mkdir(parents=True, exist_ok=True)
+            os.makedirs(long_path(str(dest.parent)), exist_ok=True)
             digest = _copy_hashed(src, dest)
             expected = known.get((rid, rel))
             if expected and expected != digest:
@@ -139,7 +159,7 @@ def run_backup(ctx, conn: sqlite3.Connection, target: str | Path, progress: Call
 
     summary = {"folder": str(base), "files": len(files), "copied": copied, "unchanged": unchanged,
                "failed": failed, "bytes": written, "hash_mismatches": mismatched[:50],
-               "errors": errors[:50], "seconds": round(time.time() - t0, 1),
+               "errors": errors[:50], "scan_errors": scan_errors[:50], "seconds": round(time.time() - t0, 1),
                "finished_at": time.time(), "cancelled": bool(should_stop and should_stop())}
     (mem / "backup-log.json").write_text(json.dumps(summary, indent=1), encoding="utf-8")
     if not summary["cancelled"]:

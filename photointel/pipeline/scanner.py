@@ -46,6 +46,16 @@ def _is_link_dir(entry: os.DirEntry) -> bool:
         return False
 
 
+def is_link_dir_path(path) -> bool:
+    """Same check as `_is_link_dir`, for callers that only have a path (not a DirEntry from `os.scandir`) —
+    `os.walk`'s own `followlinks=False` does not see a junction on Windows (`os.path.islink` only knows the
+    symlink reparse tag), so a caller walking with `os.walk` must call this itself on every directory name."""
+    try:
+        return getattr(os.stat(path, follow_symlinks=False), "st_reparse_tag", 0) in _LINK_TAGS
+    except OSError:
+        return False
+
+
 LONG_PREFIX = "\\\\?\\"
 
 

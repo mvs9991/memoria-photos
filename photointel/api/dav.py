@@ -143,6 +143,12 @@ def _propfind(conn, who: str, path: str, depth: str) -> Response:
         parts.append(_response_xml(path, False, entry["size"], entry["mtime"]))
     else:
         parts.append(_response_xml(path, True))
+        if depth == "infinity":
+            # RFC 4918 §9.1 allows refusing an infinite-depth listing; this server only ever had one
+            # level to give (dav_files/dav_dirs are not walked recursively below the first level), so a
+            # client asking for the whole tree got exactly the same one-level answer as Depth: 1, with no
+            # sign anything past that was left out — a backup app could believe a folder was empty.
+            return Response(status_code=403)
         if depth != "0":
             base = f"{path}/" if path else ""
             like = base.replace("%", r"\%").replace("_", r"\_") + "%"

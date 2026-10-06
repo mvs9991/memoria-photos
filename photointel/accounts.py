@@ -61,7 +61,11 @@ def allowed(role: str, method: str, path: str) -> bool:
 
 
 def _check(username: str, password: str | None, role: str | None) -> None:
-    if not _NAME.match(username or ""):
+    # Checked after stripping, matching what create()/enable() actually store: "  " (all spaces) passed
+    # the raw regex (it allows a space) and was then stored as "" — a real, logged-in account that every
+    # route keyed by current_user() (falsy for "") treated as signed out, including its own self-service
+    # password change.
+    if not _NAME.match((username or "").strip()):
         raise AccountError("a name of 2 to 40 letters, digits, spaces or . @ - _")
     if password is not None and len(password) < 6:
         raise AccountError("use a password of at least 6 characters")

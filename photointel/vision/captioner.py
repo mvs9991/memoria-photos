@@ -93,6 +93,7 @@ def caption_photos(ctx, conn, photo_ids: list[int] | None = None, limit: int = 2
                    detailed: bool = False, progress=None, should_stop=None) -> dict:
     """Caption photos that don't have one yet (covers and highlights first)."""
     from .. import db, imaging
+    from ..rotation import rotate_image
 
     model_id = db.register_model(conn, "caption", CAPTION_MODEL_NAME, CAPTION_MODEL_VERSION, None,
                                  {"repo": CAPTION_MODEL_REPO})
@@ -102,12 +103,12 @@ def caption_photos(ctx, conn, photo_ids: list[int] | None = None, limit: int = 2
     if photo_ids:
         marks = ",".join("?" * len(photo_ids))
         rows = conn.execute(
-            f"""SELECT p.id, r.path root, p.rel_path FROM photos p JOIN roots r ON r.id = p.root_id
+            f"""SELECT p.id, r.path root, p.rel_path, p.rotation FROM photos p JOIN roots r ON r.id = p.root_id
                 WHERE p.id IN ({marks}) AND p.status='ok'""", photo_ids).fetchall()
     else:
         # Priority: event covers and highlights — the photos the UI actually shows big.
         rows = conn.execute(
-            """SELECT p.id, r.path root, p.rel_path FROM photos p JOIN roots r ON r.id = p.root_id
+            """SELECT p.id, r.path root, p.rel_path, p.rotation FROM photos p JOIN roots r ON r.id = p.root_id
                WHERE p.status='ok' AND p.live_component=0 AND (p.caption IS NULL OR p.caption_model != ?)
                  AND COALESCE(p.source_kind,'') != 'screenshot'
                ORDER BY (p.id IN (SELECT cover_photo_id FROM events WHERE cover_photo_id IS NOT NULL)) DESC,
@@ -127,6 +128,7 @@ def caption_photos(ctx, conn, photo_ids: list[int] | None = None, limit: int = 2
         path = Path(r["root"]) / r["rel_path"]
         try:
             img = imaging.decode(path, max_side=1024).image
+            img = rotate_image(img, r["rotation"] or 0)   # the user's turn, so the caption describes it upright
             text = captioner.caption(img, detailed=detailed)
             if text:
                 conn.execute("UPDATE photos SET caption=?, caption_model=? WHERE id=?",

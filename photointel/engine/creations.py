@@ -84,7 +84,16 @@ def collage(ctx, conn: sqlite3.Connection, photo_ids: list[int], size: int = 240
         canvas.paste(tile, (gap + c * (cell_w + gap), gap + r * (cell_h + gap)))
     stamps = [t for _, t in photos]
     dest = _dest(ctx, conn, stamps, f"Collage {time.strftime('%Y-%m-%d %H%M%S')}.jpg")
-    canvas.save(dest, "JPEG", quality=90)
+    # Written beside `dest` and swapped in atomically: a failure partway through `.save()` (a full
+    # disk, a bad pixel buffer) must not leave a truncated JPEG sitting under the collage's real name,
+    # where the next index would read it as a real, corrupt photo.
+    tmp = dest.with_name(dest.name + ".part")
+    try:
+        canvas.save(tmp, "JPEG", quality=90)
+        os.replace(tmp, dest)
+    except Exception:
+        tmp.unlink(missing_ok=True)
+        raise
     _touch(dest, stamps)
     return {"path": str(dest), "width": canvas.width, "height": canvas.height, "photos": len(photos)}
 
@@ -101,8 +110,14 @@ def animation(ctx, conn: sqlite3.Connection, photo_ids: list[int], fps: int = 6,
     frames = [ImageOps.fit(img, (w, h), Image.Resampling.LANCZOS) for img, _ in photos]
     stamps = [t for _, t in photos]
     dest = _dest(ctx, conn, stamps, f"Animation {time.strftime('%Y-%m-%d %H%M%S')}.gif")
-    frames[0].save(dest, "GIF", save_all=True, append_images=frames[1:], duration=int(1000 / max(1, min(fps, 30))),
-                   loop=0, optimize=True)
+    tmp = dest.with_name(dest.name + ".part")                        # see collage(): same atomic-swap reasoning
+    try:
+        frames[0].save(tmp, "GIF", save_all=True, append_images=frames[1:],
+                       duration=int(1000 / max(1, min(fps, 30))), loop=0, optimize=True)
+        os.replace(tmp, dest)
+    except Exception:
+        tmp.unlink(missing_ok=True)
+        raise
     _touch(dest, stamps)
     return {"path": str(dest), "frames": len(frames)}
 
@@ -136,32 +151,38 @@ def movie(ctx, conn: sqlite3.Connection, photo_ids: list[int], seconds_each: flo
 
     stamps = [t for _, t in photos]
     dest = _dest(ctx, conn, stamps, f"Memories {time.strftime('%Y-%m-%d %H%M%S')}.mp4")
+    # Real .mp4 extension, same reasoning as trim_video(): a failure partway (should_stop aside,
+    # which exits cleanly) must not leave this readable as a real, corrupt video by the next index.
     tmp = dest.with_name(dest.stem + ".part.mp4")
-    out = av.open(str(tmp), "w")
     try:
-        stream = out.add_stream("libx264", rate=fps)
-        stream.width, stream.height, stream.pix_fmt = W, H, "yuv420p"
-        stream.options = {"preset": "veryfast", "crf": "21"}
-        prev_tail: list[np.ndarray] | None = None
-        for i, (img, _) in enumerate(photos):
-            if should_stop and should_stop():
-                break
-            fr = frames_of(img)
-            if prev_tail is not None:
-                for k in range(fade_n):
-                    a = (k + 1) / (fade_n + 1)
-                    fr[k] = (prev_tail[k] * (1 - a) + fr[k] * a).astype(np.uint8)
-            body = fr if i == len(photos) - 1 else fr[:-fade_n] if fade_n else fr
-            for f in body:
-                for pkt in stream.encode(av.VideoFrame.from_ndarray(f, format="rgb24")):
-                    out.mux(pkt)
-            prev_tail = fr[-fade_n:] if fade_n else None
-            if progress:
-                progress(i + 1, len(photos))
-        for pkt in stream.encode():
-            out.mux(pkt)
-    finally:
-        out.close()
-    os.replace(tmp, dest)
+        out = av.open(str(tmp), "w")
+        try:
+            stream = out.add_stream("libx264", rate=fps)
+            stream.width, stream.height, stream.pix_fmt = W, H, "yuv420p"
+            stream.options = {"preset": "veryfast", "crf": "21"}
+            prev_tail: list[np.ndarray] | None = None
+            for i, (img, _) in enumerate(photos):
+                if should_stop and should_stop():
+                    break
+                fr = frames_of(img)
+                if prev_tail is not None:
+                    for k in range(fade_n):
+                        a = (k + 1) / (fade_n + 1)
+                        fr[k] = (prev_tail[k] * (1 - a) + fr[k] * a).astype(np.uint8)
+                body = fr if i == len(photos) - 1 else fr[:-fade_n] if fade_n else fr
+                for f in body:
+                    for pkt in stream.encode(av.VideoFrame.from_ndarray(f, format="rgb24")):
+                        out.mux(pkt)
+                prev_tail = fr[-fade_n:] if fade_n else None
+                if progress:
+                    progress(i + 1, len(photos))
+            for pkt in stream.encode():
+                out.mux(pkt)
+        finally:
+            out.close()
+        os.replace(tmp, dest)
+    except Exception:
+        tmp.unlink(missing_ok=True)
+        raise
     _touch(dest, stamps)
     return {"path": str(dest), "photos": len(photos), "seconds": round(len(photos) * seconds_each, 1)}

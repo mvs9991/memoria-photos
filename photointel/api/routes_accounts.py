@@ -209,7 +209,13 @@ def lock_photos(body: IdsBody):
     state = get_state()
     if not state.ctx.settings.locked_pin_hash:
         raise HTTPException(400, "set a PIN for the Locked folder first")
-    return {"locked": locked_mod.lock(state.conn(), body.photo_ids)}
+    conn = state.conn()
+    # Never a private photo: it was reachable by any id given, so one swept into an ordinary lock call
+    # (e.g. a stray id in a batch) picked up `locked=1` while `status` stayed 'private' — invisible to
+    # everyone until its owner shared it again, and then it came back as 'locked' instead of 'ok' (private.
+    # share() honours that flag), silently stuck for a family member and newly reachable through the
+    # owner's Locked folder despite "not even the owner" (see guard_locked's docstring).
+    return {"locked": locked_mod.lock(conn, visible_ids(conn, body.photo_ids))}
 
 
 @router.post("/photos/unlock")

@@ -115,6 +115,17 @@ def test_webdav_roles_paths_and_guessing(ctx, library, app, family):
     assert propfind(dav, "/dav/", depth="0").status_code == 429
 
 
+def test_propfind_depth_infinity_is_refused_not_silently_truncated(ctx, library, app, family):
+    """This server only ever has one level to give (dav_files/dav_dirs are not walked recursively), so
+    Depth: infinity used to return exactly the Depth: 1 answer with no sign anything deeper was left out
+    — RFC 4918 §9.1 allows refusing it outright, which is what a real client needs to not be misled."""
+    index(ctx, library)
+    dav = TestClient(app)
+    dav.put("/dav/a/b/deep.jpg", content=_jpeg(), auth=PRIYA)
+    r = propfind(dav, "/dav/", depth="infinity", auth=PRIYA)
+    assert r.status_code != 207 or "deep.jpg" in r.text
+
+
 def test_webdav_needs_a_password_beyond_this_machine(ctx, app):
     assert TestClient(app).request("PROPFIND", "/dav/", headers={"Depth": "0"}).status_code == 403
 

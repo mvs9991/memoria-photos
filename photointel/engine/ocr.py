@@ -19,6 +19,7 @@ import numpy as np
 
 from .. import db, imaging
 from ..pipeline.scanner import long_path
+from ..rotation import rotate_image
 
 log = logging.getLogger(__name__)
 
@@ -78,7 +79,7 @@ def candidates(conn: sqlite3.Connection, model_id: int, everything: bool = False
                  OR EXISTS (SELECT 1 FROM photo_tags pt JOIN tags t ON t.id = pt.tag_id
                             WHERE pt.photo_id = p.id AND t.name IN ({marks}) AND pt.score >= ?))""")
         args += [*TEXTY_TAGS, TEXTY_TAG_MIN_SCORE]
-    sql = (f"SELECT p.id, r.path AS root, p.rel_path FROM photos p JOIN roots r ON r.id = p.root_id "
+    sql = (f"SELECT p.id, r.path AS root, p.rel_path, p.rotation FROM photos p JOIN roots r ON r.id = p.root_id "
            f"WHERE {' AND '.join(where)} ORDER BY p.id")
     if limit:
         sql += f" LIMIT {int(limit)}"
@@ -100,11 +101,15 @@ def ocr_photos(ctx, conn: sqlite3.Connection, everything: bool = False, limit: i
             break
         try:
             img = imaging.decode(long_path(os.path.join(r["root"], r["rel_path"])), max_side=OCR_MAX_SIDE).image
+            img = rotate_image(img, r["rotation"] or 0)   # the user's turn, so sideways text reads correctly
             text = engine.read(np.asarray(img, dtype=np.uint8))
         except Exception as exc:
+            # Not recorded as "read" (ocr_model stays as it was): a transient failure — a locked file, a
+            # drive that dropped — must stay a candidate for the next run, `--all` included. Stamping it
+            # the same as a real "no text found" meant it was never retried short of bumping the model version.
             failed += 1
             log.debug("OCR failed for photo %s: %s", r["id"], exc)
-            text = ""
+            continue
         conn.execute("UPDATE photos SET ocr_text = ?, ocr_model = ? WHERE id = ?", (text, model_id, r["id"]))
         done += 1
         with_text += 1 if text else 0

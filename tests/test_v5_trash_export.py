@@ -196,7 +196,8 @@ ALLOWED_REMOVALS = {
     "pipeline/jobs.py": 1,              # the index lock file
     "video.py": 2,                      # transcode temp files
     "engine/uploads.py": 1,             # an upload's own temp file in <upload folder>/.incoming
-    "engine/editor.py": 1,              # a trim's own .part file when nothing was copied
+    "engine/editor.py": 2,              # a trim's or an edit's own .part file when the save failed (or nothing was copied)
+    "engine/creations.py": 3,           # a collage's/animation's/movie's own .part file when the save failed
     "engine/export.py": 1,              # an export copy's own temp file in the export folder when the copy failed
     "engine/thumbpack.py": 3,           # its own cache files: a half-written pack, the pack it replaced, its staging file
     "api/images.py": 2,                 # temp files under <data>/cache: a rotated thumbnail that lost a race; a face crop whose write failed

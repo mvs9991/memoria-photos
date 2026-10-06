@@ -21,6 +21,7 @@ from photointel.engine import backup as backup_mod
 from photointel.engine import export as export_mod
 from photointel.engine.export import ExportSpec, export_to_folder
 from photointel.engine.xmp import ExportError, _check_destination
+from photointel.pipeline.scanner import long_path as scanner_long_path
 
 IS_WIN = sys.platform == "win32"
 
@@ -164,7 +165,9 @@ def test_source_changing_during_the_copy_is_not_trusted_as_done(bk, monkeypatch)
     src = root / "a.jpg"
 
     def modify_then_stat(s, d, *a, **k):
-        if Path(s) == src:
+        # s/d now arrive through long_path() (the \\?\ form, for genuinely long paths elsewhere) —
+        # compare the plain tail so this still recognises "a.jpg" regardless of that prefix.
+        if Path(s).name == src.name and str(Path(s).parent).endswith(str(src.parent)):
             src.write_bytes(b"Z" * 5000)                      # same size, changed after being read
             os.utime(src, (1_600_000_500, 1_600_000_500))
         return real(s, d, *a, **k)
@@ -597,3 +600,43 @@ def test_api_backup_to_bad_targets_is_a_4xx(bk, tmp_path):
         for t in (str(root / "bk"), str(afile), str(ctx.paths.data / "bk")):
             r = c.post("/api/backup", json={"folder": t})
             assert 400 <= r.status_code < 500, (t, r.status_code, r.text[:200])
+
+
+def test_backup_does_not_silently_drop_a_file_whose_path_is_over_260_characters(bk):
+    """os.walk's default onerror is None: a path over MAX_PATH it cannot scan used to vanish from the
+    backup with nothing in errors/failed — a backup that looked complete while quietly missing photos."""
+    ctx, conn, root, target, files = bk
+    deep = root
+    for part in ("x" * 60, "y" * 60, "z" * 60, "w" * 60):
+        deep = deep / part
+        os.makedirs(scanner_long_path(str(deep)), exist_ok=True)
+    long_file = deep / "photo.jpg"
+    data = b"L" * 123
+    with open(scanner_long_path(str(long_file)), "wb") as f:
+        f.write(data)
+    os.utime(scanner_long_path(str(long_file)), (1_600_000_000, 1_600_000_000))
+    rel = str(long_file.relative_to(root)).replace(os.sep, "/")
+    rid = conn.execute("SELECT id FROM roots WHERE path = ?", (str(root),)).fetchone()[0]
+    _photo_row(conn, rid, rel, len(data), 1_600_000_000, hashlib.sha256(data).hexdigest())
+    out = backup_mod.run_backup(ctx, conn, target)
+    dest = Path(scanner_long_path(str(_dest(target, root, rel))))
+    assert os.path.exists(dest), "the long-path file is missing from the backup"
+    assert out["copied"] >= 1
+
+
+def test_backup_does_not_follow_a_junction_outside_the_root(bk):
+    """os.walk(root)'s followlinks=False does not see a Windows junction (only a real symlink): a junction
+    inside a photo root pointing at an unrelated folder was walked and its files backed up as if they
+    belonged to the library."""
+    ctx, conn, root, target, files = bk
+    outside = root.parent / "outside_secret"
+    outside.mkdir()
+    (outside / "secret.txt").write_bytes(b"not a photo, not in any root")
+    link = root / "linked"
+    rc = os.system(f'mklink /J "{link}" "{outside}" >NUL 2>&1') if IS_WIN else os.symlink(outside, link)
+    if IS_WIN and not link.exists():
+        pytest.skip("could not create a junction on this machine")
+    backup_mod.run_backup(ctx, conn, target)
+    leaked = list((target / "Memoria Backup" / "photos" / root.name / "linked").rglob("secret.txt")) \
+        if (target / "Memoria Backup" / "photos" / root.name / "linked").exists() else []
+    assert not leaked, f"the junction's target was backed up: {leaked}"

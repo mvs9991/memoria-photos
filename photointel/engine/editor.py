@@ -156,8 +156,12 @@ def save_edit(ctx, conn: sqlite3.Connection, photo_id: int, spec: EditSpec) -> d
     kw = {"quality": 92, "subsampling": 0}
     if exif:
         kw["exif"] = exif
-    img.save(tmp, "JPEG", **kw)
-    os.replace(tmp, dest)
+    try:
+        img.save(tmp, "JPEG", **kw)
+        os.replace(tmp, dest)
+    except Exception:
+        tmp.unlink(missing_ok=True)
+        raise
     if row["mtime"]:
         try:
             os.utime(dest, (row["mtime"], row["mtime"]))
@@ -180,43 +184,49 @@ def trim_video(ctx, conn: sqlite3.Connection, photo_id: int, start: float, end: 
         raise EditError("the end must come after the start")
     ext = Path(row["filename"]).suffix.lower() or ".mp4"
     dest = _claim(_dest_dir(ctx, conn, row), f"{Path(row['filename']).stem} (trim){ext}")
+    # Named with the real extension so a *successful* replace lands as an ordinary video; which
+    # means a failure midway (a demux error, a full disk) must not leave this lying around — it would
+    # read as a real, corrupt video the next time the library is indexed, under this trim's own name.
     tmp = dest.with_name(dest.stem + ".part" + ext)
-    src = av.open(str(path))
     try:
-        vstreams = [s for s in src.streams if s.type in ("video", "audio")]
-        if not vstreams:
-            raise EditError("no video in this file")
-        out = av.open(str(tmp), "w")
+        src = av.open(str(path))
         try:
-            mapping = {s.index: out.add_stream_from_template(s) for s in vstreams}
-            video = next((s for s in vstreams if s.type == "video"), vstreams[0])
-            src.seek(int(start / video.time_base), stream=video, backward=True, any_frame=False)
-            offsets: dict[int, int] = {}
-            copied = 0
-            for pkt in src.demux(vstreams):
-                if pkt.dts is None or pkt.pts is None:
-                    continue
-                t = float(pkt.pts * pkt.time_base)
-                if t > end:
-                    if pkt.stream.index == video.index:
-                        break
-                    continue
-                if pkt.stream.index not in offsets:
-                    offsets[pkt.stream.index] = pkt.dts
-                off = offsets[pkt.stream.index]
-                pkt.pts -= off
-                pkt.dts -= off
-                pkt.stream = mapping[pkt.stream.index]
-                out.mux(pkt)
-                copied += 1
+            vstreams = [s for s in src.streams if s.type in ("video", "audio")]
+            if not vstreams:
+                raise EditError("no video in this file")
+            out = av.open(str(tmp), "w")
+            try:
+                mapping = {s.index: out.add_stream_from_template(s) for s in vstreams}
+                video = next((s for s in vstreams if s.type == "video"), vstreams[0])
+                src.seek(int(start / video.time_base), stream=video, backward=True, any_frame=False)
+                offsets: dict[int, int] = {}
+                copied = 0
+                for pkt in src.demux(vstreams):
+                    if pkt.dts is None or pkt.pts is None:
+                        continue
+                    t = float(pkt.pts * pkt.time_base)
+                    if t > end:
+                        if pkt.stream.index == video.index:
+                            break
+                        continue
+                    if pkt.stream.index not in offsets:
+                        offsets[pkt.stream.index] = pkt.dts
+                    off = offsets[pkt.stream.index]
+                    pkt.pts -= off
+                    pkt.dts -= off
+                    pkt.stream = mapping[pkt.stream.index]
+                    out.mux(pkt)
+                    copied += 1
+            finally:
+                out.close()
         finally:
-            out.close()
-    finally:
-        src.close()
-    if not copied:
+            src.close()
+        if not copied:
+            raise EditError("nothing between those times")
+        os.replace(tmp, dest)
+    except Exception:
         tmp.unlink(missing_ok=True)
-        raise EditError("nothing between those times")
-    os.replace(tmp, dest)
+        raise
     conn.execute("INSERT INTO edits(original_id, path, kind, created_at) VALUES (?,?,?,?)",
                  (photo_id, str(dest), "trim", time.time()))
     conn.commit()

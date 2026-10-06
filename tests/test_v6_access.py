@@ -48,6 +48,15 @@ def family(ctx, library, app):
 
 # ----------------------------------------------------------------- accounts
 
+def test_a_whitespace_only_username_is_refused_not_stored_blank(ctx, library, app, family):
+    """"  " (all spaces) passed the raw name regex (it allows a space) and was stored stripped to ""
+    — a real account that could sign in, but current_user() (falsy for "") then treated every one of
+    its own self-service requests, like changing its own password, as if nobody were signed in."""
+    owner = family
+    r = owner.post("/api/accounts", json={"username": "  ", "password": "whatever1", "role": "family"})
+    assert r.status_code == 400, r.text
+
+
 def test_every_request_needs_an_account(ctx, library, app, family):
     anon = TestClient(app)
     for path in ("/api/stats", "/api/photos/index", "/api/thumb/1", "/api/accounts/me"):

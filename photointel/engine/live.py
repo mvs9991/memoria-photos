@@ -34,10 +34,14 @@ def pair_live_photos(conn: sqlite3.Connection) -> dict:
         stills.setdefault(key, []).append(r)
 
     pairs: list[tuple[int, int]] = []
+    paired_stills: set[int] = set()
     for v in conn.execute(
+            # A video whose length could not be read must stay a normal, visible video: hiding it as a
+            # Live Photo's motion half on a NULL (unknown, not "short") duration could bury a real clip
+            # of any length with no way to find it again short of unpairing by hand.
             "SELECT id, root_id, folder, filename, taken_ts, duration FROM photos "
             "WHERE media_type = 'video' AND status = 'ok' "
-            "AND (duration IS NULL OR duration <= ?)", (video.LIVE_MAX_SECONDS,)):
+            "AND duration IS NOT NULL AND duration <= ?", (video.LIVE_MAX_SECONDS,)):
         cands = stills.get((v["root_id"], v["folder"], os.path.splitext(v["filename"])[0].lower()))
         if not cands:
             continue
@@ -45,6 +49,10 @@ def pair_live_photos(conn: sqlite3.Connection) -> dict:
         if (still["taken_ts"] is not None and v["taken_ts"] is not None
                 and abs(still["taken_ts"] - v["taken_ts"]) > PAIR_MAX_CLOCK_SKEW_S):
             continue  # same name, different moment (a reused IMG_0001 on another day)
+        if int(still["id"]) in paired_stills:
+            continue  # another video already claimed this still: a third same-stem file must not
+                      # both get hidden as live_component (the second UPDATE below only remembers one)
+        paired_stills.add(int(still["id"]))
         pairs.append((int(still["id"]), int(v["id"])))
 
     conn.execute("UPDATE photos SET live_video_id = NULL WHERE live_video_id IS NOT NULL")
