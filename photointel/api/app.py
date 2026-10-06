@@ -22,6 +22,40 @@ log = logging.getLogger(__name__)
 WEB_DIST = Path(__file__).resolve().parent.parent.parent / "web" / "dist"
 
 
+def _content_security_policy() -> str:
+    """One policy for every response: scripts and everything else come only from this server, so a stray bit
+    of someone's text (a filename, a caption, an OCR line) that slipped past React's escaping still could not
+    run as code or phone home. The page's one inline bootstrap script is allowed by its own SHA-256 hash, read
+    from the built index.html so it keeps matching after a rebuild. Styles stay inline because React writes
+    element styles and Leaflet does too; images allow data:/blob: (thumbnails, the editor preview) and the
+    opt-in OpenStreetMap tiles."""
+    import base64
+    import hashlib
+    import re
+
+    hashes = ""
+    try:
+        html = (WEB_DIST / "index.html").read_text(encoding="utf-8")
+        for body in re.findall(r"<script(?![^>]*\bsrc=)[^>]*>(.*?)</script>", html, re.S):
+            digest = base64.b64encode(hashlib.sha256(body.encode("utf-8")).digest()).decode()
+            hashes += f" 'sha256-{digest}'"
+    except OSError:
+        pass
+    return "; ".join((
+        "default-src 'self'",
+        f"script-src 'self'{hashes}",
+        "style-src 'self' 'unsafe-inline'",
+        "img-src 'self' data: blob: https://tile.openstreetmap.org",
+        "media-src 'self' blob:",
+        "font-src 'self'",
+        "connect-src 'self'",
+        "object-src 'none'",
+        "base-uri 'self'",
+        "form-action 'self'",
+        "frame-ancestors 'self'",
+    ))
+
+
 def _warm_models(ctx: AppContext) -> None:
     """Load the semantic model in the background so the first search is not a 15s wait."""
     try:
@@ -163,13 +197,17 @@ def create_app(ctx: AppContext) -> FastAPI:
         app.include_router(router, prefix="/api")
     app.include_router(dav.router)          # /dav/: the backup-app drop box (its own sign-in)
 
+    csp = _content_security_policy()
+
     def _hardened(response):
         """Headers every response carries: no guessing a type for what we serve (a photo or upload can
-        never be run as a page), no framing by another site (clickjacking), and no leaking the address
-        of a page, which can hold a share token, to sites it links to."""
+        never be run as a page), no framing by another site (clickjacking), no leaking the address
+        of a page, which can hold a share token, to sites it links to, and a content-security-policy that
+        keeps scripts and connections to this server only."""
         response.headers.setdefault("X-Content-Type-Options", "nosniff")
         response.headers.setdefault("X-Frame-Options", "SAMEORIGIN")
         response.headers.setdefault("Referrer-Policy", "same-origin")
+        response.headers.setdefault("Content-Security-Policy", csp)
         return response
 
     @app.middleware("http")
