@@ -1,4 +1,4 @@
-import { useMemo, useState } from "react";
+import { useEffect, useMemo, useState } from "react";
 import { Link, useParams } from "react-router-dom";
 import { useMutation, useQuery, useQueryClient } from "@tanstack/react-query";
 import { ArrowLeft, Check, FolderOutput, MapPin, MonitorPlay, Pencil, Sparkles, Users, X } from "lucide-react";
@@ -57,9 +57,7 @@ export default function EventDetail() {
 
       <header className="event-hero">
         {data.cover_photo_id && (
-          <div className="event-hero-bg">
-            <img src={thumbUrl(data.cover_photo_id, "l")} alt="" />
-          </div>
+          <HeroImage photoId={data.cover_photo_id} />
         )}
         <div className="event-hero-inner">
           {renaming ? (
@@ -187,3 +185,19 @@ export default function EventDetail() {
     </div>
   );
 }
+
+
+/** The 512 px thumbnail at once, then the 2048 px preview over it when it has arrived: the large one alone
+ * painted after 4.6-14 s on a phone-speed connection to the real library, the small one after 2.3-5 s. */
+function HeroImage({ photoId }: { photoId: number }) {
+  const [sharp, setSharp] = useState(false);
+  useEffect(() => setSharp(false), [photoId]);
+  return (
+    <div className="event-hero-bg">
+      <img src={thumbUrl(photoId, "m")} alt="" />
+      <img src={thumbUrl(photoId, "l")} alt="" className={`event-hero-sharp${sharp ? " on" : ""}`}
+        onLoad={() => setSharp(true)} />
+    </div>
+  );
+}
+

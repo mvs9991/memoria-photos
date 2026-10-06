@@ -182,6 +182,8 @@
 }
 .event-hero-bg { position: absolute; inset: 0; }
 .event-hero-bg img { width: 100%; height: 100%; object-fit: cover; filter: saturate(105%); }
+.event-hero-sharp { position: absolute; inset: 0; opacity: 0; transition: opacity 0.25s ease; }
+.event-hero-sharp.on { opacity: 1; }
 .event-hero-bg::after {
   content: "";
   position: absolute;

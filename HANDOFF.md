@@ -1260,3 +1260,16 @@ job heartbeats invalidate it every few seconds, which is no slower than before.
 called from other Python code (a hit returns a `Response`, not a dict); time-dependent ones need `by_day=True`.
 Tests get a fresh cache per test (`tests/conftest.py::_fresh_answer_cache`), which also closes the watcher
 connection that would otherwise hold each test library's file open on Windows.
+
+### Frontend on the real library (2026-10-06; measured with Playwright + CDP, CPU ×4 and ~30 Mbps, A/B by serving each build's assets through route interception against the live server)
+
+- **Photo grid fling** (31k photos, fast swipe): frame p50 56–100 ms → 18–34 ms, thumbnail requests 500–700 → 30–180.
+  Tiles that mount while the grid moves faster than ~8 screens a second wait for it to slow down before asking
+  for their image (`LoadGate` in `PhotoGrid.tsx`); a tile scrolled away before its image arrived cancels the
+  download (else hundreds queue ahead of what is on screen when it stops); `Tile` is memoised and rows keyed by
+  position.
+- **Viewer first picture:** 380–885 ms → 92–143 ms, by standing in with the grid's own small thumbnail (already in
+  the browser) instead of the 512 px one. Time to sharp unchanged.
+- **Event page header:** painted after 4.6–14 s with only the 2048 px preview → 2.3–5 s with the 512 px one first and
+  the preview faded in over it when it arrives.
+- Tried, no clear gain: lazy-loading the map library on Places/place pages (1.9 → 1.6–1.8 s on Places, none on a place).

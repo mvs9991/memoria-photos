@@ -6,7 +6,7 @@
  * inside the viewport (plus an overscan band) are mounted, which keeps a
  * 100k-photo library at a steady frame rate.
  */
-import { useCallback, useEffect, useLayoutEffect, useMemo, useRef, useState } from "react";
+import { memo, useCallback, useEffect, useLayoutEffect, useMemo, useRef, useState } from "react";
 import { Check, Heart, Layers, Play, Star } from "lucide-react";
 import { FLAG, thumbUrl } from "../lib/api";
 import { clock, formatDay, formatMonth, toDate } from "../lib/format";
@@ -71,6 +71,24 @@ interface Props {
 }
 
 const HEADER_H = 46;
+
+/** Holds back thumbnail downloads while the grid moves faster than anyone can look at it. Tiles that
+ * mount during a fast scroll wait here, and get their image when it slows down or stops; tiles that
+ * scroll away first never ask the server for anything. */
+interface LoadGate { fast: boolean; set(fast: boolean): void; wait(go: () => void): () => void }
+function createGate(): LoadGate {
+  const waiting = new Set<() => void>();
+  const gate: LoadGate = {
+    fast: false,
+    set(fast) {
+      if (gate.fast === fast) return;
+      gate.fast = fast;
+      if (!fast) { const all = [...waiting]; waiting.clear(); all.forEach((go) => go()); }
+    },
+    wait(go) { waiting.add(go); return () => { waiting.delete(go); }; },
+  };
+  return gate;
+}
 const NO_SELECTION: Set<number> = new Set();
 const noop = () => {};
 
@@ -126,6 +144,7 @@ export function PhotoGrid({
   const [scrollTop, setScrollTop] = useState(0);
   const [viewport, setViewport] = useState(800);
   const scrollerRef = useRef<HTMLElement | null>(null);
+  const gate = useMemo(createGate, []);
 
   // Press and hold a tile, then drag across others. Works by index into `items`, so
   // it stays correct although most tiles of a big library are not mounted.
@@ -161,14 +180,32 @@ export function PhotoGrid({
     const scroller = scrollerRef.current;
     if (!scroller) return;
     let raf = 0;
+    let lastTop = scroller.scrollTop;
+    let lastAt = performance.now();
+    let idle = 0;
+    let speed = 0;
     const onScroll = () => {
       if (raf) return;
       raf = requestAnimationFrame(() => {
         raf = 0;
         const host = hostRef.current;
         if (!host) return;
+        const now = performance.now();
+        const top = scroller.scrollTop;
+        // px per second, smoothed over a few frames (a wheel or fling delivers uneven steps);
+        // "fast" = more than eight screens a second
+        speed = speed * 0.6 + (Math.abs(top - lastTop) / Math.max(1, now - lastAt) * 1000) * 0.4;
+        lastTop = top;
+        lastAt = now;
+        clearTimeout(idle);
+        if (speed > scroller.clientHeight * 8) {
+          gate.set(true);
+          idle = window.setTimeout(() => { speed = 0; gate.set(false); }, 150);
+        } else {
+          gate.set(false);
+        }
         const offset = host.offsetTop;
-        setScrollTop(Math.max(0, scroller.scrollTop - offset));
+        setScrollTop(Math.max(0, top - offset));
       });
     };
     scroller.addEventListener("scroll", onScroll, { passive: true });
@@ -176,8 +213,10 @@ export function PhotoGrid({
     return () => {
       scroller.removeEventListener("scroll", onScroll);
       if (raf) cancelAnimationFrame(raf);
+      clearTimeout(idle);
+      gate.set(false);
     };
-  }, [items.length]);
+  }, [items.length, gate]);
 
   const sections = useMemo<Section[]>(() => {
     if (!width || items.length === 0) return [];
@@ -297,8 +336,8 @@ export function PhotoGrid({
             )}
             {section.rows
               .filter((r) => r.top + r.height >= scrollTop - overscan && r.top <= scrollTop + viewport + overscan)
-              .map((row, ri) => (
-                <div key={ri} className="grid-row" style={{ top: row.top - section.top, height: row.height }}>
+              .map((row) => (
+                <div key={row.top} className="grid-row" style={{ top: row.top - section.top, height: row.height }}>
                   {row.items.map((cell) => (
                     <Tile
                       key={cell.id}
@@ -318,6 +357,7 @@ export function PhotoGrid({
                       onSelect={handleSelect}
                       suppressClick={drag.shouldSuppressClick}
                       thumbFor={thumbFor}
+                      gate={gate}
                     />
                   ))}
                 </div>
@@ -333,7 +373,7 @@ export function PhotoGrid({
   );
 }
 
-function Tile({ id, w, h, flags, dur, rating, stack, rot, index, selected, selectable, selectMode, onOpen, onSelect, suppressClick, thumbFor }: {
+const Tile = memo(function Tile({ id, w, h, flags, dur, rating, stack, rot, index, selected, selectable, selectMode, onOpen, onSelect, suppressClick, thumbFor, gate }: {
   id: number; w: number; h: number; flags: number; dur: number; rating: number; stack: number; rot: number; index: number;
   selected: boolean; selectable: boolean;
   selectMode: boolean;
@@ -341,9 +381,19 @@ function Tile({ id, w, h, flags, dur, rating, stack, rot, index, selected, selec
   /** true for a moment after a press-and-hold or drag, so its release does not also open the tile */
   suppressClick: () => boolean;
   thumbFor?: (id: number, size: "sm" | "m") => string;
+  gate: LoadGate;
 }) {
   const [loaded, setLoaded] = useState(false);
+  const [go, setGo] = useState(() => !gate.fast);
+  useEffect(() => (go ? undefined : gate.wait(() => setGo(true))), [go, gate]);
   const size = w > 420 || h > 420 ? "m" : "sm";
+  // A tile scrolled away before its thumbnail arrived: cancel the download, or a fast scroll leaves
+  // hundreds of requests queued ahead of the photos that are on screen when it stops.
+  const imgRef = useRef<HTMLImageElement>(null);
+  useEffect(() => {
+    const img = imgRef.current;          // React clears the ref before this cleanup runs
+    return () => { if (img && !img.complete) img.removeAttribute("src"); };
+  }, []);
   return (
     // The select button is a SIBLING of the tile, not a child: a focusable control
     // nested inside a focusable control is invalid, and assistive technology can still
@@ -371,7 +421,8 @@ function Tile({ id, w, h, flags, dur, rating, stack, rot, index, selected, selec
       aria-pressed={selectable && selectMode ? selected : undefined}
     >
       <img
-        src={thumbFor ? thumbFor(id, size) + (rot ? `&r=${rot}` : "") : thumbUrl(id, size, rot)}
+        ref={imgRef}
+        src={!go ? undefined : thumbFor ? thumbFor(id, size) + (rot ? `&r=${rot}` : "") : thumbUrl(id, size, rot)}
         loading="lazy"
         decoding="async"
         alt=""
@@ -413,7 +464,7 @@ function Tile({ id, w, h, flags, dur, rating, stack, rot, index, selected, selec
       )}
     </div>
   );
-}
+});
 
 function Scrubber({ sections, totalHeight, scrollTop, viewport, onSeek }: {
   sections: Section[]; totalHeight: number; scrollTop: number; viewport: number;
