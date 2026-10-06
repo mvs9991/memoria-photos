@@ -130,7 +130,7 @@ def _to_rgb(img: Image.Image) -> Image.Image:
     return img.convert("RGB")
 
 
-def decode(path: Path | str, max_side: int = 1600, data: bytes | None = None) -> Decoded:
+def decode(path: Path | str, max_side: int = 1600, data: bytes | None = None, draft_slack: float = 1.0) -> Decoded:
     """Decode an image to RGB with orientation applied and long side <= max_side.
 
     A video decodes to its representative frame; `info["video"]` then holds its VideoInfo.
@@ -173,7 +173,9 @@ def decode(path: Path | str, max_side: int = 1600, data: bytes | None = None) ->
         raw_w, raw_h = img.size
         if fmt == "JPEG":
             # DCT-domain downscale: request the oriented target box in *stored* orientation.
-            scale = max_side / max(raw_w, raw_h)
+            # draft_slack < 1 lets the JPEG decoder's own halving land a little under max_side (a 4000 px photo
+            # decoded at 2000 rather than in full for a 2048 preview: ~60 ms instead of ~200). Analysis keeps 1.
+            scale = max_side * draft_slack / max(raw_w, raw_h)
             if scale < 1:
                 img.draft("RGB", (max(1, int(raw_w * scale)), max(1, int(raw_h * scale))))
         img.load()

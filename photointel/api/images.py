@@ -169,7 +169,9 @@ def _thumb_plain(photo_id: int, s: str, row) -> Response:
         raise HTTPException(410, "original file is missing")
     size = {"sm": 256, "m": state.ctx.settings.thumb_size, "l": state.ctx.settings.preview_size}[s]
     try:
-        dec = imaging.decode(path, max_side=size)
+        # The viewer's preview may come out a little under its 2048 px (the decoder halves cheaply); the grid's
+        # thumbnails are made exactly as before.
+        dec = imaging.decode(path, max_side=size, draft_slack=0.95 if s == "l" else 1.0)
     except imaging.DecodeError as exc:
         raise HTTPException(415, f"cannot decode image: {exc}")
     if sha:

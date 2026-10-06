@@ -43,3 +43,11 @@ def test_stop_finds_the_keeper_and_server_of_this_library_only():
     assert service._subcommand("python.exe -m photointel --data D:/lib serve --port 8765") == "serve"
     assert service._subcommand("python.exe -m photointel --data D:/lib index --job-id 3") == "index"
     assert service._subcommand("python.exe -m pytest -q") is None
+
+
+def test_a_preview_may_use_the_jpeg_decoders_cheap_halving_and_analysis_does_not(tmp_path):
+    p = tmp_path / "phone.jpg"
+    Image.new("RGB", (4000, 3000), (10, 120, 200)).save(p, "JPEG")
+    assert imaging.decode(p, max_side=2048).image.size == (2048, 1536)                       # unchanged default
+    assert imaging.decode(p, max_side=2048, draft_slack=0.95).image.size == (2000, 1500)     # halved, a little under
+    assert imaging.decode(p, max_side=1600).image.size == (1600, 1200)                       # analysis as before
