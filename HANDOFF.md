@@ -1273,3 +1273,21 @@ connection that would otherwise hold each test library's file open on Windows.
 - **Event page header:** painted after 4.6–14 s with only the 2048 px preview → 2.3–5 s with the 512 px one first and
   the preview faded in over it when it arrives.
 - Tried, no clear gain: lazy-loading the map library on Places/place pages (1.9 → 1.6–1.8 s on Places, none on a place).
+
+### Small-thumbnail pack (`engine/thumbpack.py`, 2026-10-06)
+
+The phone grid's small thumbnails (one file per content hash, scattered over 256 folders) are copied, while the
+server is idle, into `cache/thumbs/small-pack-<n>.db` in the grid's order (newest first), with the hash index built
+after the rows and loaded into memory when the pack opens, so each tile is one read by position. Cold reads were
+measured by evicting the OS file cache (writing and reading back a 14 GB file), three random grid regions each:
+
+| 30 neighbouring tiles, cold | first layout (lookup through the index) | final layout |
+|---|---|---|
+| separate files | 621–990 ms | 133–784 ms |
+| pack | 290–458 ms | 29–100 ms |
+
+Through the live server, 30 tiles in a row on one connection: 107–327 ms (the cold separate-file reads earlier
+averaged ~330 ms *per tile*). The pack holds unique content (23,991 of 31k photos on the real library: copies share
+one entry), is ~280 MB, takes ~6 min of idle disk time to build, pauses whenever someone uses the app, and is rebuilt
+when more than 2% of photos are missing from it or a day after the last build if any are. Anything not in it (new,
+rotated) is served from its file as before; clearing the thumbnail cache closes and removes it.

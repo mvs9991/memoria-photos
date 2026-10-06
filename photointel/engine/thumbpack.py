@@ -31,7 +31,7 @@ REBUILD_SHARE = 0.02          # rebuild when more than this share of visible pho
 REBUILD_AFTER_S = 86400       # ...or a day after the last build, if anything is missing at all
 
 _lock = threading.Lock()
-_open: dict[str, tuple[Path, sqlite3.Connection]] = {}
+_open: dict[str, tuple[Path, sqlite3.Connection, dict]] = {}     # thumb root -> (pack, connection, sha -> pos)
 
 
 def _packs(thumb_root: Path) -> list[Path]:
@@ -44,13 +44,13 @@ def _packs(thumb_root: Path) -> list[Path]:
     return [p for _, p in sorted(out, reverse=True)]
 
 
-def _conn(thumb_root: Path) -> sqlite3.Connection | None:
+def _conn(thumb_root: Path) -> tuple[sqlite3.Connection, dict] | None:
     key = str(thumb_root)
     with _lock:
         hit = _open.get(key)
         if hit is not None:
             if hit[0].exists():
-                return hit[1]
+                return hit[1], hit[2]
             try:                                # its file went (the cache was cleared): forget it
                 hit[1].close()
             except sqlite3.Error:
@@ -60,18 +60,26 @@ def _conn(thumb_root: Path) -> sqlite3.Connection | None:
         if not packs:
             return None
         conn = sqlite3.connect(f"file:{packs[0].as_posix()}?mode=ro", uri=True, check_same_thread=False)
-        _open[key] = (packs[0], conn)
-        return conn
+        # Where each photo sits, read once from the hash index (about 1 MB, written in one piece): a lookup is
+        # then one read by position, and neighbouring tiles are neighbouring rows. Looking each one up through
+        # the index cost a scattered index read per tile, which halved what the pack gained on a cold disk.
+        positions = dict(conn.execute("SELECT sha, pos FROM pack INDEXED BY ix_pack_sha"))             if conn.execute("SELECT 1 FROM sqlite_master WHERE name = 'ix_pack_sha'").fetchone()             else dict(conn.execute("SELECT sha, pos FROM pack"))
+        _open[key] = (packs[0], conn, positions)
+        return conn, positions
 
 
 def lookup(thumb_root: Path, sha: str) -> bytes | None:
     """The small thumbnail's bytes from the pack, or None (no pack yet, or this photo is not in it)."""
-    conn = _conn(thumb_root)
-    if conn is None:
+    opened = _conn(thumb_root)
+    if opened is None:
+        return None
+    conn, positions = opened
+    pos = positions.get(sha)
+    if pos is None:
         return None
     try:
         with _lock:
-            row = conn.execute("SELECT data FROM pack WHERE sha = ?", (sha,)).fetchone()
+            row = conn.execute("SELECT data FROM pack WHERE pos = ?", (pos,)).fetchone()
     except sqlite3.Error:
         return None
     return bytes(row[0]) if row else None
@@ -96,10 +104,11 @@ def status(conn: sqlite3.Connection, thumb_root: Path) -> dict:
     shas = _visible_shas(conn)
     packed: set[str] = set()
     built = None
-    pc = _conn(thumb_root)
-    if pc is not None:
+    opened = _conn(thumb_root)
+    if opened is not None:
+        pc, positions = opened
+        packed = set(positions)
         with _lock:
-            packed = {r[0] for r in pc.execute("SELECT sha FROM pack")}
             row = pc.execute("SELECT value FROM meta WHERE key = 'built_at'").fetchone()
         built = float(row[0]) if row else None
     missing = [s for s in shas if s not in packed and thumbs_mod.small_path(thumb_root, s).exists()]
@@ -145,6 +154,8 @@ def build(conn: sqlite3.Connection, thumb_root: Path, *, may_run: Callable[[], b
         have = {r[0] for r in stage.execute("SELECT sha FROM staged")}
         # Already in the current pack: copied from there (one file, fast) rather than from 256 folders.
         current = _conn(thumb_root)
+        current_pos = current[1] if current else {}
+        current = current[0] if current else None
         todo = [s for s in shas if s not in have]
         # Files in name order: the folders are by the hash's first two letters, so this reads one folder at a time.
         for n, sha in enumerate(sorted(todo)):
@@ -152,9 +163,9 @@ def build(conn: sqlite3.Connection, thumb_root: Path, *, may_run: Callable[[], b
                 stage.commit()
                 return "paused"
             data = None
-            if current is not None:
+            if current is not None and sha in current_pos:
                 with _lock:
-                    row = current.execute("SELECT data FROM pack WHERE sha = ?", (sha,)).fetchone()
+                    row = current.execute("SELECT data FROM pack WHERE pos = ?", (current_pos[sha],)).fetchone()
                 data = bytes(row[0]) if row else None
             if data is None:
                 p = thumbs_mod.small_path(thumb_root, sha)
@@ -180,7 +191,7 @@ def build(conn: sqlite3.Connection, thumb_root: Path, *, may_run: Callable[[], b
         try:
             out.execute("PRAGMA journal_mode = OFF")
             out.execute("PRAGMA page_size = 16384")
-            out.execute("CREATE TABLE pack (pos INTEGER PRIMARY KEY, sha TEXT NOT NULL UNIQUE, data BLOB NOT NULL)")
+            out.execute("CREATE TABLE pack (pos INTEGER PRIMARY KEY, sha TEXT NOT NULL, data BLOB NOT NULL)")
             out.execute("CREATE TABLE meta (key TEXT PRIMARY KEY, value TEXT)")
             staged = {r[0] for r in stage.execute("SELECT sha FROM staged")}
             pos = 0
@@ -190,6 +201,8 @@ def build(conn: sqlite3.Connection, thumb_root: Path, *, may_run: Callable[[], b
                 data = stage.execute("SELECT data FROM staged WHERE sha = ?", (sha,)).fetchone()[0]
                 out.execute("INSERT INTO pack(pos, sha, data) VALUES (?, ?, ?)", (pos, sha, data))
                 pos += 1
+            # The index after the rows: built in one sort, its pages lie together (see _conn).
+            out.execute("CREATE UNIQUE INDEX ix_pack_sha ON pack(sha)")
             out.execute("INSERT INTO meta VALUES ('built_at', ?)", (str(time.time()),))
             out.commit()
         finally:

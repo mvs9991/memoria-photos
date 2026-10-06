@@ -29,7 +29,7 @@ def test_the_pack_holds_every_small_thumbnail_in_grid_order_with_the_same_bytes(
     assert thumbpack.build(conn, root, may_run=lambda: True) == "built"
     assert not thumbpack.needs_build(conn, root)
     shas = thumbpack._visible_shas(conn)
-    packed = [r[0] for r in thumbpack._conn(root).execute("SELECT sha FROM pack ORDER BY pos")]
+    packed = [r[0] for r in thumbpack._conn(root)[0].execute("SELECT sha FROM pack ORDER BY pos")]
     assert packed == [s for s in shas if thumbs.small_path(root, s).exists()] and packed
     for sha in packed[:5]:
         assert thumbpack.lookup(root, sha) == thumbs.small_path(root, sha).read_bytes()
